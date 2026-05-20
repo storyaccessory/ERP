@@ -446,6 +446,80 @@ const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZ
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
 
 // ═══════════════════════════════════════════
+// Session Security：閒置自動登出 + 關閉分頁登出
+// ═══════════════════════════════════════════
+const SESSION_TIMEOUT_MS = 60 * 60 * 1000; // 60 分鐘
+const SESSION_WARN_MS    =  5 * 60 * 1000; //  5 分鐘前警告
+let _idleTimer   = null;
+let _warnTimer   = null;
+let _warnToastEl = null;
+
+function _clearIdleTimers() {
+  clearTimeout(_idleTimer);
+  clearTimeout(_warnTimer);
+  if (_warnToastEl) { _warnToastEl.remove(); _warnToastEl = null; }
+}
+
+function _resetIdleTimer() {
+  if (!state.user) return;          // 未登入不需計時
+  _clearIdleTimers();
+
+  // 5 分鐘前顯示警告 toast
+  _warnTimer = setTimeout(() => {
+    if (!state.user) return;
+    _warnToastEl = document.createElement('div');
+    _warnToastEl.className = 'alert alert-warning';
+    _warnToastEl.style.cssText = 'position:fixed;top:16px;right:16px;z-index:9999;min-width:280px;max-width:400px;box-shadow:0 4px 12px rgba(0,0,0,.2);cursor:pointer;';
+    _warnToastEl.innerHTML = '⚠️ <b>閒置超時警告</b><br>系統將於 5 分鐘後自動登出，點此繼續使用。';
+    _warnToastEl.onclick = () => { _resetIdleTimer(); };
+    document.body.appendChild(_warnToastEl);
+  }, SESSION_TIMEOUT_MS - SESSION_WARN_MS);
+
+  // 時間到強制登出
+  _idleTimer = setTimeout(async () => {
+    _clearIdleTimers();
+    if (!state.user) return;
+    showToast('⏰ 閒置超過 60 分鐘，已自動登出', 'warning', 5000);
+    await signOut();
+  }, SESSION_TIMEOUT_MS);
+}
+
+// 監聽使用者任何互動，重置計時器
+['mousemove','mousedown','keydown','touchstart','scroll','click'].forEach(evt => {
+  document.addEventListener(evt, () => _resetIdleTimer(), { passive: true });
+});
+
+// 關閉分頁 / 離開頁面時登出
+// 使用 sendBeacon 確保頁面關閉時也能送出登出請求
+window.addEventListener('beforeunload', () => {
+  if (!state.user) return;
+  // 從 localStorage 找 Supabase token（key 格式：sb-<project>-auth-token）
+  try {
+    let token = '';
+    for (const k of Object.keys(localStorage)) {
+      if (k.startsWith('sb-') && k.endsWith('-auth-token')) {
+        const val = JSON.parse(localStorage.getItem(k) || '{}');
+        token = val.access_token || '';
+        break;
+      }
+    }
+    if (token) {
+      // sendBeacon 是同步送出，不會因頁面關閉而中斷
+      const blob = new Blob([JSON.stringify({})], { type: 'application/json' });
+      navigator.sendBeacon(
+        `${SUPABASE_URL}/auth/v1/logout?scope=local`,
+        blob
+      );
+    }
+    // 清除 localStorage 的 Supabase session（讓下次開啟需重新登入）
+    Object.keys(localStorage).forEach(k => {
+      if (k.startsWith('sb-') || k.includes('supabase')) localStorage.removeItem(k);
+    });
+    localStorage.removeItem('story_last_page');
+  } catch(e) {}
+});
+
+// ═══════════════════════════════════════════
 // State
 // ═══════════════════════════════════════════
 let state = window._state = {
@@ -484,6 +558,7 @@ const PAGES = {
   // 業務追蹤
   calendar:   { label: '行事曆',       icon: '📅', section: '業務追蹤' },
   todos:      { label: '待辦事項',     icon: '✅', section: '業務追蹤' },
+  journal:    { label: '工作日誌',     icon: '📝', section: '業務追蹤' },
   cs:         { label: '客服記錄',     icon: '💬', section: '業務追蹤' },
   // 商品管理
   products:   { label: '商品資料庫',   icon: '🗄️', section: '商品管理' },
@@ -501,6 +576,9 @@ const PAGES = {
   sales:      { label: '業績儀表板',   icon: '📈', section: '業務追蹤' },
   // 財務
   wages:      { label: '鑄件工資月結', icon: '💴', section: '財務' },
+  jinbaosan:  { label: '金寶山月結',   icon: '🏔️', section: '財務' },
+  plate:      { label: '電鍍廠月結',   icon: '⚡', section: '財務' },
+  foundry:    { label: '鑄造廠月結',   icon: '🔥', section: '財務' },
   accounting: { label: '會計月結',     icon: '📊', section: '財務' },
   costs:      { label: '成本管理',     icon: '💰', section: '財務' },
   peripheral: { label: '周邊成本',     icon: '📦', section: '財務' },
@@ -566,11 +644,13 @@ async function signIn(email, password) {
   state.user = data.user;
   await loadProfile();
   await loadClaudeApiKey();
+  _resetIdleTimer(); // 登入後啟動閒置計時器
   renderApp();
   loadPageData('dashboard');
 }
 
 async function signOut() {
+  _clearIdleTimers();
   await db.auth.signOut();
   state.user = null; state.profile = null; state.page = 'dashboard';
   localStorage.removeItem('story_last_page');
@@ -596,6 +676,7 @@ async function loadPageData(page) {
     restock:    loadRestock,
     pickup:     loadRestock,
     todos:      loadTodos,
+    journal:    loadJournal,
     cs:         loadCS,
     repair:     loadRepair,
     dev:        loadDev,
@@ -604,6 +685,9 @@ async function loadPageData(page) {
     costs:      loadCosts,
     users:      loadUsers,
     wages:      loadWages,
+    jinbaosan:  loadJinbaosan,
+    plate:      loadPlate,
+    foundry:    loadFoundry,
     goldsmith:  loadGoldsmith,
     peripheral: loadPeripheral,
   };
@@ -4017,7 +4101,13 @@ async function modalAddAcct(tab, existing) {
           <!-- 7: 金額 -->
           <div class="form-group" style="margin:0">
             <label>金額 *</label>
-            <input class="form-control" id="acct-amount" type="number" placeholder="0" value="${existing?.amount||''}">
+            <input class="form-control" id="acct-amount" type="number" placeholder="0" value="${existing?.amount||''}"
+              oninput="(function(){
+                const amt = parseFloat(this.value)||0;
+                const fee = parseFloat(document.getElementById('acct-wire-fee')?.value)||0;
+                const realEl = document.getElementById('acct-real-amount');
+                if(realEl) realEl.value = (amt - fee).toLocaleString();
+              }).call(this)">
           </div>
 
           <!-- 8: 付款狀態 -->
@@ -4032,10 +4122,73 @@ async function modalAddAcct(tab, existing) {
 
         </div>
 
+        <!-- 成本分類 + 付款條件 -->
+        <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0">
+            <label>成本分類</label>
+            <select class="form-control" id="acct-cost-category">
+              ${['','進貨成本','進貨運費','出貨運費','包裝材料','人事費用（薪資）','勞健保','租金水電','管銷費用','匯費／手續費','其他費用'].map(c =>
+                `<option value="${c}" ${(existing?.cost_category||'')=== c?'selected':''}>${c||'— 請選擇 —'}</option>`
+              ).join('')}
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>付款條件</label>
+            <select class="form-control" id="acct-pay-term"
+              onchange="(function(v){
+                const dueDateEl = document.getElementById('acct-due-date');
+                if(!dueDateEl) return;
+                if(!v || v==='custom') return;
+                const now = new Date();
+                let y = now.getFullYear(), m = now.getMonth();
+                if(v==='M0') { /* 當月10號 */ }
+                else if(v==='M1') { m+=1; }
+                else if(v==='M2') { m+=2; }
+                else if(v==='M3') { m+=3; }
+                if(m>11){ y+=Math.floor(m/12); m=m%12; }
+                const dateStr = y+'-'+String(m+1).padStart(2,'0')+'-10';
+                dueDateEl.value = dateStr;
+                dueDateEl.dataset.manual='1';
+              }).call(this, this.value)">
+              <option value="" ${!(existing?.pay_term)?'selected':''}>— 請選擇 —</option>
+              <option value="M0" ${existing?.pay_term==='M0'?'selected':''}>當月10號</option>
+              <option value="M1" ${existing?.pay_term==='M1'?'selected':''}>M+1（次月10號）</option>
+              <option value="M2" ${existing?.pay_term==='M2'?'selected':''}>M+2（兩個月後10號）</option>
+              <option value="M3" ${existing?.pay_term==='M3'?'selected':''}>M+3（三個月後10號）</option>
+            </select>
+          </div>
+        </div>
+
+        <!-- 匯費 + 實付金額 -->
+        <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+          <div class="form-group" style="margin:0">
+            <label>匯費 <span style="font-size:11px;color:var(--muted)">（選填，預設 0）</span></label>
+            <input class="form-control" id="acct-wire-fee" type="number" placeholder="0" value="${existing?.wire_fee||0}"
+              oninput="(function(){
+                const amt = parseFloat(document.getElementById('acct-amount').value)||0;
+                const fee = parseFloat(this.value)||0;
+                const realEl = document.getElementById('acct-real-amount');
+                if(realEl) realEl.value = (amt - fee).toLocaleString();
+              }).call(this)">
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>實付金額 <span style="font-size:11px;color:var(--muted)">（自動計算）</span></label>
+            <input class="form-control" id="acct-real-amount" type="text" readonly
+              value="${existing ? ((existing.amount||0)-(existing.wire_fee||0)).toLocaleString() : ''}"
+              style="background:#f5f5f5;color:var(--text);font-weight:600">
+          </div>
+        </div>
+
         <!-- 品項說明（全寬） -->
         <div class="form-group">
           <label>品項說明</label>
-          <input class="form-control" id="acct-desc" placeholder="請款品項說明" value="${existing?.item_desc||''}">
+          <input class="form-control" id="acct-desc" placeholder="請款品項說明" value="${existing?.item_desc||''}"
+            oninput="(function(){
+              const amt = parseFloat(document.getElementById('acct-amount').value)||0;
+              const fee = parseFloat(document.getElementById('acct-wire-fee').value)||0;
+              const realEl = document.getElementById('acct-real-amount');
+              if(realEl) realEl.value = (amt - fee).toLocaleString();
+            })()">
         </div>
 
         <!-- 信件主旨（全寬） -->
@@ -4147,6 +4300,7 @@ async function modalAddAcct(tab, existing) {
         const billingMonthRaw = document.getElementById('acct-billing-month').value || '';
         const billingMonthMatch = billingMonthRaw.match(/(\d{4}-\d{2})/);
         const billingMonth = billingMonthMatch ? billingMonthMatch[1] : (billingMonthRaw.slice(0,7) || null);
+        const wireFee = parseFloat(document.getElementById('acct-wire-fee')?.value) || 0;
         const apPayload = {
           vendor_id: vendorId,
           vendor_name: vendorName,
@@ -4157,6 +4311,10 @@ async function modalAddAcct(tab, existing) {
           paid_at: paidDate ? `${paidDate}T00:00:00` : null,   // 空白 = 清空
           is_paid: !!paidDate,
           amount,
+          wire_fee: wireFee,
+          actual_amount: amount - wireFee,
+          cost_category: document.getElementById('acct-cost-category')?.value || null,
+          pay_term: document.getElementById('acct-pay-term')?.value || null,
           item_desc: document.getElementById('acct-desc').value.trim(),
           invoice_no: document.getElementById('acct-invoice').value.trim(),
           subject: document.getElementById('acct-subject').value.trim(),
@@ -7609,6 +7767,7 @@ function renderAccounting() {
       ${canSeeAR ? `<div class="tab ${activeTab==='應收帳款'?'active':''}" data-acct-tab="應收帳款">應收帳款</div>` : ''}
       <div class="tab ${activeTab==='餐費發票'?'active':''}" data-acct-tab="餐費發票">餐費發票</div>
       <div class="tab ${activeTab==='代墊金額'?'active':''}" data-acct-tab="代墊金額">代墊金額</div>
+      ${canSeeAP ? `<div class="tab ${activeTab==='本月待付款'?'active':''}" data-acct-tab="本月待付款" style="color:var(--warning)">💳 本月待付款</div>` : ''}
     </div>
     <!-- 工具列：第一列（月份快捷 + 操作按鈕） -->
     <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;flex-wrap:nowrap">
@@ -7811,6 +7970,76 @@ function renderAccounting() {
         </div>
       </div>
     </div>` : ''}
+
+    ${activeTab === '本月待付款' ? (() => {
+      // 計算本月待付款：payment_due_date 在本月內 且 is_paid = false
+      const todayStr = new Date().toISOString().slice(0,7); // YYYY-MM
+      const dueThisMonth = (ap||[]).filter(r => {
+        if (r.is_paid) return false;
+        const due = (r.payment_due_date||'').slice(0,7);
+        return due === todayStr;
+      }).sort((a,b) => (a.payment_due_date||'').localeCompare(b.payment_due_date||''));
+      const dueTotal = dueThisMonth.reduce((s,r) => s + (r.actual_amount ?? r.amount ?? 0), 0);
+      const duePaid = dueThisMonth.filter(r=>r.is_paid).reduce((s,r) => s + (r.actual_amount ?? r.amount ?? 0), 0);
+
+      return `<div class="card">
+        <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+          <span style="font-weight:700;font-size:15px">💳 本月待付款清單</span>
+          <span style="font-size:12px;color:var(--muted)">${todayStr.replace('-','年')}月</span>
+          <div style="margin-left:auto;display:flex;gap:12px;align-items:center">
+            <span style="font-size:13px">待付合計：<strong style="color:var(--danger)">$${dueTotal.toLocaleString()}</strong></span>
+          </div>
+        </div>
+        ${dueThisMonth.length === 0 ? `<div class="empty"><div class="empty-icon">✅</div><p>本月無待付款項</p></div>` : `
+        <div class="table-wrap">
+          <table>
+            <thead><tr>
+              <th>廠商</th>
+              <th>成本分類</th>
+              <th>品項說明</th>
+              <th>應付金額</th>
+              <th>匯費</th>
+              <th>實付金額</th>
+              <th>預計付款日</th>
+              <th>操作</th>
+            </tr></thead>
+            <tbody>
+            ${dueThisMonth.map(r => {
+              const wireFee = r.wire_fee || 0;
+              const actualAmt = r.actual_amount ?? (r.amount - wireFee);
+              return `<tr>
+                <td><strong style="font-size:13px">${r.vendor_name||'—'}</strong>
+                  ${r.vendor_id ? (() => {
+                    const vv = (vendors||[]).find(v=>String(v.id)===String(r.vendor_id));
+                    return vv?.bank_account ? `<div style="font-size:11px;color:var(--muted)">${vv.bank_name||''} ${vv.bank_account}</div>` : '';
+                  })() : ''}
+                </td>
+                <td style="font-size:12px;color:var(--muted)">${r.cost_category||'—'}</td>
+                <td style="font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.item_desc||'—'}</td>
+                <td><strong>$${(r.amount||0).toLocaleString()}</strong></td>
+                <td style="font-size:12px;color:var(--muted)">${wireFee ? '$'+wireFee.toLocaleString() : '—'}</td>
+                <td><strong style="color:var(--accent)">$${actualAmt.toLocaleString()}</strong></td>
+                <td style="font-size:12px;font-weight:600;color:var(--warning)">${r.payment_due_date?.slice?.(0,10)||'—'}</td>
+                <td><div class="action-btns">
+                  <button class="btn-table" data-action="edit-ap" data-id="${r.id}" style="background:#e3f2fd;color:#1565c0">編輯</button>
+                  <button class="btn-table" data-action="ap-mark-paid" data-id="${r.id}" style="background:#e8f5e9;color:#2e7d32">✅ 標記已付</button>
+                </div></td>
+              </tr>`;
+            }).join('')}
+            </tbody>
+            <tfoot>
+              <tr style="background:var(--surface);font-weight:700">
+                <td colspan="3" style="padding:10px 8px;font-size:13px">合計</td>
+                <td style="padding:10px 8px">$${dueThisMonth.reduce((s,r)=>s+(r.amount||0),0).toLocaleString()}</td>
+                <td style="padding:10px 8px;color:var(--muted)">$${dueThisMonth.reduce((s,r)=>s+(r.wire_fee||0),0).toLocaleString()}</td>
+                <td style="padding:10px 8px;color:var(--accent)">$${dueTotal.toLocaleString()}</td>
+                <td colspan="2"></td>
+              </tr>
+            </tfoot>
+          </table>
+        </div>`}
+      </div>`;
+    })() : ''}
 
     ${activeTab === '應收帳款' ? (() => {
       const arRows = ar || [];
@@ -14241,13 +14470,21 @@ window.modalEditUser = function(userId) {
         <option value="general" ${u.role==='general'||!u.role?'selected':''}>一般員工</option>
       </select>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:4px">角色決定預設行為，細部頁面權限可在人員管理頁面個別設定</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:4px;margin-bottom:16px">角色決定預設行為，細部頁面權限可在人員管理頁面個別設定</div>
+    <div class="form-group"><label>📝 工作日誌模板</label>
+      <select class="form-control" id="eu-journal-tpl">
+        <option value="" ${!u.journal_template?'selected':''}>依角色自動（預設）</option>
+        ${Object.entries(JOURNAL_TEMPLATES).map(([k,v])=>`<option value="${k}" ${u.journal_template===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}
+      </select>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">指定後員工填寫日誌時會看到對應格式的欄位</div>
+    </div>
   `, [
     { label:'儲存', primary:true, onclick: async ()=>{
       const name = document.getElementById('eu-name').value.trim();
       const role = document.getElementById('eu-role').value;
+      const journal_template = document.getElementById('eu-journal-tpl').value || null;
       if (!name) { showToast('請填姓名','error'); return; }
-      const { error } = await db.from('profiles').update({ name, role }).eq('id', userId);
+      const { error } = await db.from('profiles').update({ name, role, journal_template }).eq('id', userId);
       if (error) { showToast('更新失敗：'+error.message,'error'); return; }
       showToast('已更新'); closeModal(); await loadUsers(); renderApp();
     }},
@@ -14783,15 +15020,21 @@ function renderAPTemplateSettings() {
   var templates = state.data.apTemplates || [];
   var vendors = (state.data.accounting && state.data.accounting.vendors) || [];
   var activeVendors = vendors.filter(function(v){ return v.is_active !== false && v.type !== 'client'; });
+  var amtModeLabel = { 'fixed':'固定金額', 'last_month':'帶入上月', 'zero':'填 0' };
+  var payTermLabel = { 'M0':'當月10號','M1':'M+1','M2':'M+2','M3':'M+3' };
   var rows = templates.length === 0
-    ? '<tr><td colspan="4" style="text-align:center;padding:20px;color:var(--muted)">尚無範本，點「+ 新增」加入固定廠商</td></tr>'
+    ? '<tr><td colspan="6" style="text-align:center;padding:20px;color:var(--muted)">尚無範本，點「+ 新增」加入固定廠商</td></tr>'
     : templates.map(function(t, i) {
         var v = vendors.find(function(x){ return String(x.id) === String(t.vendor_id); });
         var vname = v ? (v.company_name || v.name) : (t.vendor_name || '未知廠商');
+        var amtMode = t.amount_mode || 'last_month';
+        var amtDisplay = amtMode === 'fixed' ? ('$'+(t.default_amount||0).toLocaleString()) : amtModeLabel[amtMode]||'—';
         return '<tr style="border-bottom:1px solid var(--border)">'
           + '<td style="padding:8px">' + vname + '</td>'
           + '<td style="padding:8px;color:var(--muted);font-size:12px">' + (t.item_desc||'—') + '</td>'
-          + '<td style="padding:8px;font-weight:600">$' + (t.default_amount||0).toLocaleString() + '</td>'
+          + '<td style="padding:8px;font-size:12px">' + (t.cost_category||'—') + '</td>'
+          + '<td style="padding:8px;font-size:12px">' + (payTermLabel[t.pay_term]||'—') + '</td>'
+          + '<td style="padding:8px;font-weight:600;font-size:12px">' + amtDisplay + '</td>'
           + '<td style="padding:8px;white-space:nowrap">'
             + '<button class="btn btn-outline" style="font-size:11px;padding:2px 8px;margin-right:4px" onclick="window._editAPTemplate(' + i + ')">編輯</button>'
             + '<button class="btn btn-outline" style="font-size:11px;padding:2px 8px;color:#ef4444" onclick="window._delAPTemplate(' + i + ')">刪除</button>'
@@ -14800,52 +15043,89 @@ function renderAPTemplateSettings() {
   return '<div class="card">'
     + '<div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">'
     + '<span style="font-weight:600;font-size:14px">📋 AP 固定範本</span>'
-    + '<span style="font-size:12px;color:var(--muted)">每月套用時自動帶入上月金額</span>'
+    + '<span style="font-size:12px;color:var(--muted)">設定每月固定廠商的帶入方式與付款條件</span>'
     + '<button class="btn btn-primary" style="font-size:12px;padding:4px 12px;margin-left:auto" onclick="window._addAPTemplate()">+ 新增</button>'
     + '</div>'
     + '<table style="width:100%;border-collapse:collapse">'
     + '<thead><tr style="border-bottom:2px solid var(--border);background:var(--surface)">'
     + '<th style="padding:8px;text-align:left;font-size:12px;color:var(--muted)">廠商</th>'
     + '<th style="padding:8px;text-align:left;font-size:12px;color:var(--muted)">品項說明</th>'
-    + '<th style="padding:8px;text-align:left;font-size:12px;color:var(--muted)">預設金額（上月無資料時）</th>'
+    + '<th style="padding:8px;text-align:left;font-size:12px;color:var(--muted)">成本分類</th>'
+    + '<th style="padding:8px;text-align:left;font-size:12px;color:var(--muted)">付款條件</th>'
+    + '<th style="padding:8px;text-align:left;font-size:12px;color:var(--muted)">帶入金額</th>'
     + '<th style="padding:8px"></th>'
     + '</tr></thead>'
     + '<tbody>' + rows + '</tbody>'
     + '</table></div>';
 }
 
-window._addAPTemplate = function() {
-  var vendors = (state.data.accounting && state.data.accounting.vendors) || [];
-  var activeVendors = vendors.filter(function(v){ return v.is_active !== false; });
-  showModal('新增 AP 範本', `
+var _APT_COST_CATS = ['','進貨成本','進貨運費','出貨運費','包裝材料','人事費用（薪資）','勞健保','租金水電','管銷費用','匯費／手續費','其他費用'];
+
+function _aptFormHtml(t) {
+  t = t || {};
+  var amtMode = t.amount_mode || 'last_month';
+  return `
     <div class="form-group" style="position:relative">
       <label>廠商</label>
-      <input class="form-control" id="apt-vendor-search" placeholder="輸入關鍵字搜尋廠商" autocomplete="off"
+      <input class="form-control" id="apt-vendor-search" value="${t.vendor_name||''}" placeholder="輸入關鍵字搜尋廠商" autocomplete="off"
         oninput="window._aptVendorSearch(this)">
-      <input type="hidden" id="apt-vendor-id">
+      <input type="hidden" id="apt-vendor-id" value="${t.vendor_id||''}">
       <div id="apt-vendor-suggestions" style="display:none;position:absolute;z-index:999;background:#fff;border:1px solid var(--border);border-radius:6px;width:100%;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);top:100%"></div>
     </div>
     <div class="form-group"><label>品項說明</label>
-      <input class="form-control" id="apt-desc" placeholder="例：月租費、平台服務費">
+      <input class="form-control" id="apt-desc" value="${t.item_desc||''}" placeholder="例：月租費、平台服務費">
     </div>
-    <div class="form-group"><label>預設金額（上月無記錄時使用）</label>
-      <input class="form-control" id="apt-amount" type="number" placeholder="0">
+    <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group" style="margin:0"><label>成本分類</label>
+        <select class="form-control" id="apt-cost-cat">
+          ${_APT_COST_CATS.map(function(c){ return '<option value="'+c+'"'+(t.cost_category===c?' selected':'')+'>'+( c||'— 請選擇 —')+'</option>'; }).join('')}
+        </select>
+      </div>
+      <div class="form-group" style="margin:0"><label>付款條件</label>
+        <select class="form-control" id="apt-pay-term">
+          <option value="" ${!t.pay_term?'selected':''}>— 請選擇 —</option>
+          <option value="M0" ${t.pay_term==='M0'?'selected':''}>當月10號</option>
+          <option value="M1" ${t.pay_term==='M1'?'selected':''}>M+1（次月10號）</option>
+          <option value="M2" ${t.pay_term==='M2'?'selected':''}>M+2（兩個月後10號）</option>
+          <option value="M3" ${t.pay_term==='M3'?'selected':''}>M+3（三個月後10號）</option>
+        </select>
+      </div>
     </div>
-  `, [
+    <div class="form-group"><label>金額帶入方式</label>
+      <select class="form-control" id="apt-amount-mode"
+        onchange="document.getElementById('apt-fixed-amount-row').style.display=this.value==='fixed'?'block':'none'">
+        <option value="last_month" ${amtMode==='last_month'?'selected':''}>帶入上月金額</option>
+        <option value="fixed" ${amtMode==='fixed'?'selected':''}>固定金額</option>
+        <option value="zero" ${amtMode==='zero'?'selected':''}>填 0（每月手動輸入）</option>
+      </select>
+    </div>
+    <div id="apt-fixed-amount-row" class="form-group" style="display:${amtMode==='fixed'?'block':'none'}">
+      <label>固定金額</label>
+      <input class="form-control" id="apt-amount" type="number" value="${t.default_amount||0}" placeholder="0">
+    </div>
+  `;
+}
+
+window._addAPTemplate = function() {
+  showModal('新增 AP 範本', _aptFormHtml(), [
     { label:'儲存', primary:true, onclick: function() {
       var vid = document.getElementById('apt-vendor-id').value;
-      var desc = document.getElementById('apt-desc').value.trim();
-      var amt = parseInt(document.getElementById('apt-amount').value) || 0;
-      if (!vid) { alert('請選擇廠商'); return; }
+      if (!vid) { showToast('請選擇廠商', 'error'); return; }
       var vendors = (state.data.accounting && state.data.accounting.vendors) || [];
       var v = vendors.find(function(x){ return String(x.id) === String(vid); });
+      var amtMode = document.getElementById('apt-amount-mode').value;
       if (!state.data.apTemplates) state.data.apTemplates = [];
-      state.data.apTemplates.push({ vendor_id: vid, vendor_name: v ? (v.company_name||v.name) : '', item_desc: desc, default_amount: amt });
-      // 儲存到 localStorage
+      state.data.apTemplates.push({
+        vendor_id: vid,
+        vendor_name: v ? (v.company_name||v.name) : '',
+        item_desc: document.getElementById('apt-desc').value.trim(),
+        cost_category: document.getElementById('apt-cost-cat').value || null,
+        pay_term: document.getElementById('apt-pay-term').value || null,
+        amount_mode: amtMode,
+        default_amount: amtMode === 'fixed' ? (parseInt(document.getElementById('apt-amount').value)||0) : 0,
+      });
       localStorage.setItem('story_ap_templates', JSON.stringify(state.data.apTemplates));
-      closeModal();
-      renderApp();
-      showToast('範本已儲存');
+      closeModal(); renderApp(); showToast('範本已儲存');
     }},
     { label:'取消', onclick: closeModal }
   ]);
@@ -14856,32 +15136,24 @@ window._editAPTemplate = function(i) {
   var t = templates[i];
   if (!t) return;
   var vendors = (state.data.accounting && state.data.accounting.vendors) || [];
-  var activeVendors = vendors.filter(function(v){ return v.is_active !== false; });
-  var curVendor = activeVendors.find(function(v){ return String(v.id)===String(t.vendor_id); });
-  var curVendorName = curVendor ? (curVendor.company_name||curVendor.name) : (t.vendor_name||'');
-  showModal('編輯 AP 範本', `
-    <div class="form-group" style="position:relative">
-      <label>廠商</label>
-      <input class="form-control" id="apt-vendor-search" value="${curVendorName}" placeholder="輸入關鍵字搜尋廠商" autocomplete="off"
-        oninput="window._aptVendorSearch(this)">
-      <input type="hidden" id="apt-vendor-id" value="${t.vendor_id||''}">
-      <div id="apt-vendor-suggestions" style="display:none;position:absolute;z-index:999;background:#fff;border:1px solid var(--border);border-radius:6px;width:100%;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.1);top:100%"></div>
-    </div>
-    <div class="form-group"><label>品項說明</label>
-      <input class="form-control" id="apt-desc" value="${t.item_desc||''}">
-    </div>
-    <div class="form-group"><label>預設金額</label>
-      <input class="form-control" id="apt-amount" type="number" value="${t.default_amount||0}">
-    </div>
-  `, [
+  var curVendor = vendors.find(function(v){ return String(v.id)===String(t.vendor_id); });
+  var tWithName = Object.assign({}, t, { vendor_name: curVendor ? (curVendor.company_name||curVendor.name) : (t.vendor_name||'') });
+  showModal('編輯 AP 範本', _aptFormHtml(tWithName), [
     { label:'儲存', primary:true, onclick: function() {
       var vid = document.getElementById('apt-vendor-id').value;
-      var desc = document.getElementById('apt-desc').value.trim();
-      var amt = parseInt(document.getElementById('apt-amount').value) || 0;
-      if (!vid) { alert('請選擇廠商'); return; }
+      if (!vid) { showToast('請選擇廠商', 'error'); return; }
       var vendors2 = (state.data.accounting && state.data.accounting.vendors) || [];
       var v = vendors2.find(function(x){ return String(x.id) === String(vid); });
-      state.data.apTemplates[i] = { vendor_id: vid, vendor_name: v ? (v.company_name||v.name) : '', item_desc: desc, default_amount: amt };
+      var amtMode = document.getElementById('apt-amount-mode').value;
+      state.data.apTemplates[i] = {
+        vendor_id: vid,
+        vendor_name: v ? (v.company_name||v.name) : '',
+        item_desc: document.getElementById('apt-desc').value.trim(),
+        cost_category: document.getElementById('apt-cost-cat').value || null,
+        pay_term: document.getElementById('apt-pay-term').value || null,
+        amount_mode: amtMode,
+        default_amount: amtMode === 'fixed' ? (parseInt(document.getElementById('apt-amount').value)||0) : 0,
+      };
       localStorage.setItem('story_ap_templates', JSON.stringify(state.data.apTemplates));
       closeModal(); renderApp(); showToast('範本已更新');
     }},
@@ -14966,13 +15238,37 @@ window._applyAPTemplate = function() {
   var drafts = templates.map(function(t) {
     var v = vendors.find(function(x){ return String(x.id) === String(t.vendor_id); });
     var vname = v ? (v.company_name||v.name) : t.vendor_name;
-    // 找上月同廠商金額
-    var prevRecord = ap.find(function(r){
-      var rYm = (r.billing_month||r.item_date||'').slice(0,7).replace('-','');
-      return rYm === prevYm && String(r.vendor_id) === String(t.vendor_id);
-    });
-    var amount = prevRecord ? (prevRecord.amount||0) : (t.default_amount||0);
-    return { vendor_id: t.vendor_id, vendor_name: vname, item_desc: t.item_desc||'', amount: amount, alreadyExists: existingVendorIds.has(String(t.vendor_id)) };
+    var amtMode = t.amount_mode || 'last_month';
+    var amount = 0;
+    if (amtMode === 'fixed') {
+      amount = t.default_amount || 0;
+    } else if (amtMode === 'zero') {
+      amount = 0;
+    } else {
+      // 帶入上月同廠商金額
+      var prevRecord = ap.find(function(r){
+        var rYm = (r.billing_month||r.item_date||'').slice(0,7).replace('-','');
+        return rYm === prevYm && String(r.vendor_id) === String(t.vendor_id);
+      });
+      amount = prevRecord ? (prevRecord.amount||0) : (t.default_amount||0);
+    }
+    // 計算預計付款日
+    var payTerm = t.pay_term || '';
+    var dueDateStr = '';
+    if (payTerm) {
+      var selY = parseInt(selectedYm.slice(0,4));
+      var selM = parseInt(selectedYm.slice(4,6)) - 1; // 0-indexed
+      if (payTerm==='M1') selM+=1;
+      else if (payTerm==='M2') selM+=2;
+      else if (payTerm==='M3') selM+=3;
+      if (selM>11){ selY+=Math.floor(selM/12); selM=selM%12; }
+      dueDateStr = selY+'-'+String(selM+1).padStart(2,'0')+'-10';
+    }
+    return {
+      vendor_id: t.vendor_id, vendor_name: vname, item_desc: t.item_desc||'',
+      amount: amount, cost_category: t.cost_category||'', pay_term: payTerm,
+      due_date: dueDateStr, alreadyExists: existingVendorIds.has(String(t.vendor_id))
+    };
   });
 
   // 顯示確認 modal，逐筆草稿
@@ -15000,7 +15296,17 @@ window._applyAPTemplate = function() {
           if (!chk || !chk.checked) return;
           var amount = parseInt(document.getElementById('apt-amount-' + i)?.value) || 0;
           var desc = document.getElementById('apt-desc-' + i)?.value.trim() || '';
-          toInsert.push({ vendor_id: d.vendor_id, vendor_name: d.vendor_name, amount: amount, item_desc: desc, billing_month: prevYmDash, type: 'ap', created_by: state.user?.id });
+          toInsert.push({
+            vendor_id: d.vendor_id, vendor_name: d.vendor_name, applicant_name: d.vendor_name,
+            amount: amount, item_desc: desc,
+            billing_month: prevYmDash,
+            year_month: selectedYm,
+            cost_category: d.cost_category || null,
+            pay_term: d.pay_term || null,
+            payment_due_date: d.due_date || null,
+            created_by: state.user?.id || null,
+            updated_at: new Date().toISOString(),
+          });
         });
         if (toInsert.length === 0) { alert('請至少勾選一筆'); return; }
         closeModal();
@@ -15311,6 +15617,876 @@ window.deleteWage = async function(id) {
   await db.from('casting_wage_items').delete().eq('record_id',id);
   await db.from('casting_wage_records').delete().eq('id',id);
   showToast('已刪除'); await loadWages(); renderApp();
+};
+
+// ══════════════════════════════════════════════
+// 工作日誌（職位模板制）
+// ══════════════════════════════════════════════
+
+// ─── 模板定義 ───────────────────────────────
+const JOURNAL_TEMPLATES = {
+  visual_designer: {
+    label: '視覺設計師',
+    icon: '🎨',
+    fields: [
+      { key:'completed',   label:'✅ 今日完成',         color:'#10b981', placeholder:'例：Banner 初稿 x2、商品修圖 15 張、IG 貼文排版完成', rows:3 },
+      { key:'in_progress', label:'🔄 進行中',            color:'#f59e0b', placeholder:'例：聯名頁面視覺調整中', rows:2 },
+      { key:'blockers',    label:'⚠️ 卡點 / 需協助',    color:'#ef4444', placeholder:'例：商品素材不足、AI 生成風格不穩定', rows:2 },
+      { key:'planned',     label:'📌 明日預計',          color:'#6366f1', placeholder:'例：完成主視覺第二版', rows:2 },
+      { key:'help_needed', label:'🙋 需要主管協助',      color:'#8b5cf6', placeholder:'有需要主管決策或協助的事項…', rows:2 },
+    ]
+  },
+  visual_designer_lead: {
+    label: '視覺設計主管',
+    icon: '🎨👑',
+    fields: [
+      { key:'team_progress', label:'👥 今日團隊進度',    color:'#10b981', placeholder:'例：A 完成 Banner、B 修圖進度延後', rows:3 },
+      { key:'risks',         label:'⚠️ 目前風險 / 問題', color:'#ef4444', placeholder:'例：Reels 素材不足、聯名修改次數偏高', rows:2 },
+      { key:'coordinated',   label:'🤝 已協調事項',      color:'#06b6d4', placeholder:'例：與行銷確認方向、與金工安排拍攝', rows:2 },
+      { key:'planned',       label:'📌 明日重點',        color:'#6366f1', placeholder:'例：完成新品頁統整', rows:2 },
+      { key:'help_needed',   label:'🙋 需要協助',        color:'#8b5cf6', placeholder:'', rows:2 },
+    ]
+  },
+  goldsmith: {
+    label: '金工人員',
+    icon: '🔨',
+    fields: [
+      { key:'completed',     label:'✅ 今日完成件數',    color:'#10b981', placeholder:'例：戒指 8 件、項鍊 5 件', rows:2 },
+      { key:'work_content',  label:'🔨 製作內容',        color:'#f59e0b', placeholder:'例：焊接、拋光、鑲石', rows:2 },
+      { key:'blockers',      label:'⚠️ 異常 / 問題',    color:'#ef4444', placeholder:'例：銀料硬度異常、模具耗損', rows:2 },
+      { key:'pending',       label:'📋 待處理事項',      color:'#f97316', placeholder:'例：客訂修改 2 件', rows:2 },
+      { key:'help_needed',   label:'🙋 需要主管協助',    color:'#8b5cf6', placeholder:'', rows:2 },
+    ]
+  },
+  goldsmith_lead: {
+    label: '金工主管',
+    icon: '🔨👑',
+    fields: [
+      { key:'line_status',   label:'🏭 今日產線狀況',    color:'#10b981', placeholder:'例：完成率 85%、客訂進度正常', rows:2 },
+      { key:'anomalies',     label:'⚠️ 異常回報',        color:'#ef4444', placeholder:'例：模具需更換、某工序耗時增加', rows:2 },
+      { key:'quality',       label:'🔍 品質狀況',        color:'#f59e0b', placeholder:'例：2 件需返工', rows:2 },
+      { key:'manpower',      label:'👷 人力狀況',        color:'#06b6d4', placeholder:'例：新人速度偏慢', rows:2 },
+      { key:'planned',       label:'📌 明日安排',        color:'#6366f1', placeholder:'例：優先處理急單', rows:2 },
+      { key:'help_needed',   label:'🙋 需要協助',        color:'#8b5cf6', placeholder:'', rows:2 },
+    ]
+  },
+  admin_ops: {
+    label: '營運行政',
+    icon: '📋',
+    fields: [
+      { key:'completed',     label:'✅ 今日完成',         color:'#10b981', placeholder:'例：對帳完成、出貨單整理、廠商聯繫', rows:3 },
+      { key:'tracking',      label:'🔍 待追蹤事項',       color:'#f59e0b', placeholder:'例：授權合約回覆中、廠商報價未回', rows:2 },
+      { key:'anomalies',     label:'⚠️ 異常事項',         color:'#ef4444', placeholder:'例：平台訂單同步異常、延遲出貨 3 筆', rows:2 },
+      { key:'planned',       label:'📌 明日重點',         color:'#6366f1', placeholder:'例：完成請款資料', rows:2 },
+      { key:'help_needed',   label:'🙋 需要主管協助',     color:'#8b5cf6', placeholder:'', rows:2 },
+    ]
+  },
+  general: {
+    label: '一般員工',
+    icon: '📝',
+    fields: [
+      { key:'completed',     label:'✅ 今日完成',         color:'#10b981', placeholder:'今天完成了哪些事？', rows:3 },
+      { key:'in_progress',   label:'🔄 目前進度',         color:'#f59e0b', placeholder:'目前正在進行的工作', rows:2 },
+      { key:'blockers',      label:'⚠️ 卡點 / 問題',     color:'#ef4444', placeholder:'是否有遇到困難或等待事項？', rows:2 },
+      { key:'planned',       label:'📌 明日預計',         color:'#6366f1', placeholder:'明天打算做什麼？', rows:2 },
+      { key:'help_needed',   label:'🙋 需要主管協助',     color:'#8b5cf6', placeholder:'需要什麼幫助？', rows:2 },
+    ]
+  },
+};
+
+// 系統 role → 預設模板
+const ROLE_TO_JOURNAL_TEMPLATE = {
+  admin:           'admin_ops',
+  management:      'admin_ops',
+  accounting:      'admin_ops',
+  production_lead: 'goldsmith_lead',
+  production:      'goldsmith',
+  designer:        'visual_designer',
+  cs:              'general',
+  general:         'general',
+};
+
+function _getMyTemplate(jd) {
+  const myId = state.user?.id;
+  const myProfile = (jd.profiles||[]).find(p=>p.id===myId);
+  const tpl = myProfile?.journal_template || ROLE_TO_JOURNAL_TEMPLATE[myProfile?.role] || 'general';
+  return JOURNAL_TEMPLATES[tpl] || JOURNAL_TEMPLATES.general;
+}
+
+function _getTemplateForLog(log, jd) {
+  const profile = (jd.profiles||[]).find(p=>p.id===log.user_id);
+  const tplKey = log.template_type || profile?.journal_template || ROLE_TO_JOURNAL_TEMPLATE[profile?.role] || 'general';
+  return JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
+}
+
+async function loadJournal() {
+  const today = new Date().toISOString().slice(0,10);
+  const [todayRes, histRes, profilesRes] = await Promise.all([
+    db.from('work_journals').select('*').eq('date', today).order('created_at'),
+    db.from('work_journals').select('*').eq('user_id', state.user.id).order('date', { ascending: false }).limit(90),
+    db.from('profiles').select('id, name, role, journal_template').order('name'),
+  ]);
+  state.data.journal = {
+    today: todayRes.data || [],
+    history: histRes.data || [],
+    profiles: profilesRes.data || [],
+    todayDate: today,
+  };
+}
+
+function renderJournal() {
+  const jd = state.data.journal || {};
+  const tab = state.data.journalTab || '今日全覽';
+  const today = jd.todayDate || new Date().toISOString().slice(0,10);
+  const todayLogs = jd.today || [];
+  const history = jd.history || [];
+  const profiles = jd.profiles || [];
+  const myId = state.user?.id;
+  const myLog = todayLogs.find(l => l.user_id === myId);
+  const hasSubmitted = !!myLog;
+  const myTpl = _getMyTemplate(jd);
+
+  // ── 今日全覽 ──
+  const todayView = () => {
+    const submittedIds = new Set(todayLogs.map(l=>l.user_id));
+    const missing = profiles.filter(p => !submittedIds.has(p.id));
+    return `
+      ${todayLogs.length === 0 && missing.length === 0 ?
+        `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>今天還沒有人填寫日誌</p></div></div>` : ''}
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
+        ${todayLogs.map(log => {
+          const isMe = log.user_id === myId;
+          const tpl = _getTemplateForLog(log, jd);
+          const fields = log.fields || {};
+          // 有值的欄位
+          const filledFields = tpl.fields.filter(f => fields[f.key] || log[f.key]);
+          return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div>
+                <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
+                <div style="font-size:11px;color:var(--muted)">${tpl.icon} ${tpl.label}</div>
+              </div>
+              <div style="font-size:11px;color:var(--muted)">${log.updated_at ? new Date(log.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
+            </div>
+            ${filledFields.map(f => {
+              const val = fields[f.key] || log[f.key];
+              return val ? `<div style="margin-bottom:8px">
+                <div style="font-size:11px;font-weight:600;color:${f.color};margin-bottom:3px">${f.label}</div>
+                <div style="font-size:13px;white-space:pre-wrap;line-height:1.5">${val}</div>
+              </div>` : '';
+            }).join('')}
+            ${isMe ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><button class="btn btn-sm btn-outline" onclick="modalEditJournal()">✏️ 修改</button></div>` : ''}
+          </div>`;
+        }).join('')}
+        ${missing.map(p => `
+          <div class="card" style="border-left:4px solid var(--border);opacity:.45">
+            <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">尚未填寫今日日誌</div>
+          </div>`).join('')}
+      </div>`;
+  };
+
+  // ── 我的日誌（歷史） ──
+  const myView = () => {
+    const grouped = {};
+    history.forEach(l => {
+      const ym = l.date?.slice(0,7);
+      if (!grouped[ym]) grouped[ym] = [];
+      grouped[ym].push(l);
+    });
+    return `
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
+        <button class="btn btn-primary" onclick="modalEditJournal()">${hasSubmitted?'✏️ 修改今日日誌':'📝 填寫今日日誌'}</button>
+        ${hasSubmitted?`<span style="font-size:12px;color:#10b981">✅ 今日已填寫</span>`:''}
+        <span style="font-size:12px;color:var(--muted);margin-left:auto">${myTpl.icon} 使用模板：${myTpl.label}</span>
+      </div>
+      ${Object.keys(grouped).sort().reverse().map(ym => `
+        <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:18px 0 8px">${ym}</div>
+        ${grouped[ym].map(log => {
+          const tpl = _getTemplateForLog(log, jd);
+          const fields = log.fields || {};
+          const filledFields = tpl.fields.filter(f => fields[f.key] || log[f.key]);
+          return `<div class="card" style="margin-bottom:10px">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+              <div style="font-size:14px;font-weight:600">📅 ${log.date} <span style="font-size:11px;color:var(--muted);font-weight:400">${tpl.icon} ${tpl.label}</span></div>
+              <button class="btn btn-sm btn-outline" onclick="modalEditJournal('${log.id}')">編輯</button>
+            </div>
+            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px">
+              ${filledFields.map(f => {
+                const val = fields[f.key] || log[f.key];
+                return val ? `<div>
+                  <div style="color:${f.color};font-weight:600;margin-bottom:3px">${f.label}</div>
+                  <div style="white-space:pre-wrap;line-height:1.5">${val}</div>
+                </div>` : '';
+              }).join('')}
+            </div>
+          </div>`;
+        }).join('')}
+      `).join('')}
+      ${history.length===0?`<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>還沒有日誌記錄，來填寫今天的吧！</p></div></div>`:''}`;
+  };
+
+  return `
+    <div class="tabs" style="margin-bottom:16px">
+      <div class="tab ${tab==='今日全覽'?'active':''}" data-journal-tab="今日全覽">👥 今日全覽</div>
+      <div class="tab ${tab==='我的日誌'?'active':''}" data-journal-tab="我的日誌">📋 我的日誌</div>
+    </div>
+    ${!hasSubmitted && tab==='今日全覽' ? `
+    <div style="background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
+      <div>
+        <div style="font-weight:700;font-size:14px">你今天還沒填寫日誌 📝</div>
+        <div style="font-size:12px;opacity:.85;margin-top:2px">${myTpl.icon} ${myTpl.label} 模板 · 約 3～5 分鐘填完</div>
+      </div>
+      <button class="btn" style="background:#fff;color:var(--accent-dark);font-weight:700;white-space:nowrap" onclick="modalEditJournal()">立即填寫</button>
+    </div>` : ''}
+    ${tab==='今日全覽' ? todayView() : myView()}`;
+}
+
+window.modalEditJournal = async function(existingId = null) {
+  const jd = state.data.journal || {};
+  const myId = state.user?.id;
+  const today = new Date().toISOString().slice(0,10);
+  let existing = null;
+  if (existingId) {
+    existing = (jd.history||[]).find(l=>l.id===existingId);
+  } else {
+    existing = (jd.today||[]).find(l=>l.user_id===myId);
+  }
+  const logDate = existing?.date || today;
+  const myProfile = (jd.profiles||[]).find(p=>p.id===myId);
+  const myName = myProfile?.name || state.user?.email || '—';
+  const tplKey = existing?.template_type || myProfile?.journal_template || ROLE_TO_JOURNAL_TEMPLATE[myProfile?.role] || 'general';
+  const tpl = JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
+  const existingFields = existing?.fields || {};
+
+  showModal(`${tpl.icon} ${existing?'修改':'填寫'}工作日誌`, `
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+      <div style="font-size:13px;color:var(--muted)">📅 ${logDate} · ${myName}</div>
+      <span style="font-size:12px;padding:3px 10px;background:var(--surface2);border-radius:12px;color:var(--accent-dark);font-weight:600">${tpl.label}</span>
+    </div>
+    ${tpl.fields.map(f => `
+    <div class="form-group">
+      <label style="color:${f.color};font-weight:600;font-size:13px">${f.label}</label>
+      <textarea class="form-control jnl-field" data-field="${f.key}" rows="${f.rows||2}" placeholder="${f.placeholder||''}">${existingFields[f.key]||existing?.[f.key]||''}</textarea>
+    </div>`).join('')}
+    <div style="font-size:11px;color:var(--muted);text-align:right;margin-top:-4px">建議 3～5 分鐘完成，簡短清楚即可 ✍️</div>
+  `, [
+    { label:'送出日誌', primary:true, onclick: async () => {
+      const fields = {};
+      document.querySelectorAll('.jnl-field').forEach(el => {
+        const v = el.value.trim();
+        if (v) fields[el.dataset.field] = v;
+      });
+      const payload = {
+        user_id: myId,
+        user_name: myName,
+        date: logDate,
+        template_type: tplKey,
+        fields,
+        updated_at: new Date().toISOString(),
+      };
+      if (existing) {
+        await db.from('work_journals').update(payload).eq('id', existing.id);
+      } else {
+        await db.from('work_journals').insert(payload);
+      }
+      showToast('日誌已送出！'); closeModal(); await loadJournal(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+// ══════════════════════════════════════════════
+// 金寶山月結
+// ══════════════════════════════════════════════
+async function loadJinbaosan() {
+  const { data } = await db.from('jinbaosan_ledger').select('*').order('year_month', { ascending: false });
+  state.data.jinbaosan = data || [];
+}
+
+function renderJinbaosan() {
+  const records = state.data.jinbaosan || [];
+  const filterYm = state.data.jinbaosanYm || new Date().toISOString().slice(0,7);
+  const filtered = records.filter(r => r.year_month === filterYm);
+  const grandTotal = filtered.reduce((s,r) => s + (r.total||0), 0);
+  const tax = Math.round(grandTotal * 0.05);
+  return `
+    <div class="search-bar" style="flex-wrap:wrap;gap:8px">
+      <input type="month" class="form-control" style="width:160px" value="${filterYm}" onchange="state.data.jinbaosanYm=this.value;renderApp()">
+      <button class="btn btn-primary" onclick="modalAddJinbaosan()">+ 新增記錄</button>
+    </div>
+    ${filtered.length === 0 ?
+      `<div class="card"><div class="empty"><div class="empty-icon">🏔️</div><p>本月尚無金寶山月結記錄</p></div></div>` :
+      filtered.map(r => {
+        const items = r.items || [];
+        return `<div class="card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <div style="font-size:14px;font-weight:600">📅 ${r.record_date || r.year_month}</div>
+              ${r.notes ? `<div style="font-size:12px;color:var(--muted)">${r.notes}</div>` : ''}
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:16px;font-weight:700;color:var(--accent-dark)">NT$ ${(r.total||0).toLocaleString()}</div>
+              <span class="tag ${r.status==='已結算'?'tag-green':r.status==='確認中'?'tag-yellow':'tag-grey'}">${r.status||'待確認'}</span>
+            </div>
+          </div>
+          ${items.length > 0 ? `
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+            <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:4px 0">品項</th><th style="text-align:right;padding:4px 0">數量</th><th style="text-align:right;padding:4px 0">金額</th>
+            </tr></thead>
+            <tbody>${items.map(i=>`<tr>
+              <td style="padding:3px 0">${i.name||'—'}</td>
+              <td style="text-align:right;padding:3px 0">${i.qty||'—'}</td>
+              <td style="text-align:right;padding:3px 0">NT$ ${(i.amount||0).toLocaleString()}</td>
+            </tr>`).join('')}</tbody>
+          </table>` : ''}
+          <div style="margin-top:10px;display:flex;gap:6px">
+            <button class="btn btn-sm btn-outline" onclick="editJinbaosan('${r.id}')">編輯</button>
+            ${r.status !== '已結算' ? `<button class="btn btn-sm btn-primary" onclick="settleJinbaosan('${r.id}')">✓ 確認結算</button>` : ''}
+            <button class="btn btn-sm btn-danger" onclick="deleteJinbaosan('${r.id}')">刪除</button>
+          </div>
+        </div>`;
+      }).join('')
+    }
+    ${filtered.length > 0 ? `
+    <div class="card" style="background:var(--surface2)">
+      <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin-bottom:8px">📊 ${filterYm} 月結匯總</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;font-size:13px">
+        <div><div style="color:var(--muted);font-size:11px">未稅總計</div><div style="font-weight:700">NT$ ${grandTotal.toLocaleString()}</div></div>
+        <div><div style="color:var(--muted);font-size:11px">5% 稅額</div><div style="font-weight:700">NT$ ${tax.toLocaleString()}</div></div>
+        <div><div style="color:var(--muted);font-size:11px">含稅總計</div><div style="font-weight:700;color:var(--accent-dark)">NT$ ${(grandTotal+tax).toLocaleString()}</div></div>
+      </div>
+    </div>` : ''}`;
+}
+
+window.modalAddJinbaosan = function(existing = null) {
+  const id = existing?.id;
+  const items = existing?.items || [{ name:'', qty:'', amount:0 }];
+  const today = new Date().toISOString().slice(0,10);
+  const ym = new Date().toISOString().slice(0,7);
+  showModal(id ? '編輯金寶山記錄' : '新增金寶山記錄', `
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>年月 *</label><input class="form-control" id="jbs-ym" type="month" value="${existing?.year_month||ym}"></div>
+      <div class="form-group"><label>日期</label><input class="form-control" id="jbs-date" type="date" value="${existing?.record_date||today}"></div>
+    </div>
+    <div class="form-group"><label>備註</label><input class="form-control" id="jbs-notes" value="${existing?.notes||''}" placeholder="備註說明"></div>
+    <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:12px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)">品項明細</div>
+    <div id="jbs-items">
+      ${items.map(i=>`
+      <div class="jbs-row" style="display:grid;grid-template-columns:1fr 80px 100px auto;gap:6px;margin-bottom:6px">
+        <input class="form-control jbs-name" placeholder="品項名稱" value="${i.name||''}">
+        <input class="form-control jbs-qty" type="text" placeholder="數量" value="${i.qty||''}">
+        <input class="form-control jbs-amount" type="number" placeholder="金額" min="0" value="${i.amount||0}" oninput="updateJbsTotal()">
+        <button onclick="this.closest('.jbs-row').remove();updateJbsTotal()" style="background:var(--danger);color:#fff;border:none;border-radius:4px;padding:0 8px;cursor:pointer">✕</button>
+      </div>`).join('')}
+    </div>
+    <button class="btn btn-outline btn-sm" onclick="addJbsRow()" style="margin-bottom:12px">+ 新增品項</button>
+    <div style="text-align:right;font-size:14px;font-weight:600;padding:8px;background:var(--surface2);border-radius:6px">
+      小計：NT$ <span id="jbs-total-display">0</span>
+    </div>
+  `, [
+    { label:'儲存', primary:true, onclick: async () => {
+      const ym2 = document.getElementById('jbs-ym').value;
+      if (!ym2) { showToast('請填年月','error'); return; }
+      const rows = document.querySelectorAll('.jbs-row');
+      const itemsData = [];
+      let total = 0;
+      rows.forEach(r => {
+        const name = r.querySelector('.jbs-name').value.trim();
+        const qty = r.querySelector('.jbs-qty').value.trim();
+        const amount = parseFloat(r.querySelector('.jbs-amount').value)||0;
+        if (name) { itemsData.push({ name, qty, amount }); total += amount; }
+      });
+      const payload = {
+        year_month: ym2,
+        record_date: document.getElementById('jbs-date').value || null,
+        notes: document.getElementById('jbs-notes').value.trim() || null,
+        items: itemsData, total,
+      };
+      if (id) {
+        await db.from('jinbaosan_ledger').update(payload).eq('id', id);
+      } else {
+        payload.status = '待確認'; payload.created_by = state.user?.id;
+        await db.from('jinbaosan_ledger').insert(payload);
+      }
+      showToast(id ? '已更新' : '已新增！'); closeModal(); await loadJinbaosan(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+  requestAnimationFrame(() => updateJbsTotal());
+};
+
+window.addJbsRow = function() {
+  const div = document.createElement('div');
+  div.className = 'jbs-row';
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 80px 100px auto;gap:6px;margin-bottom:6px';
+  div.innerHTML = `
+    <input class="form-control jbs-name" placeholder="品項名稱">
+    <input class="form-control jbs-qty" type="text" placeholder="數量">
+    <input class="form-control jbs-amount" type="number" placeholder="金額" min="0" value="0" oninput="updateJbsTotal()">
+    <button onclick="this.closest('.jbs-row').remove();updateJbsTotal()" style="background:var(--danger);color:#fff;border:none;border-radius:4px;padding:0 8px;cursor:pointer">✕</button>`;
+  document.getElementById('jbs-items').appendChild(div);
+};
+
+window.updateJbsTotal = function() {
+  let total = 0;
+  document.querySelectorAll('.jbs-amount').forEach(el => { total += parseFloat(el.value)||0; });
+  const el = document.getElementById('jbs-total-display');
+  if (el) el.textContent = total.toLocaleString();
+};
+window.editJinbaosan = function(id) {
+  const rec = (state.data.jinbaosan||[]).find(r=>r.id===id);
+  if (rec) window.modalAddJinbaosan(rec);
+};
+window.settleJinbaosan = async function(id) {
+  if (!confirm('確認結算此記錄？')) return;
+  await db.from('jinbaosan_ledger').update({ status:'已結算' }).eq('id',id);
+  showToast('已結算！'); await loadJinbaosan(); renderApp();
+};
+window.deleteJinbaosan = async function(id) {
+  if (!confirm('確定刪除此記錄？')) return;
+  await db.from('jinbaosan_ledger').delete().eq('id',id);
+  showToast('已刪除'); await loadJinbaosan(); renderApp();
+};
+
+// ══════════════════════════════════════════════
+// 電鍍廠月結
+// ══════════════════════════════════════════════
+async function loadPlate() {
+  const { data } = await db.from('plate_ledger').select('*').order('year_month', { ascending: false });
+  state.data.plate = data || [];
+}
+
+function renderPlate() {
+  const records = state.data.plate || [];
+  const filterYm = state.data.plateYm || new Date().toISOString().slice(0,7);
+  const filtered = records.filter(r => r.year_month === filterYm);
+  const grandTotal = filtered.reduce((s,r) => s + (r.total||0), 0);
+  return `
+    <div class="search-bar" style="flex-wrap:wrap;gap:8px">
+      <input type="month" class="form-control" style="width:160px" value="${filterYm}" onchange="state.data.plateYm=this.value;renderApp()">
+      <button class="btn btn-primary" onclick="modalAddPlate()">+ 新增記錄</button>
+    </div>
+    ${filtered.length === 0 ?
+      `<div class="card"><div class="empty"><div class="empty-icon">⚡</div><p>本月尚無電鍍廠月結記錄</p></div></div>` :
+      filtered.map(r => {
+        const items = r.items || [];
+        return `<div class="card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <div style="font-size:14px;font-weight:600">${r.invoice_date || r.year_month}${r.internal_order_no ? ` · #${r.internal_order_no}` : ''}</div>
+              ${r.notes ? `<div style="font-size:12px;color:var(--muted)">${r.notes}</div>` : ''}
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:16px;font-weight:700;color:var(--accent-dark)">NT$ ${(r.total||0).toLocaleString()}</div>
+              <span class="tag ${r.status==='已結算'?'tag-green':r.status==='確認中'?'tag-yellow':'tag-grey'}">${r.status||'待確認'}</span>
+            </div>
+          </div>
+          ${items.length > 0 ? `
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+            <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:4px 0">商品</th><th style="text-align:left;padding:4px 0">顏色</th>
+              <th style="text-align:right;padding:4px 0">數量</th><th style="text-align:right;padding:4px 0">電鍍費</th>
+            </tr></thead>
+            <tbody>${items.map(i=>`<tr>
+              <td style="padding:3px 0">${i.product_name||'—'}</td>
+              <td style="padding:3px 0">${i.color||'—'}</td>
+              <td style="text-align:right;padding:3px 0">${i.qty||0}</td>
+              <td style="text-align:right;padding:3px 0">NT$ ${(i.plate_amount||0).toLocaleString()}</td>
+            </tr>`).join('')}</tbody>
+          </table>` : ''}
+          <div style="margin-top:10px;display:flex;gap:6px">
+            <button class="btn btn-sm btn-outline" onclick="editPlate('${r.id}')">編輯</button>
+            ${r.status !== '已結算' ? `<button class="btn btn-sm btn-primary" onclick="settlePlate('${r.id}')">✓ 確認結算</button>` : ''}
+            <button class="btn btn-sm btn-danger" onclick="deletePlate('${r.id}')">刪除</button>
+          </div>
+        </div>`;
+      }).join('')
+    }
+    ${filtered.length > 0 ? `
+    <div class="card" style="background:var(--surface2)">
+      <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin-bottom:6px">📊 ${filterYm} 電鍍費匯總</div>
+      <div style="font-size:14px;font-weight:700">總計：NT$ ${grandTotal.toLocaleString()}</div>
+    </div>` : ''}`;
+}
+
+function _pltItemHtml(i = {}) {
+  const name = (i.product_name||'').replace(/"/g,'&quot;');
+  return `<div class="plt-row" style="display:grid;grid-template-columns:1.5fr 80px 60px 100px auto;gap:5px;margin-bottom:8px;align-items:start">
+    <div style="position:relative">
+      <input class="form-control plt-product" placeholder="輸入關鍵字搜尋商品…" value="${name}" oninput="pltSearch(this)" autocomplete="off" onfocus="pltSearch(this)">
+      <input type="hidden" class="plt-product-id" value="${i.product_id||''}">
+      <div class="plt-drop" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:6px;z-index:200;max-height:160px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>
+    </div>
+    <input class="form-control plt-color" placeholder="顏色" value="${i.color||''}">
+    <input class="form-control plt-qty" type="number" placeholder="數量" min="0" value="${i.qty||0}">
+    <input class="form-control plt-amount" type="number" placeholder="電鍍費" min="0" value="${i.plate_amount||0}" oninput="updatePltTotal()">
+    <button onclick="this.closest('.plt-row').remove();updatePltTotal()" style="background:var(--danger);color:#fff;border:none;border-radius:4px;padding:0 10px;cursor:pointer;height:36px">✕</button>
+  </div>`;
+}
+
+window.pltSearch = function(input) {
+  const q = (input.value||'').toLowerCase().trim();
+  const drop = input.closest('div[style*="position:relative"]').querySelector('.plt-drop');
+  const products = state.data.products || [];
+  const matches = q ? products.filter(p => (p.name||'').toLowerCase().includes(q)).slice(0,10)
+                     : products.slice(0,10);
+  if (!matches.length) { drop.style.display='none'; return; }
+  drop.innerHTML = matches.map(p =>
+    `<div style="padding:7px 10px;cursor:pointer;font-size:13px;border-bottom:1px solid var(--border)"
+      onmousedown="pltSelectProduct(event,'${(p.name||'').replace(/'/g,"\\'")}','${p.id}')">${p.name}</div>`
+  ).join('');
+  drop.style.display = 'block';
+  // 點外面關閉
+  setTimeout(() => {
+    const close = (e) => { if (!drop.contains(e.target) && e.target !== input) { drop.style.display='none'; document.removeEventListener('mousedown', close); } };
+    document.addEventListener('mousedown', close);
+  }, 0);
+};
+
+window.pltSelectProduct = function(e, name, id) {
+  e.preventDefault();
+  const item = e.target.closest('div[style*="position:relative"]');
+  item.querySelector('.plt-product').value = name;
+  item.querySelector('.plt-product-id').value = id;
+  item.querySelector('.plt-drop').style.display = 'none';
+};
+
+window.modalAddPlate = async function(existing = null) {
+  const id = existing?.id;
+  const items = existing?.items || [{}];
+  const today = new Date().toISOString().slice(0,10);
+  const ym = new Date().toISOString().slice(0,7);
+  // 確保商品資料已載入
+  if (!(state.data.products||[]).length) await loadProducts();
+  showModal(id ? '編輯電鍍廠記錄' : '新增電鍍廠記錄', `
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>年月 *</label><input class="form-control" id="plt-ym" type="month" value="${existing?.year_month||ym}"></div>
+      <div class="form-group"><label>日期</label><input class="form-control" id="plt-date" type="date" value="${existing?.invoice_date||today}"></div>
+    </div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>廠內單號</label><input class="form-control" id="plt-order" value="${existing?.internal_order_no||''}" placeholder="廠商單號"></div>
+      <div class="form-group"><label>備註</label><input class="form-control" id="plt-notes" value="${existing?.notes||''}"></div>
+    </div>
+    <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:12px 0 4px;padding-bottom:6px;border-bottom:1px solid var(--border)">電鍍明細</div>
+    <div style="display:grid;grid-template-columns:1.5fr 80px 60px 100px auto;gap:5px;margin-bottom:4px">
+      <div style="font-size:11px;color:var(--muted)">商品名稱</div>
+      <div style="font-size:11px;color:var(--muted)">顏色</div>
+      <div style="font-size:11px;color:var(--muted)">數量</div>
+      <div style="font-size:11px;color:var(--muted)">電鍍費</div>
+      <div></div>
+    </div>
+    <div id="plt-items">${items.map(i=>_pltItemHtml(i)).join('')}</div>
+    <button class="btn btn-outline btn-sm" onclick="addPltRow()" style="margin-bottom:12px">+ 新增品項</button>
+    <div style="text-align:right;font-size:14px;font-weight:600;padding:8px;background:var(--surface2);border-radius:6px">
+      小計：NT$ <span id="plt-total-display">0</span>
+    </div>
+  `, [
+    { label:'儲存', primary:true, onclick: async () => {
+      const ym2 = document.getElementById('plt-ym').value;
+      if (!ym2) { showToast('請填年月','error'); return; }
+      const rows = document.querySelectorAll('.plt-row');
+      const itemsData = []; let total = 0;
+      rows.forEach(r => {
+        const product_name = r.querySelector('.plt-product').value.trim();
+        const product_id = r.querySelector('.plt-product-id').value || null;
+        const color = r.querySelector('.plt-color').value.trim();
+        const qty = parseInt(r.querySelector('.plt-qty').value)||0;
+        const plate_amount = parseFloat(r.querySelector('.plt-amount').value)||0;
+        if (product_name) { itemsData.push({ product_name, product_id, color, qty, plate_amount }); total += plate_amount; }
+      });
+      const payload = {
+        year_month: ym2,
+        invoice_date: document.getElementById('plt-date').value||null,
+        internal_order_no: document.getElementById('plt-order').value.trim()||null,
+        notes: document.getElementById('plt-notes').value.trim()||null,
+        items: itemsData, total,
+      };
+      if (id) {
+        await db.from('plate_ledger').update(payload).eq('id', id);
+      } else {
+        payload.status = '待確認'; payload.created_by = state.user?.id;
+        await db.from('plate_ledger').insert(payload);
+      }
+      showToast(id?'已更新':'已新增！'); closeModal(); await loadPlate(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+  requestAnimationFrame(() => updatePltTotal());
+};
+
+window.addPltRow = function() {
+  const div = document.createElement('div');
+  div.outerHTML; // dummy
+  document.getElementById('plt-items').insertAdjacentHTML('beforeend', _pltItemHtml({}));
+};
+window.updatePltTotal = function() {
+  let total = 0;
+  document.querySelectorAll('.plt-amount').forEach(el => { total += parseFloat(el.value)||0; });
+  const el = document.getElementById('plt-total-display');
+  if (el) el.textContent = total.toLocaleString();
+};
+window.editPlate = function(id) {
+  const rec = (state.data.plate||[]).find(r=>r.id===id);
+  if (rec) window.modalAddPlate(rec);
+};
+window.settlePlate = async function(id) {
+  if (!confirm('確認結算此記錄？')) return;
+  await db.from('plate_ledger').update({ status:'已結算' }).eq('id',id);
+  showToast('已結算！'); await loadPlate(); renderApp();
+};
+window.deletePlate = async function(id) {
+  if (!confirm('確定刪除此記錄？')) return;
+  await db.from('plate_ledger').delete().eq('id',id);
+  showToast('已刪除'); await loadPlate(); renderApp();
+};
+
+// ══════════════════════════════════════════════
+// 鑄造廠月結
+// ══════════════════════════════════════════════
+const WAGE_RATES = [40, 45, 50, 55, 60, 70, 80, 100, 200, 300];
+
+async function loadFoundry() {
+  const { data } = await db.from('foundry_ledger')
+    .select('*, foundry_ledger_items(*, castings(name))')
+    .order('year_month', { ascending: false });
+  state.data.foundry = data || [];
+}
+
+function renderFoundry() {
+  const records = state.data.foundry || [];
+  const filterYm = state.data.foundryYm || new Date().toISOString().slice(0,7);
+  const filtered = records.filter(r => r.year_month === filterYm);
+
+  let totalSilverCost = 0, totalWages = 0;
+  const wageByRate = {};
+  WAGE_RATES.forEach(r => wageByRate[r] = { qty:0, amount:0 });
+  filtered.forEach(batch => {
+    const netWeight = (batch.silver_weight||0) - (batch.return_weight||0);
+    totalSilverCost += netWeight * (batch.silver_price||0);
+    (batch.foundry_ledger_items||[]).forEach(item => {
+      const rate = item.wage_rate||0, qty = item.qty||0;
+      const sub = item.subtotal||(qty*rate);
+      totalWages += sub;
+      if (wageByRate[rate]) { wageByRate[rate].qty += qty; wageByRate[rate].amount += sub; }
+    });
+  });
+  const grandTotal = totalSilverCost + totalWages;
+  const usedRates = WAGE_RATES.filter(r => wageByRate[r].qty > 0);
+
+  return `
+    <div class="search-bar" style="flex-wrap:wrap;gap:8px">
+      <input type="month" class="form-control" style="width:160px" value="${filterYm}" onchange="state.data.foundryYm=this.value;renderApp()">
+      <button class="btn btn-primary" onclick="modalAddFoundry()">+ 新增藍單</button>
+    </div>
+    ${filtered.length > 0 ? `
+    <div class="card" style="background:var(--surface2);margin-bottom:12px">
+      <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin-bottom:10px">📊 ${filterYm} 月結匯總</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-bottom:10px">
+        <div class="card" style="margin:0"><div style="font-size:11px;color:var(--muted)">銀料費</div><div style="font-size:15px;font-weight:700">NT$ ${Math.round(totalSilverCost).toLocaleString()}</div></div>
+        <div class="card" style="margin:0"><div style="font-size:11px;color:var(--muted)">鑄口工資</div><div style="font-size:15px;font-weight:700">NT$ ${Math.round(totalWages).toLocaleString()}</div></div>
+        <div class="card" style="margin:0;border:2px solid var(--accent)"><div style="font-size:11px;color:var(--muted)">未稅總計</div><div style="font-size:15px;font-weight:700;color:var(--accent-dark)">NT$ ${Math.round(grandTotal).toLocaleString()}</div></div>
+      </div>
+      ${usedRates.length > 0 ? `
+      <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px">工資費率分佈</div>
+      <table style="width:100%;font-size:12px;border-collapse:collapse">
+        <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
+          <th style="text-align:left;padding:3px 0">費率</th><th style="text-align:right;padding:3px 0">數量</th><th style="text-align:right;padding:3px 0">金額</th>
+        </tr></thead>
+        <tbody>${usedRates.map(r=>`<tr>
+          <td style="padding:3px 0">NT$ ${r}/件</td>
+          <td style="text-align:right">${wageByRate[r].qty}</td>
+          <td style="text-align:right">NT$ ${wageByRate[r].amount.toLocaleString()}</td>
+        </tr>`).join('')}</tbody>
+      </table>` : ''}
+    </div>` : ''}
+    ${filtered.length === 0 ?
+      `<div class="card"><div class="empty"><div class="empty-icon">🔥</div><p>本月尚無鑄造廠月結記錄</p></div></div>` :
+      filtered.map(batch => {
+        const items = batch.foundry_ledger_items || [];
+        const netWeight = (batch.silver_weight||0) - (batch.return_weight||0);
+        const silverCost = netWeight * (batch.silver_price||0);
+        const wagesTotal = items.reduce((s,i)=>s+(i.subtotal||((i.qty||0)*(i.wage_rate||0))),0);
+        return `<div class="card" style="margin-bottom:12px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:8px">
+            <div>
+              <div style="font-size:14px;font-weight:600">藍單 ${batch.batch_no||'—'} · ${batch.batch_date||batch.year_month}</div>
+              <div style="font-size:12px;color:var(--muted)">銀價 NT$${batch.silver_price}/TL · 銀重 ${batch.silver_weight}TL${batch.return_weight ? ` · 退水口 ${batch.return_weight}TL` : ''} · 淨重 ${netWeight.toFixed(3)}TL</div>
+              ${batch.notes ? `<div style="font-size:12px;color:var(--muted)">${batch.notes}</div>` : ''}
+            </div>
+            <div style="text-align:right">
+              <div style="font-size:12px;color:var(--muted)">銀料 NT$ ${Math.round(silverCost).toLocaleString()}</div>
+              <div style="font-size:12px;color:var(--muted)">工資 NT$ ${Math.round(wagesTotal).toLocaleString()}</div>
+              <div style="font-size:15px;font-weight:700;color:var(--accent-dark)">NT$ ${Math.round(silverCost+wagesTotal).toLocaleString()}</div>
+              <span class="tag ${batch.status==='已結算'?'tag-green':batch.status==='確認中'?'tag-yellow':'tag-grey'}">${batch.status||'待確認'}</span>
+            </div>
+          </div>
+          ${items.length > 0 ? `
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+            <thead><tr style="color:var(--muted);border-bottom:1px solid var(--border)">
+              <th style="text-align:left;padding:4px 0">鑄件</th><th style="text-align:right;padding:4px 0">數量</th>
+              <th style="text-align:right;padding:4px 0">費率</th><th style="text-align:right;padding:4px 0">小計</th>
+            </tr></thead>
+            <tbody>${items.map(i=>`<tr>
+              <td style="padding:3px 0">${i.castings?.name||i.item_name||'—'}</td>
+              <td style="text-align:right">${i.qty}</td>
+              <td style="text-align:right">NT$${i.wage_rate}/件</td>
+              <td style="text-align:right">NT$ ${(i.subtotal||((i.qty||0)*(i.wage_rate||0))).toLocaleString()}</td>
+            </tr>`).join('')}</tbody>
+          </table>` : ''}
+          <div style="margin-top:10px;display:flex;gap:6px">
+            <button class="btn btn-sm btn-outline" onclick="editFoundry('${batch.id}')">編輯</button>
+            ${batch.status !== '已結算' ? `<button class="btn btn-sm btn-primary" onclick="settleFoundry('${batch.id}')">✓ 確認結算</button>` : ''}
+            <button class="btn btn-sm btn-danger" onclick="deleteFoundry('${batch.id}')">刪除</button>
+          </div>
+        </div>`;
+      }).join('')
+    }`;
+}
+
+window.modalAddFoundry = async function(existing = null) {
+  const id = existing?.id;
+  const existingItems = existing?.foundry_ledger_items || [];
+  if (!(state.data.castings||[]).length) await loadCastings();
+  const cs2 = state.data.castings || [];
+  const today = new Date().toISOString().slice(0,10);
+  const ym = new Date().toISOString().slice(0,7);
+
+  const itemsHtml = (existingItems.length > 0 ? existingItems : [{}]).map(i=>`
+    <div class="fdy-row" style="display:grid;grid-template-columns:1fr 70px 110px 90px auto;gap:5px;margin-bottom:6px">
+      <select class="form-control fdy-casting">
+        <option value="">選擇鑄件</option>
+        ${cs2.map(c=>`<option value="${c.id}" ${i.casting_id===c.id?'selected':''}>${c.name}</option>`).join('')}
+      </select>
+      <input class="form-control fdy-qty" type="number" placeholder="數量" min="0" value="${i.qty||0}" oninput="updateFdyTotal()">
+      <select class="form-control fdy-rate" onchange="updateFdyTotal()">
+        ${WAGE_RATES.map(r=>`<option value="${r}" ${i.wage_rate===r?'selected':''}>NT$${r}/件</option>`).join('')}
+      </select>
+      <input class="form-control fdy-subtotal" type="number" value="${i.subtotal||0}" readonly style="background:var(--surface2)">
+      <button onclick="this.closest('.fdy-row').remove();updateFdyTotal()" style="background:var(--danger);color:#fff;border:none;border-radius:4px;padding:0 8px;cursor:pointer">✕</button>
+    </div>`).join('');
+
+  showModal(id ? '編輯藍單' : '新增藍單', `
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>年月 *</label><input class="form-control" id="fdy-ym" type="month" value="${existing?.year_month||ym}"></div>
+      <div class="form-group"><label>日期</label><input class="form-control" id="fdy-date" type="date" value="${existing?.batch_date||today}"></div>
+    </div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>藍單編號</label><input class="form-control" id="fdy-batchno" value="${existing?.batch_no||''}" placeholder="例：060402"></div>
+      <div class="form-group"><label>銀價 (NT$/TL)</label><input class="form-control" id="fdy-silver-price" type="number" value="${existing?.silver_price||0}" oninput="updateFdyTotal()"></div>
+    </div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>銀重 (TL)</label><input class="form-control" id="fdy-silver-weight" type="number" step="0.001" value="${existing?.silver_weight||0}" oninput="updateFdyTotal()"></div>
+      <div class="form-group"><label>退水口重 (TL)</label><input class="form-control" id="fdy-return-weight" type="number" step="0.001" value="${existing?.return_weight||0}" oninput="updateFdyTotal()"></div>
+    </div>
+    <div class="form-group"><label>備註</label><input class="form-control" id="fdy-notes" value="${existing?.notes||''}"></div>
+    <div style="padding:8px;background:var(--surface2);border-radius:6px;font-size:12px;margin-bottom:12px;display:flex;gap:16px;flex-wrap:wrap">
+      <span>淨重：<b id="fdy-net-weight">0</b> TL</span>
+      <span>銀料費：<b id="fdy-silver-cost">NT$ 0</b></span>
+      <span>工資：<b id="fdy-wage-total">NT$ 0</b></span>
+      <span style="font-size:13px;font-weight:700;color:var(--accent-dark)">合計：<b id="fdy-grand-total">NT$ 0</b></span>
+    </div>
+    <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:0 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)">鑄件明細</div>
+    <div id="fdy-items">${itemsHtml}</div>
+    <button class="btn btn-outline btn-sm" onclick="addFdyRow()" style="margin-bottom:12px">+ 新增鑄件</button>
+  `, [
+    { label:'儲存', primary:true, onclick: async () => {
+      const ym2 = document.getElementById('fdy-ym').value;
+      if (!ym2) { showToast('請填年月','error'); return; }
+      const silverPrice = parseFloat(document.getElementById('fdy-silver-price').value)||0;
+      const silverWeight = parseFloat(document.getElementById('fdy-silver-weight').value)||0;
+      const returnWeight = parseFloat(document.getElementById('fdy-return-weight').value)||0;
+      const batchPayload = {
+        year_month: ym2,
+        batch_date: document.getElementById('fdy-date').value||null,
+        batch_no: document.getElementById('fdy-batchno').value.trim()||null,
+        silver_price: silverPrice, silver_weight: silverWeight, return_weight: returnWeight,
+        notes: document.getElementById('fdy-notes').value.trim()||null,
+        status: existing?.status || '待確認',
+      };
+      let batchId = id;
+      if (id) {
+        await db.from('foundry_ledger').update(batchPayload).eq('id', id);
+        await db.from('foundry_ledger_items').delete().eq('ledger_id', id);
+      } else {
+        batchPayload.created_by = state.user?.id;
+        const { data: bd, error } = await db.from('foundry_ledger').insert(batchPayload).select().single();
+        if (error) { showToast('儲存失敗：'+error.message,'error'); return; }
+        batchId = bd.id;
+      }
+      const rows = document.querySelectorAll('.fdy-row');
+      const itemsData = [];
+      rows.forEach(r => {
+        const cid = r.querySelector('.fdy-casting').value;
+        const qty = parseInt(r.querySelector('.fdy-qty').value)||0;
+        const rate = parseFloat(r.querySelector('.fdy-rate').value)||0;
+        if (qty > 0) itemsData.push({ ledger_id: batchId, casting_id: cid||null, qty, wage_rate: rate, subtotal: qty*rate });
+      });
+      if (itemsData.length) await db.from('foundry_ledger_items').insert(itemsData);
+      showToast(id?'已更新':'已新增！'); closeModal(); await loadFoundry(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+  requestAnimationFrame(() => updateFdyTotal());
+};
+
+window.addFdyRow = function() {
+  const cs2 = state.data.castings || [];
+  const div = document.createElement('div');
+  div.className = 'fdy-row';
+  div.style.cssText = 'display:grid;grid-template-columns:1fr 70px 110px 90px auto;gap:5px;margin-bottom:6px';
+  div.innerHTML = `
+    <select class="form-control fdy-casting">
+      <option value="">選擇鑄件</option>
+      ${cs2.map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
+    </select>
+    <input class="form-control fdy-qty" type="number" placeholder="數量" min="0" value="0" oninput="updateFdyTotal()">
+    <select class="form-control fdy-rate" onchange="updateFdyTotal()">
+      ${WAGE_RATES.map(r=>`<option value="${r}">NT$${r}/件</option>`).join('')}
+    </select>
+    <input class="form-control fdy-subtotal" type="number" value="0" readonly style="background:var(--surface2)">
+    <button onclick="this.closest('.fdy-row').remove();updateFdyTotal()" style="background:var(--danger);color:#fff;border:none;border-radius:4px;padding:0 8px;cursor:pointer">✕</button>`;
+  document.getElementById('fdy-items').appendChild(div);
+};
+
+window.updateFdyTotal = function() {
+  const silverPrice = parseFloat(document.getElementById('fdy-silver-price')?.value)||0;
+  const silverWeight = parseFloat(document.getElementById('fdy-silver-weight')?.value)||0;
+  const returnWeight = parseFloat(document.getElementById('fdy-return-weight')?.value)||0;
+  const netWeight = silverWeight - returnWeight;
+  const silverCost = Math.round(netWeight * silverPrice);
+  let wageTotal = 0;
+  document.querySelectorAll('.fdy-row').forEach(r => {
+    const qty = parseInt(r.querySelector('.fdy-qty')?.value)||0;
+    const rate = parseFloat(r.querySelector('.fdy-rate')?.value)||0;
+    const sub = qty * rate;
+    const subEl = r.querySelector('.fdy-subtotal');
+    if (subEl) subEl.value = sub;
+    wageTotal += sub;
+  });
+  const grand = silverCost + wageTotal;
+  const setEl = (id2, val) => { const el = document.getElementById(id2); if(el) el.textContent = val; };
+  setEl('fdy-net-weight', netWeight.toFixed(3));
+  setEl('fdy-silver-cost', 'NT$ '+silverCost.toLocaleString());
+  setEl('fdy-wage-total', 'NT$ '+wageTotal.toLocaleString());
+  setEl('fdy-grand-total', 'NT$ '+grand.toLocaleString());
+};
+
+window.editFoundry = function(id) {
+  const rec = (state.data.foundry||[]).find(r=>r.id===id);
+  if (rec) window.modalAddFoundry(rec);
+};
+window.settleFoundry = async function(id) {
+  if (!confirm('確認結算此藍單？')) return;
+  await db.from('foundry_ledger').update({ status:'已結算' }).eq('id',id);
+  showToast('已結算！'); await loadFoundry(); renderApp();
+};
+window.deleteFoundry = async function(id) {
+  if (!confirm('確定刪除此藍單記錄？')) return;
+  await db.from('foundry_ledger_items').delete().eq('ledger_id',id);
+  await db.from('foundry_ledger').delete().eq('id',id);
+  showToast('已刪除'); await loadFoundry(); renderApp();
 };
 
 // ── Goldsmith Schedule ──
@@ -15994,6 +17170,7 @@ const pageRenderers = {
   restock:    renderRestock,
   pickup:     renderPickup,
   todos:      renderTodos,
+  journal:    renderJournal,
   cs:         renderCS,
   repair:     renderRepair,
   dev:        renderDev,
@@ -16005,6 +17182,9 @@ const pageRenderers = {
   settings:   renderSettings,
   calendar:   renderCalendar,
   wages:      renderWages,
+  jinbaosan:  renderJinbaosan,
+  plate:      renderPlate,
+  foundry:    renderFoundry,
   goldsmith:  renderGoldsmith,
   peripheral: renderPeripheral,
 };
@@ -16309,6 +17489,9 @@ function bindEvents() {
   });
   document.querySelectorAll('[data-wages-tab]').forEach(el => {
     el.onclick = () => { state.data.wagesTab = el.dataset.wagesTab; renderApp(); };
+  });
+  document.querySelectorAll('[data-journal-tab]').forEach(el => {
+    el.onclick = () => { state.data.journalTab = el.dataset.journalTab; renderApp(); };
   });
 
   // ── Sales dashboard ──
@@ -17055,6 +18238,20 @@ async function handleAction(action, id, dataset) {
       break;
     }
 
+    case 'ap-mark-paid': {
+      const today = new Date().toISOString().slice(0,10);
+      if (!confirm(`確定將此筆標記為已付款（${today}）？`)) break;
+      const { error } = await db.from('accounts_payable').update({
+        is_paid: true,
+        paid_at: `${today}T00:00:00`,
+        updated_at: new Date().toISOString(),
+      }).eq('id', id);
+      if (error) { showToast('標記失敗：' + error.message, 'error'); break; }
+      showToast('✅ 已標記為付款完成');
+      await loadAccounting(); renderApp();
+      break;
+    }
+
     case 'ap-log': {
       const { data: logs, error: logErr } = await db.from('ap_change_logs')
         .select('*').eq('ap_id', id).order('changed_at', { ascending: false });
@@ -17757,6 +18954,7 @@ async function init() {
       state.page = lastPage;
     }
     await Promise.all([loadDashboard(), loadApprovals(), loadClaudeApiKey()]);
+    _resetIdleTimer(); // 恢復登入狀態，啟動閒置計時器
   }
   state.loading = false;
   renderApp();
