@@ -444,6 +444,7 @@ const { createClient } = supabase;
 const SUPABASE_URL = 'https://favfqdebeyicbzymfpxa.supabase.co';
 const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImZhdmZxZGViZXlpY2J6eW1mcHhhIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY4MzUwODksImV4cCI6MjA5MjQxMTA4OX0.BzRQnSp24lRW-hNiw4psGe-YsXrolMFVQ7eMc2BC--s';
 const db = createClient(SUPABASE_URL, SUPABASE_KEY);
+window.db = db;  // inline onclick 可直接用 db.from(...)
 
 // ═══════════════════════════════════════════
 // Session Security：閒置自動登出 + 關閉分頁登出
