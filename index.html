@@ -14053,14 +14053,17 @@ function salesDayInput(input) {
   const month1 = parseInt(input.dataset.sm);
   const day = parseInt(input.dataset.sd);
   const rawVal = input.value;
-  const val = parseFloat(rawVal) || 0;
-  salesSetDay(year, platform, month1, day, val);
-  if (rawVal !== '' && parseFloat(rawVal) > 0) {
-    input.style.background = '#fff';
-    input.style.color = '#888';
-  } else {
+  if (rawVal === '') {
+    // 清空 → 移除 localStorage（灰色：代表未填）
+    salesSetDay(year, platform, month1, day, null);
     input.style.background = '#f7f7f7';
     input.style.color = '#f7f7f7';
+  } else {
+    // 有值（含 0）→ 儲存並顯示白底
+    const val = parseFloat(rawVal) || 0;
+    salesSetDay(year, platform, month1, day, val);
+    input.style.background = '#fff';
+    input.style.color = '#555';
   }
 
   // Update day row total
