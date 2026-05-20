@@ -16920,19 +16920,19 @@ function renderJournal() {
           ${filterMode === 'date' ? `
             <input type="date" class="form-control" style="width:160px"
               value="${filterDate}"
-              onchange="state.data.journalHistDate=this.value;window.loadJournalHistoryFilter();renderApp()">
+              onchange="state.data.journalHistDate=this.value;window.loadJournalHistoryFilter()">
             <button class="btn btn-outline btn-sm"
-              onclick="state.data.journalHistDate='${today}';window.loadJournalHistoryFilter();renderApp()">今天</button>
+              onclick="state.data.journalHistDate='${today}';window.loadJournalHistoryFilter()">今天</button>
             <button class="btn btn-outline btn-sm"
-              onclick="state.data.journalHistDate='${yesterday}';window.loadJournalHistoryFilter();renderApp()">昨天</button>
+              onclick="state.data.journalHistDate='${yesterday}';window.loadJournalHistoryFilter()">昨天</button>
           ` : `
             <input type="date" class="form-control" style="width:140px"
               value="${filterStart}"
-              onchange="state.data.journalHistStart=this.value;window.loadJournalHistoryFilter();renderApp()">
+              onchange="state.data.journalHistStart=this.value;window.loadJournalHistoryFilter()">
             <span style="font-size:13px;color:var(--muted)">—</span>
             <input type="date" class="form-control" style="width:140px"
               value="${filterEnd}"
-              onchange="state.data.journalHistEnd=this.value;window.loadJournalHistoryFilter();renderApp()">
+              onchange="state.data.journalHistEnd=this.value;window.loadJournalHistoryFilter()">
           `}
           <span style="font-size:12px;color:var(--muted)">${viewLogs.length} 筆</span>
         </div>
@@ -16992,6 +16992,7 @@ window.loadJournalHistoryFilter = async function() {
   }
   const { data } = await q;
   if (data) state.data.journal.history = data;
+  renderApp(); // 資料回來後才重新渲染
 };
 
 // 新增一行日誌項目到指定欄位容器
