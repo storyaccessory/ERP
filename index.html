@@ -15904,7 +15904,7 @@ function _getTemplateForLog(log, jd) {
 }
 
 async function loadJournal() {
-  const today = new Date().toISOString().slice(0,10);
+  const today = _localToday();
   const [todayRes, histRes, profilesRes, todosRes] = await Promise.all([
     db.from('work_journals').select('*').eq('date', today).order('created_at'),
     db.from('work_journals').select('*').order('date', { ascending: false }).limit(300),
@@ -16744,7 +16744,7 @@ window.bookingGotoDate = function(dateStr) {
 function renderJournal() {
   const jd = state.data.journal || {};
   const tab = state.data.journalTab || '今日全覽';
-  const today = jd.todayDate || new Date().toISOString().slice(0,10);
+  const today = jd.todayDate || _localToday();
   const todayLogs = jd.today || [];
   const history = jd.history || [];
   const profiles = jd.profiles || [];
@@ -16916,7 +16916,7 @@ function renderJournal() {
     <div style="display:flex;align-items:center;gap:10px;padding:12px 0 14px;flex-wrap:wrap">
       <input type="date" class="form-control" style="width:160px" value="${jd.viewDate||today}" onchange="state.data.journal.viewDate=this.value;loadJournalForDate(this.value)">
       <button class="btn btn-outline btn-sm" onclick="state.data.journal.viewDate='${today}';loadJournalForDate('${today}')">今天</button>
-      <button class="btn btn-outline btn-sm" onclick="state.data.journal.viewDate='${new Date(Date.now()-86400000).toISOString().slice(0,10)}';loadJournalForDate(state.data.journal.viewDate)">昨天</button>
+      <button class="btn btn-outline btn-sm" onclick="(()=>{const y=new Date();y.setDate(y.getDate()-1);const yd=_localDateStr(y);state.data.journal.viewDate=yd;loadJournalForDate(yd);})()">昨天</button>
       <span style="font-size:12px;color:var(--muted)">${jd.viewDate&&jd.viewDate!==today?`查看：${jd.viewDate}`:'今天'}</span>
     </div>
     ${!hasSubmitted && (jd.viewDate||today)===today ? `
