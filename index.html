@@ -6464,9 +6464,10 @@ async function parseInvoiceWithClaude(file) {
                 },
                 {
                   type: 'text',
-                  text: `這是台灣電子發票證明聯 PDF。請擷取以下資訊並只回傳 JSON，找不到的欄位填 null：
-{"invoice_no":"發票號碼(2碼英文+8碼數字，如ZK14300978)","invoice_date":"開立日期YYYY-MM-DD","amount":含稅總計純數字,"vendor":"賣方公司名稱(賣方：後面)","vendor_tax_id":"賣方8碼統編","item_desc":"品名或備註"}
-注意：買方統編24372938是清流文創(買方)，賣方才是廠商。只回傳JSON。`
+                  text: `你是台灣發票辨識專家。這是台灣發票 PDF（可能是電子發票證明聯或手開發票）。
+請仔細擷取以下資訊並只回傳 JSON，找不到填 null：
+{"invoice_no":"發票號碼（2碼英文大寫+8碼數字，如ZK14300978）","invoice_date":"開立日期YYYY-MM-DD","amount":含稅總金額純數字,"vendor":"賣方/商家名稱","vendor_tax_id":"賣方8碼統編","item_desc":"品名或備註"}
+規則：民國年+1911=西元（115年=2026）；金額找「合計」「總計」後的數字；買方統編24372938是清流文創(買方)，賣方才是廠商。只回傳JSON。`
                 }
               ]
             }]
@@ -6490,9 +6491,19 @@ async function parseInvoiceWithClaude(file) {
 
     // 圖片：送 Claude Vision
     const raw = await callClaudeVision(file,
-      `這是一張台灣電子發票證明聯或手開發票圖片。請擷取以下資訊並以 JSON 格式回傳，找不到填 null（不要填「無法識別」）：
-{"invoice_no":"發票號碼(2碼英文+8碼數字)","invoice_date":"開立日期YYYY-MM-DD","amount":含稅總計純數字,"vendor":"賣方公司名稱","vendor_tax_id":"賣方8碼統編","item_desc":"品名或備註"}
-注意買方統編24372938是清流文創（買方），賣方才是廠商。只回傳JSON。`
+      `你是台灣發票辨識專家。這張圖片可能是台灣電子發票證明聯（B2C，如餐廳/超商/零售）、手開發票（B2B）或一般收據。
+
+請仔細辨識所有文字，以 JSON 格式回傳以下資訊，找不到的欄位填 null，禁止填「無法識別」：
+{"invoice_no":"發票號碼（2碼大寫英文+8碼數字，如BJ99000890）","invoice_date":"開立日期（YYYY-MM-DD）","amount":含稅總金額純數字不含符號,"vendor":"商家或賣方名稱","vendor_tax_id":"賣方8碼統編（找不到填null）","item_desc":"品名/品項說明/餐廳名/備註"}
+
+辨識規則：
+1. 發票號碼：格式固定為2碼英文大寫+8碼數字（如BJ99000890、AB12345678）
+2. 民國年轉西元：民國年+1911=西元（115年=2026年、114年=2025年、113年=2024年）；「115年05月20日」→「2026-05-20」
+3. 金額：優先找「合計」「小計」「總計」「Total」後面的數字；若無則找最大金額數字
+4. 電子發票證明聯通常無賣方統編，填null即可
+5. 買方統編24372938是清流文創（買方），賣方才是廠商
+
+只回傳JSON，不要任何說明文字。`
     );
     const jsonMatch = raw.match(/\{[\s\S]*\}/);
     if (!jsonMatch) return null;
