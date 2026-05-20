@@ -17023,7 +17023,7 @@ window.modalEditJournal = async function(existingId = null) {
       showToast('日誌已送出！'); closeModal(); await loadJournal(); renderApp();
     }},
     { label:'取消', onclick: closeModal },
-  ]);
+  ], { confirmClose: true });
 
   // 預填現有資料
   setTimeout(() => {
