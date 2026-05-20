@@ -17153,7 +17153,6 @@ window.modalEditJournal = async function(existingId = null) {
 // ══════════════════════════════════════════════
 // 每日出貨統計
 // ══════════════════════════════════════════════
-async function loadShipments() { return window.loadShipments(); }
 window.loadShipments = async function() {
   const ym = state.data.shipmentsYm || _localToday().slice(0,7);
   const [start, end] = [`${ym}-01`, `${ym}-31`];
@@ -17166,7 +17165,13 @@ window.loadShipments = async function() {
     columns: colsRes.data || [],
     rows: rowsRes.data || [],
   };
-}
+};
+async function loadShipments() { return window.loadShipments(); }
+window.shipmentNavTo = async function(ym) {
+  state.data.shipmentsYm = ym;
+  try { await window.loadShipments(); } catch(e) { console.error('loadShipments error', e); }
+  renderApp();
+};
 
 function renderShipments() {
   const sd = state.data.shipments || {};
@@ -17231,10 +17236,10 @@ function renderShipments() {
 
   return `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm" onclick="state.data.shipmentsYm='${prevYm}';loadShipments().then(renderApp)">‹ 上月</button>
+      <button class="btn btn-outline btn-sm" onclick="window.shipmentNavTo('${prevYm}')">‹ 上月</button>
       <span style="font-weight:700;font-size:15px">${year} 年 ${mon} 月</span>
-      <button class="btn btn-outline btn-sm" onclick="state.data.shipmentsYm='${nextYm}';loadShipments().then(renderApp)">下月 ›</button>
-      <button class="btn btn-outline btn-sm" onclick="state.data.shipmentsYm='${_localToday().slice(0,7)}';loadShipments().then(renderApp)">本月</button>
+      <button class="btn btn-outline btn-sm" onclick="window.shipmentNavTo('${nextYm}')">下月 ›</button>
+      <button class="btn btn-outline btn-sm" onclick="window.shipmentNavTo('${_localToday().slice(0,7)}')">本月</button>
       <span style="margin-left:auto;font-size:13px;color:var(--muted)">本月合計 <b style="color:var(--accent-dark);font-size:15px">${grandTotal}</b> 件</span>
       <button class="btn btn-outline btn-sm" onclick="window.modalShipmentColumns()">⚙️ 欄位設定</button>
     </div>
@@ -17368,29 +17373,76 @@ window.modalShipmentColumns = async function() {
   const renderList = () => {
     const active = allCols.filter(c=>c.is_active);
     const inactive = allCols.filter(c=>!c.is_active);
-    return active.map((c,i) => {
+    return `<div id="sc-drag-list">` +
+    active.map((c) => {
       const gc = GROUP_COLORS_MAP[c.group_name] || '#f5f5f5';
       return `
-      <div style="display:flex;align-items:center;gap:6px;padding:6px 4px;border-bottom:1px solid var(--border)" data-col-id="${c.id}">
-        <div style="display:flex;flex-direction:column;gap:2px">
-          <button onclick="window._scMove('${c.id}',-1)" style="background:none;border:none;cursor:pointer;font-size:11px;line-height:1;padding:1px 4px;color:var(--muted)" ${i===0?'disabled':''}>▲</button>
-          <button onclick="window._scMove('${c.id}',1)" style="background:none;border:none;cursor:pointer;font-size:11px;line-height:1;padding:1px 4px;color:var(--muted)" ${i===active.length-1?'disabled':''}>▼</button>
-        </div>
+      <div draggable="true" data-col-id="${c.id}"
+        style="display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid var(--border);cursor:default;transition:background .1s">
+        <span style="font-size:16px;color:#bbb;cursor:grab;padding:0 4px;user-select:none" title="拖曳排序">⠿</span>
         <span style="font-size:13px;flex:1"><b>${c.platform}</b>${c.method?' · '+c.method:''}</span>
-        <span style="font-size:11px;padding:2px 8px;border-radius:20px;background:${gc};color:#555;white-space:nowrap;cursor:pointer" onclick="window._scEditGroup('${c.id}')" title="點擊改分組">${c.group_name||'未分組'}</span>
-        <button onclick="window._scToggle('${c.id}',false)" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px" title="停用">✕</button>
+        <span style="font-size:11px;padding:2px 8px;border-radius:20px;background:${gc};color:#555;white-space:nowrap;cursor:pointer"
+          onclick="window._scEditGroup('${c.id}')" title="點擊改分組">${c.group_name||'未分組'}</span>
+        <button onclick="window._scToggle('${c.id}',false)"
+          style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:16px;line-height:1" title="停用">✕</button>
       </div>`;
-    }).join('') +
+    }).join('') + `</div>` +
     (inactive.length ? `<div style="margin-top:10px;font-size:11px;color:var(--muted);padding:4px 0">── 已停用 ──</div>` : '') +
     inactive.map(c=>`
-    <div style="display:flex;align-items:center;gap:8px;padding:5px 0;opacity:.5" data-col-id="${c.id}">
+    <div style="display:flex;align-items:center;gap:8px;padding:5px 0;opacity:.5">
       <span style="font-size:12px;flex:1;text-decoration:line-through">${c.platform}${c.method?' · '+c.method:''}</span>
       <span style="font-size:11px;color:var(--muted)">${c.group_name||''}</span>
       <button onclick="window._scToggle('${c.id}',true)" style="background:none;border:none;cursor:pointer;color:#10b981;font-size:13px">啟用</button>
     </div>`).join('');
   };
 
+  // 綁定拖曳事件（每次 renderList 後呼叫）
+  const bindDrag = () => {
+    const container = document.getElementById('sc-drag-list');
+    if (!container) return;
+    let dragSrc = null;
+    container.querySelectorAll('[draggable="true"]').forEach(row => {
+      row.addEventListener('dragstart', e => {
+        dragSrc = row;
+        e.dataTransfer.effectAllowed = 'move';
+        setTimeout(() => row.style.opacity = '0.4', 0);
+      });
+      row.addEventListener('dragend', () => { row.style.opacity = ''; container.querySelectorAll('[draggable]').forEach(r=>r.style.background=''); });
+      row.addEventListener('dragover', e => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        container.querySelectorAll('[draggable]').forEach(r=>r.style.background='');
+        if (row !== dragSrc) row.style.background = '#e3f2fd';
+      });
+      row.addEventListener('drop', async e => {
+        e.preventDefault();
+        if (!dragSrc || dragSrc === row) return;
+        row.style.background = '';
+        // 重排 allCols 依畫面順序
+        const active = allCols.filter(c=>c.is_active);
+        const fromId = dragSrc.dataset.colId;
+        const toId   = row.dataset.colId;
+        const fromIdx = active.findIndex(c=>c.id===fromId);
+        const toIdx   = active.findIndex(c=>c.id===toId);
+        // splice 重排
+        const [moved] = active.splice(fromIdx, 1);
+        active.splice(toIdx, 0, moved);
+        // 重新指定 display_order（間距 10）
+        active.forEach((c,i) => c.display_order = (i+1)*10);
+        // 更新 allCols 中 inactive 的 order 不動，重排整體
+        allCols.sort((a,b)=>a.display_order-b.display_order);
+        // 批次寫回 DB
+        await Promise.all(active.map(c =>
+          db.from('shipment_columns').update({ display_order: c.display_order }).eq('id', c.id)
+        ));
+        document.getElementById('sc-list').innerHTML = renderList();
+        bindDrag();
+      });
+    });
+  };
+
   showModal('⚙️ 出貨欄位設定', `
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">拖曳 ⠿ 可調整順序，點分組標籤可修改分組</div>
     <div id="sc-list">${renderList()}</div>
     <div style="margin-top:16px;padding-top:12px;border-top:1px solid var(--border)">
       <div style="font-size:13px;font-weight:600;margin-bottom:8px">新增欄位</div>
@@ -17413,28 +17465,8 @@ window.modalShipmentColumns = async function() {
     </div>
   `, [{ label:'完成', primary:true, onclick: async () => { closeModal(); await loadShipments(); renderApp(); } }]);
 
-  // 移動順序
-  window._scMove = async (id, dir) => {
-    const active = allCols.filter(c=>c.is_active);
-    const idx = active.findIndex(c=>c.id===id);
-    const swapIdx = idx + dir;
-    if (swapIdx < 0 || swapIdx >= active.length) return;
-    const a = active[idx], b = active[swapIdx];
-    const tmpOrder = a.display_order;
-    a.display_order = b.display_order;
-    b.display_order = tmpOrder;
-    // 若 display_order 相同就給差值
-    if (a.display_order === b.display_order) {
-      a.display_order = b.display_order + dir;
-    }
-    await Promise.all([
-      db.from('shipment_columns').update({ display_order: a.display_order }).eq('id', a.id),
-      db.from('shipment_columns').update({ display_order: b.display_order }).eq('id', b.id),
-    ]);
-    // 重排 allCols 陣列
-    allCols.sort((x,y) => x.display_order - y.display_order);
-    document.getElementById('sc-list').innerHTML = renderList();
-  };
+  // Modal 開啟後綁定拖曳
+  setTimeout(bindDrag, 50);
 
   // 停用 / 啟用
   window._scToggle = async (id, active) => {
@@ -17477,13 +17509,18 @@ window.modalShipmentColumns = async function() {
 // ══════════════════════════════════════════════
 // 郵資支出
 // ══════════════════════════════════════════════
-async function loadPostage() { return window.loadPostage(); }
 window.loadPostage = async function() {
   const ym = state.data.postageYm || _localToday().slice(0,7);
   const [start, end] = [`${ym}-01`, `${ym}-31`];
   const { data } = await db.from('postage_expenses').select('*').gte('date', start).lte('date', end).order('date');
   state.data.postage = { ym, records: data || [] };
-}
+};
+async function loadPostage() { return window.loadPostage(); }
+window.postageNavTo = async function(ym) {
+  state.data.postageYm = ym;
+  try { await window.loadPostage(); } catch(e) { console.error('loadPostage error', e); }
+  renderApp();
+};
 
 function renderPostage() {
   const pd = state.data.postage || {};
@@ -17503,10 +17540,10 @@ function renderPostage() {
 
   return `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
-      <button class="btn btn-outline btn-sm" onclick="state.data.postageYm='${prevYm}';loadPostage().then(renderApp)">‹ 上月</button>
+      <button class="btn btn-outline btn-sm" onclick="window.postageNavTo('${prevYm}')">‹ 上月</button>
       <span style="font-weight:700;font-size:15px">${year} 年 ${mon} 月</span>
-      <button class="btn btn-outline btn-sm" onclick="state.data.postageYm='${nextYm}';loadPostage().then(renderApp)">下月 ›</button>
-      <button class="btn btn-outline btn-sm" onclick="state.data.postageYm='${_localToday().slice(0,7)}';loadPostage().then(renderApp)">本月</button>
+      <button class="btn btn-outline btn-sm" onclick="window.postageNavTo('${nextYm}')">下月 ›</button>
+      <button class="btn btn-outline btn-sm" onclick="window.postageNavTo('${_localToday().slice(0,7)}')">本月</button>
       <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.modalAddPostage()">+ 新增支出</button>
     </div>
 
