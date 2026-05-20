@@ -16124,7 +16124,7 @@ function _renderBookingMonth(bd, today) {
             }
 
             const clickable = inMonth;
-            return `<td style="padding:5px 6px;border:1px solid var(--border);vertical-align:top;width:${100/7}%;height:110px;overflow:hidden;background:${bg};cursor:${clickable?'pointer':'default'}"
+            return `<td style="padding:5px 6px;border:1px solid var(--border);vertical-align:top;width:${100/7}%;height:150px;overflow:hidden;background:${bg};cursor:${clickable?'pointer':'default'}"
               onclick="${clickable&&!isHoliday?`window.bookingGotoDate('${d}')`:''}" title="${clickable&&!isHoliday?'點擊切換到週視圖':''}">
               <div style="height:100%;overflow-y:auto;scrollbar-width:none">
               <div style="font-size:12px;font-weight:${isToday?700:400};color:${inMonth?(isWeekend?'#bbb':'var(--text)'):'#ccc'};${isToday?'display:inline-flex;align-items:center;justify-content:center;background:var(--accent-dark);color:#fff;width:20px;height:20px;border-radius:50%;font-size:11px;':''}">
