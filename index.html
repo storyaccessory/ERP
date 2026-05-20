@@ -16753,6 +16753,8 @@ function renderJournal() {
   const history = jd.history || [];
   const profiles = jd.profiles || [];
   const myId = state.user?.id;
+  const myProfile = profiles.find(p => p.id === myId);
+  const isAdmin = myProfile?.role === 'admin' || myProfile?.role === 'management';
   const myLog = todayLogs.find(l => l.user_id === myId);
   const hasSubmitted = !!myLog;
   const myTpl = _getMyTemplate(jd);
@@ -16810,7 +16812,10 @@ function renderJournal() {
               }).join('')}
               ${myTasks.length > 4 ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">⋯ 還有 ${myTasks.length-4} 件</div>` : ''}
             </div>` : ''}
-            ${isMe ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><button class="btn btn-sm btn-outline" onclick="modalEditJournal()">✏️ 修改日誌</button></div>` : ''}
+            ${(isMe || isAdmin) ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:8px">
+              ${isMe ? `<button class="btn btn-sm btn-outline" onclick="modalEditJournal()">✏️ 修改日誌</button>` : ''}
+              ${isAdmin ? `<button class="btn btn-sm btn-outline" style="color:var(--danger);border-color:var(--danger)" onclick="window.deleteJournal('${log.id}','${log.user_name||''}')">🗑 刪除</button>` : ''}
+            </div>` : ''}
           </div>`;
         }).join('')}
         ${missing.map(p => {
@@ -16892,7 +16897,10 @@ function renderJournal() {
                 <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
                 <div style="font-size:11px;color:var(--muted)">${tpl.label}</div>
               </div>
-              ${isMe ? `<button class="btn btn-sm btn-outline" onclick="modalEditJournal('${log.id}')">編輯</button>` : ''}
+              <div style="display:flex;gap:6px">
+                ${isMe ? `<button class="btn btn-sm btn-outline" onclick="modalEditJournal('${log.id}')">編輯</button>` : ''}
+                ${isAdmin ? `<button class="btn btn-sm btn-outline" style="color:var(--danger);border-color:var(--danger)" onclick="window.deleteJournal('${log.id}','${log.user_name||''}')">🗑</button>` : ''}
+              </div>
             </div>
             <div style="font-size:12px">
               ${filledFields.map(f => {
