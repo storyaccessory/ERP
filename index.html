@@ -559,6 +559,7 @@ const PAGES = {
   calendar:   { label: '行事曆',       icon: '📅', section: '業務追蹤' },
   todos:      { label: '待辦事項',     icon: '✅', section: '業務追蹤' },
   journal:    { label: '工作日誌',     icon: '📝', section: '業務追蹤' },
+  booking:    { label: '體驗預約',     icon: '🗓️', section: '業務追蹤' },
   cs:         { label: '客服記錄',     icon: '💬', section: '業務追蹤' },
   // 商品管理
   products:   { label: '商品資料庫',   icon: '🗄️', section: '商品管理' },
@@ -675,6 +676,7 @@ async function loadPageData(page) {
     pickup:     loadRestock,
     todos:      loadTodos,
     journal:    loadJournal,
+    booking:    loadBooking,
     cs:         loadCS,
     repair:     loadRepair,
     dev:        loadDev,
@@ -697,13 +699,14 @@ async function loadDashboard() {
   const today = new Date().toISOString().split('T')[0];
   const threeDays = new Date(Date.now() + 3*86400000).toISOString().split('T')[0];
 
-  const [orders, restock, todos, cs, repair, dev] = await Promise.all([
+  const [orders, restock, todos, cs, repair, dev, bookingPending] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     db.from('todos').select('*').eq('status','未完成').or(`assignee_id.eq.${state.user?.id},is_team.eq.true`).order('deadline'),
     db.from('cs_records').select('*').eq('reply_status','未回覆'),
     db.from('repair_orders').select('*').not('status','in','("已完成","已寄回","取消")'),
     db.from('dev_projects').select('*').eq('status','進行中'),
+    db.from('experience_bookings').select('id').eq('status','待確認').gte('booking_date', today),
   ]);
 
   state.data.dashboard = {
@@ -713,6 +716,7 @@ async function loadDashboard() {
     cs: cs.data || [],
     repair: repair.data || [],
     dev: dev.data || [],
+    bookingPending: (bookingPending.data||[]).length,
     today,
     threeDays,
   };
@@ -1167,10 +1171,10 @@ function renderDashboard() {
         <div class="card-value accent">${dev.length}</div>
         <div class="card-sub">個進行中</div>
       </div>
-      <div class="card" style="cursor:pointer" data-page="restock">
-        <div class="card-title">📦 代墊費用待審核</div>
-        <div class="card-value">—</div>
-        <div class="card-sub">前往會計月結</div>
+      <div class="card" style="cursor:pointer" onclick="nav('booking')">
+        <div class="card-title">🗓️ 體驗預約待確認</div>
+        <div class="card-value ${d.bookingPending>0?'warning':''}"">${d.bookingPending||0}</div>
+        <div class="card-sub">${d.bookingPending>0?'筆待確認':'件，無待確認'}</div>
       </div>
     </div>
 
@@ -14551,13 +14555,21 @@ window.modalEditUser = function(userId) {
       </select>
       <div style="font-size:11px;color:var(--muted);margin-top:4px">指定後員工填寫日誌時會看到對應格式的欄位</div>
     </div>
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="eu-journal-required" ${u.journal_required?'checked':''} style="width:16px;height:16px;cursor:pointer">
+        <span>需要填寫工作日誌</span>
+      </label>
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">開啟後，此員工未填寫時會在今日全覽顯示「尚未填寫」提示</div>
+    </div>
   `, [
     { label:'儲存', primary:true, onclick: async ()=>{
       const name = document.getElementById('eu-name').value.trim();
       const role = document.getElementById('eu-role').value;
       const journal_template = document.getElementById('eu-journal-tpl').value || null;
+      const journal_required = document.getElementById('eu-journal-required').checked;
       if (!name) { showToast('請填姓名','error'); return; }
-      const { error } = await db.from('profiles').update({ name, role, journal_template }).eq('id', userId);
+      const { error } = await db.from('profiles').update({ name, role, journal_template, journal_required }).eq('id', userId);
       if (error) { showToast('更新失敗：'+error.message,'error'); return; }
       showToast('已更新'); closeModal(); await loadUsers(); renderApp();
     }},
@@ -15797,7 +15809,7 @@ async function loadJournal() {
   const [todayRes, histRes, profilesRes, todosRes] = await Promise.all([
     db.from('work_journals').select('*').eq('date', today).order('created_at'),
     db.from('work_journals').select('*').eq('user_id', state.user.id).order('date', { ascending: false }).limit(90),
-    db.from('profiles').select('id, name, role, journal_template').order('name'),
+    db.from('profiles').select('id, name, role, journal_template, journal_required').order('name'),
     db.from('todos').select('*, profiles!todos_assignee_id_fkey(name)').neq('status','完成').order('deadline'),
   ]);
   state.data.journal = {
@@ -15808,6 +15820,246 @@ async function loadJournal() {
     todayDate: today,
   };
 }
+
+// ═══════════════════════════════════════════
+// 體驗預約
+// ═══════════════════════════════════════════
+const BOOKING_SLOTS = ['13:00','14:00','15:00','16:00','17:00','18:00'];
+
+function _getBookingWeekStart(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00');
+  const dow = d.getDay(); // 0=Sun
+  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+  return d.toISOString().slice(0,10);
+}
+
+async function loadBooking() {
+  const today = new Date().toISOString().slice(0,10);
+  const thisWeekStart = _getBookingWeekStart(today);
+  const viewWeekStart = state.data.booking?.viewWeekStart || thisWeekStart;
+
+  const viewMon = new Date(viewWeekStart + 'T00:00:00');
+  const rangeStart = new Date(viewMon.getTime() - 7*86400000).toISOString().slice(0,10);
+  const rangeEnd   = new Date(viewMon.getTime() + 20*86400000).toISOString().slice(0,10);
+
+  const { data } = await db.from('experience_bookings')
+    .select('*')
+    .gte('booking_date', rangeStart)
+    .lte('booking_date', rangeEnd)
+    .order('booking_date')
+    .order('time_slot');
+
+  state.data.booking = {
+    ...(state.data.booking || {}),
+    records: data || [],
+    thisWeekStart,
+    viewWeekStart,
+  };
+}
+
+function renderBooking() {
+  const bd = state.data.booking || {};
+  const records = bd.records || [];
+  const today = new Date().toISOString().slice(0,10);
+  const viewStart = bd.viewWeekStart || _getBookingWeekStart(today);
+
+  // Build Mon–Sat for this view week
+  const days = [];
+  for (let i = 0; i < 6; i++) {
+    const d = new Date(viewStart + 'T00:00:00');
+    d.setDate(d.getDate() + i);
+    days.push(d.toISOString().slice(0,10));
+  }
+
+  // Group by date_slot
+  const bookingMap = {};
+  records.forEach(r => {
+    const key = `${r.booking_date}_${r.time_slot}`;
+    if (!bookingMap[key]) bookingMap[key] = [];
+    bookingMap[key].push(r);
+  });
+
+  const pendingCount = records.filter(r => r.status === '待確認').length;
+  const DAY_ZH = ['日','一','二','三','四','五','六'];
+
+  // Week label
+  const weekEnd = new Date(viewStart + 'T00:00:00');
+  weekEnd.setDate(weekEnd.getDate() + 5);
+  const fmt = d => { const dt = new Date(d+'T00:00:00'); return `${dt.getMonth()+1}/${dt.getDate()}`; };
+  const weekLabel = `${fmt(viewStart)} – ${fmt(weekEnd.toISOString().slice(0,10))}`;
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:8px">
+        <button class="btn btn-outline btn-sm" data-action="booking-prev-week">‹ 上週</button>
+        <span style="font-weight:600;font-size:15px">${weekLabel}</span>
+        <button class="btn btn-outline btn-sm" data-action="booking-next-week">下週 ›</button>
+        <button class="btn btn-outline btn-sm" data-action="booking-this-week">本週</button>
+      </div>
+      <div style="display:flex;align-items:center;gap:8px">
+        ${pendingCount > 0 ? `<span class="tag tag-orange">⏳ 待確認 ${pendingCount} 筆</span>` : ''}
+        <button class="btn btn-primary btn-sm" data-action="add-booking">+ 新增預約</button>
+      </div>
+    </div>
+
+    <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
+      <table style="width:100%;border-collapse:collapse;min-width:720px">
+        <thead>
+          <tr style="background:var(--surface2)">
+            <th style="width:78px;padding:10px 8px;text-align:center;font-size:12px;color:var(--muted);border-right:1px solid var(--border);border-bottom:2px solid var(--border)">時段</th>
+            ${days.map(d => {
+              const dt = new Date(d + 'T00:00:00');
+              const isToday = d === today;
+              return `<th style="padding:10px 8px;text-align:center;font-size:12px;border-right:1px solid var(--border);border-bottom:2px solid var(--border);min-width:105px;background:${isToday?'var(--accent-light)':'inherit'}">
+                <div style="font-weight:700;color:${isToday?'var(--accent-dark)':'var(--text)'}">
+                  ${dt.getMonth()+1}/${dt.getDate()} (${DAY_ZH[dt.getDay()]})
+                </div>
+                ${isToday ? '<div style="font-size:10px;color:var(--accent-dark);font-weight:600">今天</div>' : ''}
+              </th>`;
+            }).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${BOOKING_SLOTS.map((slot, si) => `
+            <tr>
+              <td style="padding:8px;text-align:center;font-size:11px;color:var(--muted);background:var(--surface2);border-right:1px solid var(--border);border-bottom:1px solid var(--border);white-space:nowrap;font-weight:600">
+                ${slot}<br><span style="font-size:10px;font-weight:400">~${parseInt(slot)+1}:00</span>
+              </td>
+              ${days.map(d => {
+                const key = `${d}_${slot}`;
+                const bks = bookingMap[key] || [];
+                const isPast = d < today;
+                const isConflict = bks.filter(b=>b.status!=='已取消').length > 1;
+                return `<td style="padding:5px;vertical-align:top;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:${isPast?'#fafafa':'#fff'};min-height:64px;cursor:pointer;transition:background .12s"
+                  onclick="if(!event.target.closest('[data-bk-id]'))handleAction('add-booking-slot',null,{date:'${d}',slot:'${slot}'})">
+                  ${isConflict ? `<div style="font-size:10px;color:#e53935;font-weight:700;margin-bottom:3px">⚠️ 衝突</div>` : ''}
+                  ${bks.length === 0
+                    ? `<div style="height:52px;display:flex;align-items:center;justify-content:center;color:#ddd;font-size:11px">${isPast?'':'＋'}</div>`
+                    : bks.map(b => {
+                        const sc = b.status==='已確認' ? {bg:'#e8f5e9',bl:'#4caf50',tc:'#1b5e20'} :
+                                   b.status==='已取消' ? {bg:'#f5f5f5',bl:'#bdbdbd',tc:'#9e9e9e'} :
+                                                         {bg:'#fff8e1',bl:'#ffc107',tc:'#e65100'};
+                        return `<div data-bk-id="${b.id}" onclick="event.stopPropagation();window.modalViewBooking('${b.id}')"
+                          style="background:${sc.bg};border-left:3px solid ${sc.bl};border-radius:4px;padding:5px 6px;margin-bottom:3px;font-size:11px;cursor:pointer;line-height:1.4;${b.status==='已取消'?'opacity:.55;text-decoration:line-through':''}">
+                          <div style="font-weight:700;color:${sc.tc};overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${b.customer_name||'—'}</div>
+                          <div style="color:var(--muted)">${b.phone||''}</div>
+                          <div style="color:var(--muted)">👥${b.attendees||1}　${b.status==='待確認'?'⏳':b.status==='已確認'?'✅':'❌'}</div>
+                        </div>`;
+                      }).join('')
+                  }
+                </td>`;
+              }).join('')}
+            </tr>
+          `).join('')}
+        </tbody>
+      </table>
+    </div>
+
+    <div style="display:flex;gap:14px;margin-top:12px;font-size:12px;flex-wrap:wrap;align-items:center">
+      <div style="display:flex;align-items:center;gap:5px"><div style="width:12px;height:12px;border-radius:2px;background:#fff8e1;border-left:3px solid #ffc107"></div>待確認</div>
+      <div style="display:flex;align-items:center;gap:5px"><div style="width:12px;height:12px;border-radius:2px;background:#e8f5e9;border-left:3px solid #4caf50"></div>已確認</div>
+      <div style="display:flex;align-items:center;gap:5px"><div style="width:12px;height:12px;border-radius:2px;background:#f5f5f5;border-left:3px solid #bdbdbd"></div>已取消</div>
+      <span style="color:var(--muted);margin-left:auto;font-size:11px">點擊空白格可新增預約</span>
+    </div>`;
+}
+
+window.modalAddBooking = function(defaultDate = '', defaultSlot = '') {
+  showModal('新增體驗預約', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>預約日期</label>
+        <input type="date" class="form-control" id="bk-date" value="${defaultDate}" min="${new Date().toISOString().slice(0,10)}">
+      </div>
+      <div class="form-group"><label>時段</label>
+        <select class="form-control" id="bk-slot">
+          ${BOOKING_SLOTS.map(s=>`<option value="${s}" ${s===defaultSlot?'selected':''}>${s} ～ ${parseInt(s)+1}:00</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>會員姓名 *</label><input class="form-control" id="bk-name" placeholder="姓名"></div>
+      <div class="form-group"><label>電話</label><input class="form-control" id="bk-phone" placeholder="0912-345-678"></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>鑑賞人數</label>
+        <select class="form-control" id="bk-attendees">
+          <option value="1">1 人</option><option value="2">2 人</option>
+          <option value="3">3 人</option><option value="4">4 人</option>
+        </select>
+      </div>
+      <div class="form-group"><label>來源</label>
+        <select class="form-control" id="bk-source">
+          <option value="客服登記">客服登記（FB/IG）</option>
+          <option value="電話預約">電話預約</option>
+          <option value="線上預約">線上預約表單</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>想要鑑賞的商品</label>
+      <input class="form-control" id="bk-request" placeholder="例如：庫洛米莫桑石戒指">
+    </div>
+    <div class="form-group"><label>內部備注</label>
+      <input class="form-control" id="bk-notes" placeholder="客人不會看到">
+    </div>
+  `, [
+    { label:'確認新增', primary:true, onclick: async () => {
+      const booking_date = document.getElementById('bk-date').value;
+      const time_slot = document.getElementById('bk-slot').value;
+      const customer_name = document.getElementById('bk-name').value.trim();
+      const phone = document.getElementById('bk-phone').value.trim();
+      const attendees = parseInt(document.getElementById('bk-attendees').value);
+      const request = document.getElementById('bk-request').value.trim();
+      const source = document.getElementById('bk-source').value;
+      const notes = document.getElementById('bk-notes').value.trim();
+      if (!booking_date) { showToast('請選擇日期','error'); return; }
+      if (!customer_name) { showToast('請填入姓名','error'); return; }
+      const { error } = await db.from('experience_bookings').insert({
+        booking_date, time_slot, customer_name, phone, attendees, request, source, notes,
+        status: '待確認', created_by: state.user?.id,
+      });
+      if (error) { showToast('新增失敗：'+error.message,'error'); return; }
+      showToast('預約已登記 ✅'); closeModal(); await loadBooking(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+window.modalViewBooking = function(bookingId) {
+  const b = (state.data.booking?.records||[]).find(r=>r.id===bookingId);
+  if (!b) return;
+  const sc = b.status==='已確認'?'tag-green':b.status==='已取消'?'tag-grey':'tag-orange';
+  showModal('預約詳情', `
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:16px">
+      <div>
+        <div style="font-size:18px;font-weight:700">${b.customer_name||'—'}</div>
+        <div style="font-size:13px;color:var(--muted);margin-top:3px">${b.phone||'—'}</div>
+      </div>
+      <span class="tag ${sc}">${b.status}</span>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px;font-size:13px;margin-bottom:14px;background:var(--surface2);border-radius:8px;padding:12px">
+      <div><span style="color:var(--muted)">日期：</span><strong>${b.booking_date}</strong></div>
+      <div><span style="color:var(--muted)">時段：</span><strong>${b.time_slot} ～ ${parseInt(b.time_slot)+1}:00</strong></div>
+      <div><span style="color:var(--muted)">人數：</span>${b.attendees||1} 人</div>
+      <div><span style="color:var(--muted)">來源：</span>${b.source||'客服登記'}</div>
+    </div>
+    ${b.request ? `<div style="background:#e8f5f4;border-radius:6px;padding:10px 12px;margin-bottom:10px;font-size:13px"><span style="font-weight:600;color:var(--accent-dark)">🛍 想鑑賞：</span>${b.request}</div>` : ''}
+    ${b.notes ? `<div style="background:#fff8e1;border-radius:6px;padding:10px 12px;font-size:13px"><span style="font-weight:600">📝 備注：</span>${b.notes}</div>` : ''}
+  `, [
+    ...(b.status==='待確認' ? [{
+      label:'✅ 確認預約', primary:true, onclick: async () => {
+        await db.from('experience_bookings').update({ status:'已確認' }).eq('id', bookingId);
+        showToast('已確認預約 ✅'); closeModal(); await loadBooking(); renderApp();
+      }
+    }] : []),
+    ...(b.status!=='已取消' ? [{
+      label:'❌ 取消預約', onclick: async () => {
+        if (!confirm('確定要取消這筆預約？')) return;
+        await db.from('experience_bookings').update({ status:'已取消' }).eq('id', bookingId);
+        showToast('已取消預約'); closeModal(); await loadBooking(); renderApp();
+      }
+    }] : []),
+    { label:'關閉', onclick: closeModal },
+  ]);
+};
 
 function renderJournal() {
   const jd = state.data.journal || {};
@@ -15828,7 +16080,7 @@ function renderJournal() {
   const todayView = () => {
     const viewLogs = jd.today || [];
     const submittedIds = new Set(viewLogs.map(l=>l.user_id));
-    const missing = profiles.filter(p => !submittedIds.has(p.id));
+    const missing = profiles.filter(p => p.journal_required && !submittedIds.has(p.id));
     return `
       ${viewLogs.length === 0 && missing.length === 0 ?
         `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>這天還沒有人填寫日誌</p></div></div>` : ''}
@@ -17375,6 +17627,7 @@ const pageRenderers = {
   calendar:   renderCalendar,
   wages:      renderWages,
   vendors:    renderVendors,
+  booking:    renderBooking,
   goldsmith:  renderGoldsmith,
   peripheral: renderPeripheral,
 };
@@ -18876,6 +19129,33 @@ async function handleAction(action, id, dataset) {
       if (!canAdjustStock()) { showToast('您沒有調整庫存的權限', 'error'); break; }
       modalAdjStockCasting(id);
       break;
+    // ── 體驗預約 ──
+    case 'booking-prev-week': {
+      const curr = state.data.booking?.viewWeekStart;
+      const d = new Date((curr||new Date().toISOString().slice(0,10))+'T00:00:00');
+      d.setDate(d.getDate()-7);
+      if (!state.data.booking) state.data.booking = {};
+      state.data.booking.viewWeekStart = d.toISOString().slice(0,10);
+      await loadBooking(); renderApp(); break;
+    }
+    case 'booking-next-week': {
+      const curr = state.data.booking?.viewWeekStart;
+      const d = new Date((curr||new Date().toISOString().slice(0,10))+'T00:00:00');
+      d.setDate(d.getDate()+7);
+      if (!state.data.booking) state.data.booking = {};
+      state.data.booking.viewWeekStart = d.toISOString().slice(0,10);
+      await loadBooking(); renderApp(); break;
+    }
+    case 'booking-this-week': {
+      if (!state.data.booking) state.data.booking = {};
+      state.data.booking.viewWeekStart = _getBookingWeekStart(new Date().toISOString().slice(0,10));
+      await loadBooking(); renderApp(); break;
+    }
+    case 'add-booking':
+      modalAddBooking(); break;
+    case 'add-booking-slot':
+      modalAddBooking(dataset?.date||'', dataset?.slot||''); break;
+
     case 'del-part': {
       const pt = (state.data.parts||[]).find(x=>x.id===id);
       if (!pt) break;
