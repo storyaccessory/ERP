@@ -15941,7 +15941,7 @@ function renderBooking() {
           <button class="btn btn-sm" style="border-radius:0;border:none;padding:5px 14px;border-left:1px solid var(--border);background:${viewMode==='month'?'var(--accent)':'transparent'};color:${viewMode==='month'?'#fff':'var(--text)'}" data-action="booking-view-month">月</button>
         </div>
         <input type="date" class="form-control" style="width:142px;font-size:12px;padding:5px 8px" onchange="window.bookingGotoDate(this.value)" title="跳至日期">
-        ${pendingCount > 0 ? `<span class="tag tag-orange">⏳ 待確認 ${pendingCount} 筆</span>` : ''}
+        ${pendingCount > 0 ? `<span class="tag tag-orange" onclick="window.modalPendingBookings()" style="cursor:pointer;user-select:none" title="點擊查看待確認預約">待確認 ${pendingCount} 筆</span>` : ''}
         <button class="btn btn-primary btn-sm" data-action="add-booking">+ 新增預約</button>
       </div>
     </div>
@@ -16119,9 +16119,9 @@ function _renderBookingWeek(bd, today) {
                   </td>`;
                 }
                 if (isMonRule) {
-                  return `<td style="padding:5px;vertical-align:middle;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:#f5f5f5;cursor:pointer"
-                    onclick="window.modalAddBooking('${d}','${slot}')" title="週一規則封鎖（點此手動新增）">
-                    <div style="text-align:center;font-size:10px;color:#ccc;padding:4px 0">週一保留<br><span style="font-size:9px">點此覆蓋</span></div>
+                  return `<td style="padding:5px;vertical-align:middle;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:#f0f0f0;cursor:pointer"
+                    onclick="window.modalMonRuleOverride('${d}','${slot}')" title="週一保留封鎖（點此可解除）">
+                    <div style="text-align:center;font-size:10px;color:#ccc;padding:6px 0">封鎖</div>
                   </td>`;
                 }
                 return `<td style="padding:5px;vertical-align:top;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:${isPast?'#fafafa':'#fff'};cursor:pointer;position:relative"
@@ -16296,6 +16296,59 @@ window.modalAddBooking = function(defaultDate = '', defaultSlot = '') {
     dateSel.addEventListener('change', checkConflict);
     checkConflict();
   }, 50);
+};
+
+window.modalMonRuleOverride = function(date, slot) {
+  const dt = new Date(date+'T00:00:00');
+  const DAY_ZH_M = ['日','一','二','三','四','五','六'];
+  showModal('週一保留封鎖', `
+    <div style="text-align:center;padding:10px 0 16px">
+      <div style="font-size:16px;font-weight:700">${dt.getMonth()+1}月${dt.getDate()}日（週${DAY_ZH_M[dt.getDay()]}）</div>
+      <div style="font-size:13px;color:var(--muted);margin-top:6px">${slot} ～ ${_slotEnd(slot)}</div>
+      <div style="margin-top:14px;background:#fff8e1;border-radius:8px;padding:10px 12px;font-size:12.5px;color:#7a5a00;text-align:left">
+        此時段為週一 16:00 前保留封鎖。<br>若需開放，請直接新增預約覆蓋。
+      </div>
+    </div>
+  `, [
+    { label:'解除封鎖 → 新增預約', primary: true, onclick: () => { closeModal(); modalAddBooking(date, slot); } },
+    { label:'關閉', onclick: closeModal },
+  ]);
+};
+
+window.modalPendingBookings = function() {
+  const records = state.data.booking?.records || [];
+  const pending = records.filter(r => r.status === '待確認' && r.source !== '人工封鎖')
+    .sort((a,b) => (a.booking_date+a.time_slot).localeCompare(b.booking_date+b.time_slot));
+  const DAY_ZH_P = ['日','一','二','三','四','五','六'];
+  const rows = pending.map(b => {
+    const dt = new Date((b.booking_date||'2000-01-01')+'T00:00:00');
+    const dateLabel = `${dt.getMonth()+1}/${dt.getDate()}（週${DAY_ZH_P[dt.getDay()]}）`;
+    const slotE = _slotEnd(b.time_slot||'13:00');
+    return `
+      <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fffdf8">
+        <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
+          <div>
+            <div style="font-weight:700;font-size:14px">${b.customer_name||'—'} <span style="font-size:12px;font-weight:400;color:var(--muted)">${b.phone||''}</span></div>
+            <div style="font-size:12px;color:var(--muted);margin-top:3px">${dateLabel}　${b.time_slot} ～ ${slotE}　${b.attendees||1}人</div>
+            ${b.request ? `<div style="font-size:12px;color:#555;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px">${b.request}</div>` : ''}
+          </div>
+          <div style="display:flex;gap:6px;flex-shrink:0">
+            <button class="btn btn-primary btn-sm" onclick="closeModal();setTimeout(()=>window.modalViewBooking('${b.id}'),80)">詳情</button>
+            <button class="btn btn-sm" style="background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7" onclick="
+              db.from('experience_bookings').update({status:'已確認'}).eq('id','${b.id}').then(()=>{
+                showToast('已確認');
+                loadBooking().then(()=>{ renderApp(); window.modalPendingBookings(); });
+              })">確認</button>
+          </div>
+        </div>
+      </div>`;
+  }).join('');
+  showModal(`待確認預約（${pending.length} 筆）`,
+    pending.length === 0
+      ? `<div style="text-align:center;padding:24px;color:var(--muted)">目前沒有待確認的預約</div>`
+      : `<div style="max-height:60vh;overflow-y:auto">${rows}</div>`,
+    [{ label:'關閉', onclick: closeModal }]
+  );
 };
 
 window.modalViewBooking = function(bookingId) {
