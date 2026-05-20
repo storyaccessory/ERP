@@ -14567,7 +14567,7 @@ window.modalEditUser = function(userId) {
     <div class="form-group"><label>📝 工作日誌模板</label>
       <select class="form-control" id="eu-journal-tpl">
         <option value="" ${!u.journal_template?'selected':''}>依角色自動（預設）</option>
-        ${Object.entries(JOURNAL_TEMPLATES).map(([k,v])=>`<option value="${k}" ${u.journal_template===k?'selected':''}>${v.icon} ${v.label}</option>`).join('')}
+        ${Object.entries(JOURNAL_TEMPLATES).map(([k,v])=>`<option value="${k}" ${u.journal_template===k?'selected':''}>${v.label}</option>`).join('')}
       </select>
       <div style="font-size:11px;color:var(--muted);margin-top:4px">指定後員工填寫日誌時會看到對應格式的欄位</div>
     </div>
