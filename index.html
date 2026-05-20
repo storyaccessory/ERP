@@ -706,7 +706,7 @@ async function loadDashboard() {
     db.from('cs_records').select('*').eq('reply_status','未回覆'),
     db.from('repair_orders').select('*').not('status','in','("已完成","已寄回","取消")'),
     db.from('dev_projects').select('*').eq('status','進行中'),
-    db.from('experience_bookings').select('id').eq('status','待確認').gte('booking_date', today),
+    db.from('experience_bookings').select('id').eq('status','待確認').neq('source','人工封鎖'),
   ]);
 
   state.data.dashboard = {
@@ -16122,12 +16122,14 @@ function _renderBookingMonth(bd, today) {
             }
 
             const clickable = inMonth;
-            return `<td style="padding:5px 6px;border:1px solid var(--border);vertical-align:top;min-height:64px;background:${bg};cursor:${clickable?'pointer':'default'}"
+            return `<td style="padding:5px 6px;border:1px solid var(--border);vertical-align:top;width:${100/7}%;height:110px;overflow:hidden;background:${bg};cursor:${clickable?'pointer':'default'}"
               onclick="${clickable&&!isHoliday?`window.bookingGotoDate('${d}')`:''}" title="${clickable&&!isHoliday?'點擊切換到週視圖':''}">
+              <div style="height:100%;overflow-y:auto;scrollbar-width:none">
               <div style="font-size:12px;font-weight:${isToday?700:400};color:${inMonth?(isWeekend?'#bbb':'var(--text)'):'#ccc'};${isToday?'display:inline-flex;align-items:center;justify-content:center;background:var(--accent-dark);color:#fff;width:20px;height:20px;border-radius:50%;font-size:11px;':''}">
                 ${dt.getDate()}
               </div>
               ${content}
+              </div>
             </td>`;
           }).join('')}</tr>`).join('')}
         </tbody>
@@ -16487,16 +16489,22 @@ window._pendingDetail = function(bookingId) {
   setTimeout(() => window.modalViewBooking(bookingId), 80);
 };
 
-window.modalPendingBookings = function() {
-  const records = state.data.booking?.records || [];
-  const pending = records.filter(r => r.status === '待確認' && r.source !== '人工封鎖')
-    .sort((a,b) => (a.booking_date+(a.time_slot||'')).localeCompare(b.booking_date+(b.time_slot||'')));
+window._pendingList = []; // 全域快取，供按鈕事件使用
+
+window.modalPendingBookings = async function() {
+  const { data } = await db.from('experience_bookings')
+    .select('*')
+    .eq('status', '待確認')
+    .neq('source', '人工封鎖')
+    .order('booking_date').order('time_slot');
+  window._pendingList = data || [];
+  const pending = window._pendingList;
   const DAY_ZH_P = ['日','一','二','三','四','五','六'];
-  const rows = pending.map(b => {
+  const rows = pending.map((b, idx) => {
     const dt = new Date((b.booking_date||'2000-01-01')+'T00:00:00');
     const dateLabel = `${dt.getMonth()+1}/${dt.getDate()}（週${DAY_ZH_P[dt.getDay()]}）`;
-    const isPickup = b.source === '門市取貨';
-    const slotStr = isPickup ? '門市取貨' : (b.time_slot ? `${b.time_slot} ～ ${_slotEnd(b.time_slot)}` : '—');
+    const isPickup = !b.time_slot || b.source === '門市取貨';
+    const slotStr = isPickup ? '門市取貨' : `${b.time_slot} ～ ${_slotEnd(b.time_slot)}`;
     return `
       <div style="border:1px solid var(--border);border-radius:8px;padding:12px 14px;margin-bottom:10px;background:#fffdf8">
         <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:8px">
@@ -16506,18 +16514,41 @@ window.modalPendingBookings = function() {
             ${b.request ? `<div style="font-size:12px;color:#555;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:280px">${b.request}</div>` : ''}
           </div>
           <div style="display:flex;gap:6px;flex-shrink:0">
-            <button class="btn btn-primary btn-sm" onclick="window._pendingDetail('${b.id}')">詳情</button>
-            <button class="btn btn-sm" style="background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7" onclick="window._pendingConfirm('${b.id}')">確認</button>
+            <button class="btn btn-primary btn-sm" data-pending-idx="${idx}" data-pending-action="detail">詳情</button>
+            <button class="btn btn-sm" style="background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7" data-pending-idx="${idx}" data-pending-action="confirm">確認</button>
           </div>
         </div>
       </div>`;
   }).join('');
-  showModal(`待確認預約（${pending.length} 筆）`,
+
+  const overlay = showModal(`待確認預約（${pending.length} 筆）`,
     pending.length === 0
       ? `<div style="text-align:center;padding:24px;color:var(--muted)">目前沒有待確認的預約</div>`
       : `<div style="max-height:60vh;overflow-y:auto">${rows}</div>`,
     [{ label:'關閉', onclick: closeModal }]
   );
+
+  // 用事件委派綁定，完全避免 inline onclick 問題
+  overlay?.querySelector('.modal-body')?.addEventListener('click', async (e) => {
+    const btn = e.target.closest('[data-pending-action]');
+    if (!btn) return;
+    const idx = parseInt(btn.dataset.pendingIdx, 10);
+    const action = btn.dataset.pendingAction;
+    const booking = window._pendingList[idx];
+    if (!booking) return;
+    if (action === 'detail') {
+      closeModal();
+      setTimeout(() => window.modalViewBooking(booking.id), 80);
+    } else if (action === 'confirm') {
+      btn.disabled = true;
+      const { error } = await db.from('experience_bookings').update({ status:'已確認' }).eq('id', booking.id);
+      if (error) { showToast('確認失敗：'+error.message, 'error'); btn.disabled = false; return; }
+      showToast('已確認預約 ✅');
+      await loadBooking();
+      renderApp();
+      window.modalPendingBookings();
+    }
+  });
 };
 
 window.modalViewBooking = async function(bookingId) {
