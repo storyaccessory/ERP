@@ -15733,6 +15733,7 @@ function _jnlCoreFields(placeholders = {}) {
       label: '✅ 今日完成',
       color: '#10b981',
       rows: 4,
+      hasQty: true,
       placeholder: placeholders.completed || '今天完成了哪些事？一行一件，動詞開頭',
     },
     {
@@ -15770,8 +15771,8 @@ const JOURNAL_TEMPLATES = {
         issues:      '例：商品素材不足、AI 生成風格不穩定、素材待攝影提供',
         help_needed: '例：主視覺方向需確認、發布時間需主管決策',
       }),
-      { key:'design_output', label:'🎨 設計產出', color:'#06b6d4', rows:2,
-        placeholder:'例：完稿 3 件、修改 5 件、草稿 2 件' },
+      { key:'design_output', label:'🎨 設計產出', color:'#06b6d4', rows:2, hasQty:true,
+        placeholder:'完稿、修改、草稿…' },
     ]
   },
   visual_designer_lead: {
@@ -15798,8 +15799,8 @@ const JOURNAL_TEMPLATES = {
         issues:      '例：銀料硬度異常、模具耗損需更換、2 件需返工',
         help_needed: '例：急件排序需確認、材料補貨需主管核准',
       }),
-      { key:'output_count', label:'🔢 今日產量', color:'#f97316', rows:1,
-        placeholder:'例：共 13 件（戒指 8、項鍊 5）' },
+      { key:'output_count', label:'🔢 今日產量', color:'#f97316', rows:1, hasQty:true,
+        placeholder:'例：戒指、項鍊、手鍊…' },
     ]
   },
   goldsmith_lead: {
@@ -15851,6 +15852,43 @@ const ROLE_TO_JOURNAL_TEMPLATE = {
   cs:              'general',
   general:         'general',
 };
+
+// 工作日誌欄位內容 → 條列顯示
+// 支援新格式（陣列 [{desc,qty}]）與舊格式（字串，向後相容）
+function _fmtJnlField(val) {
+  if (!val) return '';
+  const esc = s => String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  let items = []; // [{desc, qty}]
+
+  if (Array.isArray(val)) {
+    // 新格式
+    items = val.filter(i => i && i.desc && i.desc.trim()).map(i => ({ desc: i.desc.trim(), qty: (i.qty||'').trim() }));
+  } else if (typeof val === 'string' && val.trim()) {
+    // 舊格式：字串 → 解析成 items
+    let parts = val.split(/[\n、]/).map(s => s.trim()).filter(Boolean);
+    if (parts.length === 1) {
+      const bySpace = val.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+      if (bySpace.length > 1) parts = bySpace;
+    }
+    items = parts.map(desc => ({ desc, qty: '' }));
+  }
+
+  if (items.length === 0) return '';
+
+  if (items.length === 1) {
+    const { desc, qty } = items[0];
+    const qtyTag = qty ? ` <span style="background:#f0f0f0;border-radius:4px;padding:0 6px;font-size:11px;color:#666;font-weight:600">${esc(qty)}</span>` : '';
+    return `<div style="font-size:13px;line-height:1.7">${esc(desc)}${qtyTag}</div>`;
+  }
+
+  return `<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.9">
+    ${items.map(({ desc, qty }) => {
+      const qtyTag = qty ? ` <span style="background:#f0f0f0;border-radius:4px;padding:0 6px;font-size:11px;color:#666;font-weight:600">${esc(qty)}</span>` : '';
+      return `<li style="margin-bottom:2px">${esc(desc)}${qtyTag}</li>`;
+    }).join('')}
+  </ul>`;
+}
 
 function _getMyTemplate(jd) {
   const myId = state.user?.id;
@@ -16743,9 +16781,9 @@ function renderJournal() {
             </div>
             ${filledFields.map(f => {
               const val = fields[f.key] || log[f.key];
-              return val ? `<div style="margin-bottom:8px">
-                <div style="font-size:11px;font-weight:600;color:${f.color};margin-bottom:3px">${f.label}</div>
-                <div style="font-size:13px;white-space:pre-wrap;line-height:1.5">${val}</div>
+              return val ? `<div style="margin-bottom:10px">
+                <div style="font-size:11px;font-weight:600;color:${f.color};margin-bottom:4px">${f.label}</div>
+                ${_fmtJnlField(val)}
               </div>` : '';
             }).join('')}
             ${myTasks.length > 0 ? `
@@ -16851,8 +16889,8 @@ function renderJournal() {
               ${filledFields.map(f => {
                 const val = fields[f.key] || log[f.key];
                 return val ? `<div>
-                  <div style="color:${f.color};font-weight:600;margin-bottom:3px">${f.label}</div>
-                  <div style="white-space:pre-wrap;line-height:1.5">${val}</div>
+                  <div style="color:${f.color};font-weight:600;margin-bottom:4px">${f.label}</div>
+                  ${_fmtJnlField(val)}
                 </div>` : '';
               }).join('')}
             </div>
@@ -16893,10 +16931,31 @@ window.loadJournalForDate = async function(date) {
   renderApp();
 };
 
+// 新增一行日誌項目到指定欄位容器
+window._jnlAddRow = function(fieldKey, hasQty, descVal='', qtyVal='') {
+  const container = document.getElementById(`jnl-rows-${fieldKey}`);
+  if (!container) return;
+  const row = document.createElement('div');
+  row.style.cssText = 'display:flex;gap:6px;margin-bottom:6px;align-items:center';
+  row.innerHTML = `
+    <input class="form-control jnl-desc" data-field="${fieldKey}"
+      value="${descVal.replace(/"/g,'&quot;')}"
+      placeholder="描述內容"
+      style="flex:1;font-size:13px">
+    ${hasQty ? `<input class="form-control jnl-qty" data-field="${fieldKey}"
+      value="${qtyVal.replace(/"/g,'&quot;')}"
+      placeholder="數量"
+      style="width:76px;font-size:13px">` : ''}
+    <button onclick="this.parentElement.remove()"
+      style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:20px;line-height:1;padding:0 3px"
+      title="刪除此行">×</button>`;
+  container.appendChild(row);
+};
+
 window.modalEditJournal = async function(existingId = null) {
   const jd = state.data.journal || {};
   const myId = state.user?.id;
-  const today = new Date().toISOString().slice(0,10);
+  const today = _localToday();
   let existing = null;
   if (existingId) {
     existing = (jd.history||[]).find(l=>l.id===existingId);
@@ -16915,25 +16974,40 @@ window.modalEditJournal = async function(existingId = null) {
       📅 ${logDate} &nbsp;·&nbsp; ${myName}
     </div>
     ${tpl.fields.map(f => `
-    <div class="form-group">
-      <label style="color:${f.color};font-weight:600;font-size:13px">${f.label}</label>
-      <textarea class="form-control jnl-field" data-field="${f.key}" rows="${f.rows||2}" placeholder="${f.placeholder||''}">${existingFields[f.key]||existing?.[f.key]||''}</textarea>
+    <div class="form-group" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+        <label style="color:${f.color};font-weight:600;font-size:13px;margin:0">${f.label}</label>
+        ${f.hasQty ? `<span style="font-size:10px;color:var(--muted)">描述 + 數量</span>` : `<span style="font-size:10px;color:var(--muted)">描述</span>`}
+      </div>
+      <div id="jnl-rows-${f.key}"></div>
+      <button type="button"
+        onclick="window._jnlAddRow('${f.key}', ${!!f.hasQty})"
+        style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer;margin-top:2px">
+        + 新增一項
+      </button>
     </div>`).join('')}
-    <div style="font-size:11px;color:var(--muted);text-align:right;margin-top:-4px">建議 3～5 分鐘完成，簡短清楚即可 ✍️</div>
+    <div style="font-size:11px;color:var(--muted);text-align:right">建議 3～5 分鐘完成，簡短清楚即可 ✍️</div>
   `, [
     { label:'送出日誌', primary:true, onclick: async () => {
       const fields = {};
-      document.querySelectorAll('.jnl-field').forEach(el => {
-        const v = el.value.trim();
-        if (v) fields[el.dataset.field] = v;
+      tpl.fields.forEach(f => {
+        const container = document.getElementById(`jnl-rows-${f.key}`);
+        if (!container) return;
+        const rows = container.querySelectorAll('div');
+        const items = [];
+        rows.forEach(row => {
+          const descEl = row.querySelector('.jnl-desc');
+          const qtyEl  = row.querySelector('.jnl-qty');
+          const desc = descEl?.value.trim() || '';
+          const qty  = qtyEl?.value.trim()  || '';
+          if (desc) items.push(f.hasQty ? { desc, qty } : { desc });
+        });
+        if (items.length > 0) fields[f.key] = items;
       });
       const payload = {
-        user_id: myId,
-        user_name: myName,
-        date: logDate,
-        template_type: tplKey,
-        fields,
-        updated_at: new Date().toISOString(),
+        user_id: myId, user_name: myName,
+        date: logDate, template_type: tplKey,
+        fields, updated_at: new Date().toISOString(),
       };
       if (existing) {
         await db.from('work_journals').update(payload).eq('id', existing.id);
@@ -16944,6 +17018,30 @@ window.modalEditJournal = async function(existingId = null) {
     }},
     { label:'取消', onclick: closeModal },
   ]);
+
+  // 預填現有資料
+  setTimeout(() => {
+    tpl.fields.forEach(f => {
+      const raw = existingFields[f.key];
+      let items = [];
+      if (raw) {
+        if (Array.isArray(raw)) {
+          items = raw.filter(i => i?.desc);
+        } else if (typeof raw === 'string') {
+          // 舊格式字串 → 解析成行
+          let parts = raw.split(/[\n、]/).map(s => s.trim()).filter(Boolean);
+          if (parts.length === 1) {
+            const bySpace = raw.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+            if (bySpace.length > 1) parts = bySpace;
+          }
+          items = parts.map(desc => ({ desc, qty: '' }));
+        }
+      }
+      // 沒資料時給一個空行
+      if (items.length === 0) items = [{ desc: '', qty: '' }];
+      items.forEach(item => window._jnlAddRow(f.key, !!f.hasQty, item.desc||'', item.qty||''));
+    });
+  }, 60);
 };
 
 // ══════════════════════════════════════════════
