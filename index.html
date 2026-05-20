@@ -15860,8 +15860,8 @@ function _sisterSlot(slot) {
 
 function _getBookingWeekStart(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
-  const dow = d.getDay();
-  d.setDate(d.getDate() - (dow === 0 ? 6 : dow - 1));
+  const dow = d.getDay(); // 0=Sun → offset 0, 1=Mon → offset 1, …
+  d.setDate(d.getDate() - dow);
   return d.toISOString().slice(0,10);
 }
 
@@ -15951,11 +15951,12 @@ function renderBooking() {
 function _renderBookingMonth(bd, today) {
   const records = bd.records || [];
   const viewMonthStart = bd.viewMonthStart || today.slice(0,7) + '-01';
-  const DAY_ZH = ['一','二','三','四','五','六','日'];
+  // Sunday-first: 日一二三四五六
+  const DAY_ZH = ['日','一','二','三','四','五','六'];
   const mn = new Date(viewMonthStart + 'T00:00:00');
   const year = mn.getFullYear(), month = mn.getMonth();
-  const firstDow = mn.getDay();
-  const startOffset = firstDow === 0 ? 6 : firstDow - 1;
+  const firstDow = mn.getDay(); // 0=Sun with Sunday-first grid
+  const startOffset = firstDow; // Sun=0 offset, Mon=1 offset, etc.
   const gridStart = new Date(mn.getTime() - startOffset * 86400000);
 
   const cells = [];
@@ -15966,12 +15967,11 @@ function _renderBookingMonth(bd, today) {
     if (last7.every(d => new Date(d+'T00:00:00').getMonth() !== month)) cells.splice(-7); else break;
   }
 
-  const dayMap = {};
+  // Build a per-day record list
+  const dayBookings = {};
   records.forEach(r => {
-    if (!dayMap[r.booking_date]) dayMap[r.booking_date] = { pending:0, confirmed:0, holiday:false, holidayNote:'' };
-    if (r.source === '公休日') { dayMap[r.booking_date].holiday = true; dayMap[r.booking_date].holidayNote = r.notes||''; }
-    else if (r.status === '待確認') dayMap[r.booking_date].pending++;
-    else if (r.status === '已確認') dayMap[r.booking_date].confirmed++;
+    if (!dayBookings[r.booking_date]) dayBookings[r.booking_date] = [];
+    dayBookings[r.booking_date].push(r);
   });
 
   const weeks = [];
@@ -15979,10 +15979,10 @@ function _renderBookingMonth(bd, today) {
 
   return `
     <div style="border-radius:8px;border:1px solid var(--border);overflow:hidden">
-      <table style="width:100%;border-collapse:collapse">
+      <table style="width:100%;border-collapse:collapse;table-layout:fixed">
         <thead>
           <tr style="background:var(--surface2)">
-            ${DAY_ZH.map(d => `<th style="padding:8px;text-align:center;font-size:12px;color:var(--muted);border-bottom:2px solid var(--border);font-weight:600">${d}</th>`).join('')}
+            ${DAY_ZH.map((d,i) => `<th style="padding:8px;text-align:center;font-size:12px;color:${i===0?'#e53935':i===6?'#aaa':'var(--muted)'};border-bottom:2px solid var(--border);font-weight:600">${d}</th>`).join('')}
           </tr>
         </thead>
         <tbody>
@@ -15992,35 +15992,55 @@ function _renderBookingMonth(bd, today) {
             const isWeekend = dow===0||dow===6;
             const inMonth = dt.getMonth()===month;
             const isToday = d===today;
-            const info = dayMap[d]||{};
-            const isHoliday = info.holiday||isWeekend;
+            const allRecs = dayBookings[d]||[];
+            const isHoliday = isWeekend || allRecs.some(r=>r.source==='公休日');
+            const holidayRec = allRecs.find(r=>r.source==='公休日');
             const isPast = d<today;
             let bg = '#fff';
             if (!inMonth) bg='#f8f9fa'; else if (isHoliday) bg='#fff5f5'; else if (isPast) bg='#fafafa';
-            let badge='';
-            if (isHoliday) {
-              const reason = isWeekend ? (dow===6?'週六':'週日') : (info.holidayNote||'公休');
-              badge=`<div style="font-size:10px;color:#e53935;margin-top:3px">${reason}</div>`;
-            } else {
-              if (info.pending>0) badge+=`<span style="display:inline-block;background:#fff8e1;color:#e65100;border-radius:3px;padding:1px 5px;font-size:10px;margin-top:2px;margin-right:2px">⏳${info.pending}</span>`;
-              if (info.confirmed>0) badge+=`<span style="display:inline-block;background:#e8f5e9;color:#1b5e20;border-radius:3px;padding:1px 5px;font-size:10px;margin-top:2px">✅${info.confirmed}</span>`;
+
+            // Active bookings (not holiday/block/cancelled), sorted by time
+            const activeBookings = allRecs
+              .filter(r => r.source!=='公休日' && r.source!=='人工封鎖' && r.status!=='已取消')
+              .sort((a,b) => (a.time_slot||'').localeCompare(b.time_slot||''));
+
+            let content = '';
+            if (isHoliday && !isWeekend && holidayRec) {
+              content = `<div style="font-size:10px;color:#e53935;margin-top:2px">${holidayRec.notes||'公休'}</div>`;
+            } else if (isWeekend) {
+              content = `<div style="font-size:10px;color:#ddd;margin-top:2px">${dow===0?'週日':'週六'}</div>`;
+            } else if (activeBookings.length > 0) {
+              content = activeBookings.map(b => {
+                const isPickup = b.source === '門市取貨';
+                const typeTag = isPickup
+                  ? `<span style="color:#1565c0;font-weight:600">取貨</span>`
+                  : `<span style="color:#2e7d32;font-weight:600">鑑賞</span>`;
+                const timeStr = b.time_slot ? b.time_slot.slice(0,5) : '--:--';
+                const sc = b.status==='已確認' ? '#2e7d32' : '#e65100';
+                return `<div onclick="event.stopPropagation();window.modalViewBooking('${b.id}')"
+                  style="font-size:10.5px;line-height:1.4;padding:2px 3px;margin-top:2px;background:${b.status==='已確認'?'#f0faf1':'#fffde7'};border-radius:3px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${sc}">
+                  ${timeStr} ${typeTag} ${b.customer_name||'—'} ${b.phone||''}
+                </div>`;
+              }).join('');
             }
-            const clickable = inMonth && !isHoliday;
-            return `<td style="padding:6px 8px;border:1px solid var(--border);vertical-align:top;height:70px;width:14.28%;background:${bg};cursor:${clickable?'pointer':'default'}" onclick="${clickable?`window.bookingGotoDate('${d}')`:''}" title="${clickable?'點擊切換到週視圖':''}">
-              <div style="font-size:13px;font-weight:${isToday?700:400};color:${inMonth?'var(--text)':'#bbb'};${isToday?'display:inline-flex;align-items:center;justify-content:center;background:var(--accent-dark);color:#fff;width:22px;height:22px;border-radius:50%;':''}">
+
+            const clickable = inMonth;
+            return `<td style="padding:5px 6px;border:1px solid var(--border);vertical-align:top;min-height:64px;background:${bg};cursor:${clickable?'pointer':'default'}"
+              onclick="${clickable&&!isHoliday?`window.bookingGotoDate('${d}')`:''}" title="${clickable&&!isHoliday?'點擊切換到週視圖':''}">
+              <div style="font-size:12px;font-weight:${isToday?700:400};color:${inMonth?(isWeekend?'#bbb':'var(--text)'):'#ccc'};${isToday?'display:inline-flex;align-items:center;justify-content:center;background:var(--accent-dark);color:#fff;width:20px;height:20px;border-radius:50%;font-size:11px;':''}">
                 ${dt.getDate()}
               </div>
-              ${badge}
+              ${content}
             </td>`;
           }).join('')}</tr>`).join('')}
         </tbody>
       </table>
     </div>
     <div style="display:flex;gap:14px;margin-top:12px;font-size:12px;flex-wrap:wrap">
-      <div style="display:flex;align-items:center;gap:5px"><span style="background:#fff8e1;color:#e65100;border-radius:3px;padding:1px 6px">⏳</span>待確認</div>
-      <div style="display:flex;align-items:center;gap:5px"><span style="background:#e8f5e9;color:#1b5e20;border-radius:3px;padding:1px 6px">✅</span>已確認</div>
-      <div style="display:flex;align-items:center;gap:5px"><span style="background:#fff5f5;color:#e53935;border-radius:3px;padding:1px 6px">公休</span>公休/週末（自動）</div>
-      <span style="color:var(--muted)">點工作日切換到週視圖</span>
+      <div style="display:flex;align-items:center;gap:5px"><span style="background:#f0faf1;color:#2e7d32;border-radius:3px;padding:1px 6px">已確認</span></div>
+      <div style="display:flex;align-items:center;gap:5px"><span style="background:#fffde7;color:#e65100;border-radius:3px;padding:1px 6px">待確認</span></div>
+      <div style="display:flex;align-items:center;gap:5px"><span style="background:#fff5f5;color:#e53935;border-radius:3px;padding:1px 6px">公休</span>週末/公休</div>
+      <span style="color:var(--muted)">點工作日切換到週視圖；點預約列開啟詳情</span>
     </div>`;
 }
 
@@ -16046,10 +16066,10 @@ function _renderBookingWeek(bd, today) {
 
   return `
     <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
-      <table style="width:100%;border-collapse:collapse;min-width:600px">
+      <table style="width:100%;border-collapse:collapse;min-width:600px;table-layout:fixed">
         <thead>
           <tr style="background:var(--surface2)">
-            <th style="width:82px;padding:10px 8px;text-align:center;font-size:12px;color:var(--muted);border-right:1px solid var(--border);border-bottom:2px solid var(--border)">時段</th>
+            <th style="width:72px;padding:10px 4px;text-align:center;font-size:12px;color:var(--muted);border-right:1px solid var(--border);border-bottom:2px solid var(--border)">時段</th>
             ${days.map(d => {
               const dt = new Date(d + 'T00:00:00');
               const dow = dt.getDay();
@@ -16060,7 +16080,7 @@ function _renderBookingWeek(bd, today) {
               const holidayNote = isHoliday ? (dayRecords.find(r=>r.source==='公休日')?.notes || '公休') : '';
               const bgColor = isHoliday ? '#fef3f3' : isWeekend ? '#f5f5f5' : isToday ? 'var(--accent-light)' : 'inherit';
               const txtColor = isHoliday ? '#e53935' : isWeekend ? '#bbb' : isToday ? 'var(--accent-dark)' : 'var(--text)';
-              return `<th style="padding:8px 6px;text-align:center;font-size:12px;border-right:1px solid var(--border);border-bottom:2px solid var(--border);min-width:110px;background:${bgColor}">
+              return `<th style="padding:8px 4px;text-align:center;font-size:12px;border-right:1px solid var(--border);border-bottom:2px solid var(--border);width:calc((100% - 72px)/7);background:${bgColor}">
                 <div style="font-weight:700;color:${txtColor}">
                   ${dt.getMonth()+1}/${dt.getDate()} (${DAY_ZH[dt.getDay()]})
                 </div>
@@ -16422,7 +16442,89 @@ window.modalViewBooking = function(bookingId) {
         showToast('已取消預約'); closeModal(); await loadBooking(); renderApp();
       }
     }] : []),
+    { label:'✏️ 編輯', onclick: () => { closeModal(); setTimeout(()=>window.modalEditBooking(bookingId), 80); } },
     { label:'關閉', onclick: closeModal },
+  ]);
+};
+
+// 編輯預約
+window.modalEditBooking = function(bookingId) {
+  const b = (state.data.booking?.records||[]).find(r=>r.id===bookingId);
+  if (!b) return;
+  const STATUS_OPTS = ['待確認','已確認','已取消'];
+  showModal('✏️ 編輯預約', `
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>預約日期</label>
+        <input type="date" class="form-control" id="eb-date" value="${b.booking_date||''}">
+      </div>
+      <div class="form-group"><label>時段（每次30分鐘）</label>
+        <select class="form-control" id="eb-slot">
+          ${BOOKING_SLOTS.map(s=>`<option value="${s}" ${s===b.time_slot?'selected':''}>${s} ～ ${_slotEnd(s)}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>會員姓名 *</label>
+        <input class="form-control" id="eb-name" value="${b.customer_name||''}">
+      </div>
+      <div class="form-group"><label>電話</label>
+        <input class="form-control" id="eb-phone" value="${b.phone||''}">
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
+      <div class="form-group"><label>鑑賞人數</label>
+        <select class="form-control" id="eb-attendees">
+          <option value="1" ${(b.attendees||1)==1?'selected':''}>1 人</option>
+          <option value="2" ${(b.attendees||1)==2?'selected':''}>2 人</option>
+          <option value="3" ${(b.attendees||1)==3?'selected':''}>3 人</option>
+          <option value="4" ${(b.attendees||1)==4?'selected':''}>4 人</option>
+        </select>
+      </div>
+      <div class="form-group"><label>來源</label>
+        <select class="form-control" id="eb-source">
+          <option value="客服登記" ${b.source==='客服登記'?'selected':''}>客服登記（FB/IG）</option>
+          <option value="電話預約" ${b.source==='電話預約'?'selected':''}>電話預約</option>
+          <option value="線上預約" ${b.source==='線上預約'?'selected':''}>線上預約表單</option>
+        </select>
+      </div>
+      <div class="form-group"><label>狀態</label>
+        <select class="form-control" id="eb-status">
+          ${STATUS_OPTS.map(s=>`<option value="${s}" ${s===b.status?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-group"><label>🛍 想要鑑賞的商品</label>
+      <input class="form-control" id="eb-request" value="${(b.request||'').replace(/"/g,'&quot;')}" placeholder="角色／系列／商品名稱">
+    </div>
+    <div class="form-group"><label>🔗 商品參考連結（選填）</label>
+      <input class="form-control" id="eb-product-link" value="${(b.product_link||'').replace(/"/g,'&quot;')}" placeholder="官網商品連結或截圖網址">
+    </div>
+    <div class="form-group"><label>內部備注</label>
+      <input class="form-control" id="eb-notes" value="${(b.notes||'').replace(/"/g,'&quot;')}" placeholder="客人不會看到">
+    </div>
+  `, [
+    { label:'💾 儲存修改', primary:true, onclick: async () => {
+      const booking_date   = document.getElementById('eb-date').value;
+      const time_slot      = document.getElementById('eb-slot').value;
+      const customer_name  = document.getElementById('eb-name').value.trim();
+      const phone          = document.getElementById('eb-phone').value.trim();
+      const attendees      = parseInt(document.getElementById('eb-attendees').value);
+      const source         = document.getElementById('eb-source').value;
+      const status         = document.getElementById('eb-status').value;
+      const request        = document.getElementById('eb-request').value.trim();
+      const product_link   = document.getElementById('eb-product-link').value.trim();
+      const notes          = document.getElementById('eb-notes').value.trim();
+      if (!booking_date)   { showToast('請選擇日期','error'); return; }
+      if (!customer_name)  { showToast('請填入姓名','error'); return; }
+      const { error } = await db.from('experience_bookings').update({
+        booking_date, time_slot, customer_name, phone, attendees,
+        source, status, request: request||null,
+        product_link: product_link||null, notes: notes||null,
+      }).eq('id', bookingId);
+      if (error) { showToast('儲存失敗：'+error.message,'error'); return; }
+      showToast('預約已更新 ✅'); closeModal(); await loadBooking(); renderApp();
+    }},
+    { label:'取消', onclick: () => { closeModal(); setTimeout(()=>window.modalViewBooking(bookingId), 80); } },
   ]);
 };
 
