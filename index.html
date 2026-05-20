@@ -17153,7 +17153,8 @@ window.modalEditJournal = async function(existingId = null) {
 // ══════════════════════════════════════════════
 // 每日出貨統計
 // ══════════════════════════════════════════════
-async function loadShipments() {
+async function loadShipments() { return window.loadShipments(); }
+window.loadShipments = async function() {
   const ym = state.data.shipmentsYm || _localToday().slice(0,7);
   const [start, end] = [`${ym}-01`, `${ym}-31`];
   const [colsRes, rowsRes] = await Promise.all([
@@ -17476,7 +17477,8 @@ window.modalShipmentColumns = async function() {
 // ══════════════════════════════════════════════
 // 郵資支出
 // ══════════════════════════════════════════════
-async function loadPostage() {
+async function loadPostage() { return window.loadPostage(); }
+window.loadPostage = async function() {
   const ym = state.data.postageYm || _localToday().slice(0,7);
   const [start, end] = [`${ym}-01`, `${ym}-31`];
   const { data } = await db.from('postage_expenses').select('*').gte('date', start).lte('date', end).order('date');
