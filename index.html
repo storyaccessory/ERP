@@ -15725,73 +15725,118 @@ window.deleteWage = async function(id) {
 // ══════════════════════════════════════════════
 
 // ─── 模板定義 ───────────────────────────────
+// ─── 核心欄位（所有角色相同，只有 placeholder 不同）───────────
+function _jnlCoreFields(placeholders = {}) {
+  return [
+    {
+      key: 'completed',
+      label: '✅ 今日完成',
+      color: '#10b981',
+      rows: 4,
+      placeholder: placeholders.completed || '今天完成了哪些事？一行一件，動詞開頭',
+    },
+    {
+      key: 'in_progress',
+      label: '🔄 進行中 / 待跟進',
+      color: '#f59e0b',
+      rows: 3,
+      placeholder: placeholders.in_progress || '尚未完成但有進度的事，說明下一步或卡關原因',
+    },
+    {
+      key: 'issues',
+      label: '⚠️ 問題 / 備注',
+      color: '#ef4444',
+      rows: 2,
+      placeholder: placeholders.issues || '遇到的問題、需協調的事、或其他備忘',
+    },
+    {
+      key: 'help_needed',
+      label: '🙋 需要主管協助',
+      color: '#8b5cf6',
+      rows: 2,
+      placeholder: placeholders.help_needed || '需要主管決定或協助的事項（沒有可留空）',
+    },
+  ];
+}
+
 const JOURNAL_TEMPLATES = {
   visual_designer: {
     label: '視覺設計師',
     icon: '🎨',
     fields: [
-      { key:'completed',   label:'✅ 今日完成',         color:'#10b981', placeholder:'例：Banner 初稿 x2、商品修圖 15 張、IG 貼文排版完成', rows:3 },
-      { key:'in_progress', label:'🔄 進行中',            color:'#f59e0b', placeholder:'例：聯名頁面視覺調整中', rows:2 },
-      { key:'blockers',    label:'⚠️ 卡點 / 需協助',    color:'#ef4444', placeholder:'例：商品素材不足、AI 生成風格不穩定', rows:2 },
-      { key:'planned',     label:'📌 明日預計',          color:'#6366f1', placeholder:'例：完成主視覺第二版', rows:2 },
-      { key:'help_needed', label:'🙋 需要主管協助',      color:'#8b5cf6', placeholder:'有需要主管決策或協助的事項…', rows:2 },
+      ..._jnlCoreFields({
+        completed:   '例：商品修圖 15 張、Banner 初稿 x2、IG 貼文排版完成',
+        in_progress: '例：聯名頁面視覺調整中（預計明天完成）',
+        issues:      '例：商品素材不足、AI 生成風格不穩定、素材待攝影提供',
+        help_needed: '例：主視覺方向需確認、發布時間需主管決策',
+      }),
+      { key:'design_output', label:'🎨 設計產出', color:'#06b6d4', rows:2,
+        placeholder:'例：完稿 3 件、修改 5 件、草稿 2 件' },
     ]
   },
   visual_designer_lead: {
     label: '視覺設計主管',
     icon: '🎨👑',
     fields: [
-      { key:'team_progress', label:'👥 今日團隊進度',    color:'#10b981', placeholder:'例：A 完成 Banner、B 修圖進度延後', rows:3 },
-      { key:'risks',         label:'⚠️ 目前風險 / 問題', color:'#ef4444', placeholder:'例：Reels 素材不足、聯名修改次數偏高', rows:2 },
-      { key:'coordinated',   label:'🤝 已協調事項',      color:'#06b6d4', placeholder:'例：與行銷確認方向、與金工安排拍攝', rows:2 },
-      { key:'planned',       label:'📌 明日重點',        color:'#6366f1', placeholder:'例：完成新品頁統整', rows:2 },
-      { key:'help_needed',   label:'🙋 需要協助',        color:'#8b5cf6', placeholder:'', rows:2 },
+      ..._jnlCoreFields({
+        completed:   '例：A 完成 Banner、主視覺第二版確認、與行銷開會',
+        in_progress: '例：聯名頁面視覺調整中、新品主視覺待素材',
+        issues:      '例：Reels 素材不足、修改次數偏高、某設計師進度落後',
+        help_needed: '例：聯名合作方向需業主確認、預算追加需主管批准',
+      }),
+      { key:'team_status', label:'👥 團隊狀況', color:'#06b6d4', rows:2,
+        placeholder:'例：整體進度正常；B 因素材延誤、預計後天補交' },
     ]
   },
   goldsmith: {
     label: '金工人員',
     icon: '🔨',
     fields: [
-      { key:'completed',     label:'✅ 今日完成件數',    color:'#10b981', placeholder:'例：戒指 8 件、項鍊 5 件', rows:2 },
-      { key:'work_content',  label:'🔨 製作內容',        color:'#f59e0b', placeholder:'例：焊接、拋光、鑲石', rows:2 },
-      { key:'blockers',      label:'⚠️ 異常 / 問題',    color:'#ef4444', placeholder:'例：銀料硬度異常、模具耗損', rows:2 },
-      { key:'pending',       label:'📋 待處理事項',      color:'#f97316', placeholder:'例：客訂修改 2 件', rows:2 },
-      { key:'help_needed',   label:'🙋 需要主管協助',    color:'#8b5cf6', placeholder:'', rows:2 },
+      ..._jnlCoreFields({
+        completed:   '例：戒指 8 件、項鍊 5 件（請盡量寫件數）',
+        in_progress: '例：客訂酷洛米戒指 x2 焊接中、拋光待確認',
+        issues:      '例：銀料硬度異常、模具耗損需更換、2 件需返工',
+        help_needed: '例：急件排序需確認、材料補貨需主管核准',
+      }),
+      { key:'output_count', label:'🔢 今日產量', color:'#f97316', rows:1,
+        placeholder:'例：共 13 件（戒指 8、項鍊 5）' },
     ]
   },
   goldsmith_lead: {
     label: '金工主管',
     icon: '🔨👑',
     fields: [
-      { key:'line_status',   label:'🏭 今日產線狀況',    color:'#10b981', placeholder:'例：完成率 85%、客訂進度正常', rows:2 },
-      { key:'anomalies',     label:'⚠️ 異常回報',        color:'#ef4444', placeholder:'例：模具需更換、某工序耗時增加', rows:2 },
-      { key:'quality',       label:'🔍 品質狀況',        color:'#f59e0b', placeholder:'例：2 件需返工', rows:2 },
-      { key:'manpower',      label:'👷 人力狀況',        color:'#06b6d4', placeholder:'例：新人速度偏慢', rows:2 },
-      { key:'planned',       label:'📌 明日安排',        color:'#6366f1', placeholder:'例：優先處理急單', rows:2 },
-      { key:'help_needed',   label:'🙋 需要協助',        color:'#8b5cf6', placeholder:'', rows:2 },
+      ..._jnlCoreFields({
+        completed:   '例：完成率 90%、急單 3 件出貨、品檢完成',
+        in_progress: '例：新款樣品打版中、客訂 5 件預計明日完成',
+        issues:      '例：模具耗損、某工序耗時增加、2 件返工、人力偏緊',
+        help_needed: '例：材料採購需授權、急件插單需業主確認',
+      }),
+      { key:'line_summary', label:'🏭 產線摘要', color:'#06b6d4', rows:2,
+        placeholder:'例：今日總產量 45 件，品質正常，人力充足' },
     ]
   },
   admin_ops: {
     label: '營運行政',
     icon: '📋',
     fields: [
-      { key:'completed',     label:'✅ 今日完成',         color:'#10b981', placeholder:'例：對帳完成、出貨單整理、廠商聯繫', rows:3 },
-      { key:'tracking',      label:'🔍 待追蹤事項',       color:'#f59e0b', placeholder:'例：授權合約回覆中、廠商報價未回', rows:2 },
-      { key:'anomalies',     label:'⚠️ 異常事項',         color:'#ef4444', placeholder:'例：平台訂單同步異常、延遲出貨 3 筆', rows:2 },
-      { key:'planned',       label:'📌 明日重點',         color:'#6366f1', placeholder:'例：完成請款資料', rows:2 },
-      { key:'help_needed',   label:'🙋 需要主管協助',     color:'#8b5cf6', placeholder:'', rows:2 },
+      ..._jnlCoreFields({
+        completed:   '例：對帳完成、出貨單整理、廠商款項轉帳',
+        in_progress: '例：授權合約回覆中（等對方確認）、廠商報價未回',
+        issues:      '例：平台訂單同步異常、延遲出貨 3 筆、系統問題待解',
+        help_needed: '例：請款資料需主管簽核、廠商糾紛需決策',
+      }),
     ]
   },
   general: {
     label: '一般員工',
     icon: '📝',
-    fields: [
-      { key:'completed',     label:'✅ 今日完成',         color:'#10b981', placeholder:'今天完成了哪些事？', rows:3 },
-      { key:'in_progress',   label:'🔄 目前進度',         color:'#f59e0b', placeholder:'目前正在進行的工作', rows:2 },
-      { key:'blockers',      label:'⚠️ 卡點 / 問題',     color:'#ef4444', placeholder:'是否有遇到困難或等待事項？', rows:2 },
-      { key:'planned',       label:'📌 明日預計',         color:'#6366f1', placeholder:'明天打算做什麼？', rows:2 },
-      { key:'help_needed',   label:'🙋 需要主管協助',     color:'#8b5cf6', placeholder:'需要什麼幫助？', rows:2 },
-    ]
+    fields: _jnlCoreFields({
+      completed:   '今天完成了哪些事？一行一件，動詞開頭（例：處理客服 5 件、整理庫存）',
+      in_progress: '目前正在進行的工作，說明進度或下一步',
+      issues:      '遇到的問題、需協調的事，或其他備忘',
+      help_needed: '需要主管協助的事（沒有可留空）',
+    }),
   },
 };
 
@@ -16865,10 +16910,9 @@ window.modalEditJournal = async function(existingId = null) {
   const tpl = JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
   const existingFields = existing?.fields || {};
 
-  showModal(`${tpl.icon} ${existing?'修改':'填寫'}工作日誌`, `
-    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">
-      <div style="font-size:13px;color:var(--muted)">📅 ${logDate} · ${myName}</div>
-      <span style="font-size:12px;padding:3px 10px;background:var(--surface2);border-radius:12px;color:var(--accent-dark);font-weight:600">${tpl.label}</span>
+  showModal(`${existing?'修改':'填寫'}工作日誌`, `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">
+      📅 ${logDate} &nbsp;·&nbsp; ${myName}
     </div>
     ${tpl.fields.map(f => `
     <div class="form-group">
