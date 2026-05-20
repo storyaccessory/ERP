@@ -549,6 +549,7 @@ function showToast(msg, type = 'success', duration = 3000) {
   document.body.appendChild(t);
   setTimeout(() => t.remove(), duration);
 }
+window.showToast = showToast;
 
 // ═══════════════════════════════════════════
 // Navigation
@@ -617,6 +618,7 @@ function nav(page) {
   renderApp();
   loadPageData(page);
 }
+window.nav = nav;
 
 // ═══════════════════════════════════════════
 // Auth
@@ -16797,8 +16799,9 @@ window.bookingGotoDate = function(dateStr) {
 
 function renderJournal() {
   const jd = state.data.journal || {};
-  const tab = state.data.journalTab || '今日全覽';
+  const tab = state.data.journalTab || '今日總覽';
   const today = jd.todayDate || _localToday();
+  const yesterday = (() => { const y = new Date(today+'T00:00:00'); y.setDate(y.getDate()-1); return _localDateStr(y); })();
   const todayLogs = jd.today || [];
   const history = jd.history || [];
   const profiles = jd.profiles || [];
@@ -16808,191 +16811,149 @@ function renderJournal() {
   const myLog = todayLogs.find(l => l.user_id === myId);
   const hasSubmitted = !!myLog;
   const myTpl = _getMyTemplate(jd);
-
   const allTodos = jd.todos || [];
   const today3d = new Date(Date.now()+3*86400000).toISOString().slice(0,10);
 
-  // ── 全員日誌總覽 ──
+  // ── 單張日誌 card ──
+  const _jnlCard = (log, { showActions = true } = {}) => {
+    const isMe = log.user_id === myId;
+    const tpl = _getTemplateForLog(log, jd);
+    const fields = log.fields || {};
+    const logProfile = profiles.find(p => p.id === log.user_id);
+    return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div>
+          <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
+          <div style="font-size:11px;color:var(--muted)">${logProfile?.job_title||tpl.label}</div>
+        </div>
+        <div style="font-size:11px;color:var(--muted)">${log.updated_at ? new Date(log.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
+      </div>
+      ${tpl.fields.map(f => {
+        const val = fields[f.key] || log[f.key];
+        const isEmpty = !val || (Array.isArray(val) && val.filter(i=>i?.desc?.trim()).length===0);
+        if (isEmpty && f.key !== 'issues') return '';
+        return `<div style="margin-bottom:10px">
+          <div style="font-size:11px;font-weight:600;color:${f.color};margin-bottom:4px">${f.label}</div>
+          ${isEmpty ? `<div style="font-size:13px;color:var(--muted)">無</div>` : _fmtJnlField(val)}
+        </div>`;
+      }).join('')}
+      ${showActions && (isMe || isAdmin) ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:8px">
+        ${isMe ? `<button class="btn btn-sm btn-outline" onclick="window.modalEditJournal('${log.id}')">✏️ 修改日誌</button>` : ''}
+        ${isAdmin ? `<button class="btn btn-sm btn-outline" style="color:var(--danger);border-color:var(--danger)" onclick="window.deleteJournal('${log.id}','${log.user_name||''}')">🗑 刪除</button>` : ''}
+      </div>` : ''}
+    </div>`;
+  };
+
+  // ── 今日總覽（全員，無篩選） ──
   const todayView = () => {
     const allLogs = jd.today || [];
-    const filterUser = state.data.journalFilterUser || '';
-    const viewLogs = filterUser ? allLogs.filter(l => l.user_id === filterUser) : allLogs;
     const submittedIds = new Set(allLogs.map(l=>l.user_id));
     const missing = profiles.filter(p => p.journal_required && !submittedIds.has(p.id));
-    const filteredMissing = filterUser ? [] : missing;
     return `
-      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-        <span style="font-size:12px;color:var(--muted)">篩選人員：</span>
-        <button class="btn btn-sm ${!filterUser?'btn-primary':'btn-outline'}" onclick="state.data.journalFilterUser='';renderApp()">全部</button>
-        ${profiles.filter(p=>submittedIds.has(p.id)||p.journal_required).map(p=>`
-          <button class="btn btn-sm ${filterUser===p.id?'btn-primary':'btn-outline'}" onclick="state.data.journalFilterUser='${p.id}';renderApp()">${p.name}</button>
-        `).join('')}
-      </div>
-      ${viewLogs.length === 0 && filteredMissing.length === 0 ?
-        `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>${filterUser?'此人員這天沒有填寫日誌':'這天還沒有人填寫日誌'}</p></div></div>` : ''}
+      ${allLogs.length === 0 && missing.length === 0 ?
+        `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>這天還沒有人填寫日誌</p></div></div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
-        ${viewLogs.map(log => {
-          const isMe = log.user_id === myId;
-          const tpl = _getTemplateForLog(log, jd);
-          const fields = log.fields || {};
-          const logProfile = profiles.find(p => p.id === log.user_id);
-          const myTasks = allTodos.filter(t => t.assignee_id === log.user_id);
-          return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-              <div>
-                <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
-                <div style="font-size:11px;color:var(--muted)">${logProfile?.job_title||tpl.label}</div>
-              </div>
-              <div style="font-size:11px;color:var(--muted)">${log.updated_at ? new Date(log.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
-            </div>
-            ${tpl.fields.map(f => {
-              const val = fields[f.key] || log[f.key];
-              const isEmpty = !val || (Array.isArray(val) && val.filter(i=>i?.desc?.trim()).length===0);
-              if (isEmpty && f.key !== 'issues') return '';
-              return `<div style="margin-bottom:10px">
-                <div style="font-size:11px;font-weight:600;color:${f.color};margin-bottom:4px">${f.label}</div>
-                ${isEmpty ? `<div style="font-size:13px;color:var(--muted)">無</div>` : _fmtJnlField(val)}
-              </div>`;
-            }).join('')}
-            ${myTasks.length > 0 ? `
-            <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
-              <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px">📌 手上任務（${myTasks.length} 件未完成）</div>
-              ${myTasks.slice(0,4).map(t => {
-                const over = t.deadline && t.deadline < today;
-                const warn = t.deadline && t.deadline <= today3d && t.deadline >= today;
-                const estOver = t.estimated_completion && t.deadline && t.estimated_completion > t.deadline;
-                return `<div style="font-size:12px;padding:3px 0;display:flex;gap:6px;align-items:start">
-                  <span>${over?'🔴':warn?'🟡':'🟢'}</span>
-                  <div>
-                    <div style="font-weight:500">${t.title}</div>
-                    <div style="color:var(--muted);font-size:11px">
-                      交件：${t.deadline||'未設定'}
-                      ${t.estimated_completion?` · 預計：<span style="color:${estOver?'var(--danger)':'#10b981'}">${t.estimated_completion}${estOver?' ⚠️':''}</span>`:'<span style="color:#f59e0b"> · 預計完成日未填</span>'}
-                    </div>
-                  </div>
-                </div>`;
-              }).join('')}
-              ${myTasks.length > 4 ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">⋯ 還有 ${myTasks.length-4} 件</div>` : ''}
-            </div>` : ''}
-            ${(isMe || isAdmin) ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border);display:flex;gap:8px">
-              ${isMe ? `<button class="btn btn-sm btn-outline" onclick="modalEditJournal()">✏️ 修改日誌</button>` : ''}
-              ${isAdmin ? `<button class="btn btn-sm btn-outline" style="color:var(--danger);border-color:var(--danger)" onclick="window.deleteJournal('${log.id}','${log.user_name||''}')">🗑 刪除</button>` : ''}
-            </div>` : ''}
-          </div>`;
-        }).join('')}
-        ${filteredMissing.map(p => {
-          const myTasks = allTodos.filter(t => t.assignee_id === p.id);
-          return `<div class="card" style="border-left:4px solid var(--border);opacity:.7">
-            <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:4px;margin-bottom:8px">尚未填寫日誌</div>
-            ${myTasks.length > 0 ? `<div style="font-size:11px;color:var(--muted)">${myTasks.length} 件未完成任務 · 最近截止：${myTasks.find(t=>t.deadline)?.deadline||'—'}</div>` : ''}
-          </div>`;
-        }).join('')}
+        ${allLogs.map(log => _jnlCard(log)).join('')}
+        ${missing.map(p => `<div class="card" style="border-left:4px solid var(--border);opacity:.7">
+          <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:4px">尚未填寫日誌</div>
+        </div>`).join('')}
       </div>`;
   };
 
-  // ── 任務總覽 (所有人的待辦) ──
-  const taskOverview = () => {
-    const byPerson = {};
-    profiles.forEach(p => { byPerson[p.name] = { profile: p, tasks: [] }; });
-    allTodos.forEach(t => {
-      const name = t.profiles?.name || '未指派';
-      if (!byPerson[name]) byPerson[name] = { profile: null, tasks: [] };
-      byPerson[name].tasks.push(t);
-    });
-    return `
-      <div style="margin:12px 0 14px;font-size:12px;color:var(--muted)">顯示所有人的未完成任務 · 含交件日與預計完成日</div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
-        ${Object.entries(byPerson).filter(([,v])=>v.tasks.length>0).sort((a,b)=>a[0]>b[0]?1:-1).map(([name, v]) => {
-          const tasks = v.tasks.sort((a,b)=>(a.deadline||'9')>(b.deadline||'9')?1:-1);
-          const overdueN = tasks.filter(t=>t.deadline&&t.deadline<today).length;
-          return `<div class="card">
-            <div style="display:flex;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid var(--border)">
-              <div style="font-size:14px;font-weight:700">${name}</div>
-              <div style="font-size:11px;color:var(--muted)">${tasks.length} 件${overdueN>0?` · <span style="color:var(--danger)">${overdueN} 逾期</span>`:''}</div>
-            </div>
-            ${tasks.map(t => {
-              const over = t.deadline && t.deadline < today;
-              const warn = t.deadline && t.deadline <= today3d && t.deadline >= today;
-              const estOver = t.estimated_completion && t.deadline && t.estimated_completion > t.deadline;
-              return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
-                <div style="font-size:13px;font-weight:500">${over?'🔴':warn?'🟡':'🟢'} ${t.title}</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
-                  <span style="color:${over?'var(--danger)':warn?'#f59e0b':'inherit'}">交件：${t.deadline||'未設定'}</span>
-                  <span style="color:${estOver?'var(--danger)':t.estimated_completion?'#10b981':'#f59e0b'}">
-                    預計：${t.estimated_completion||'未填'}${estOver?' ⚠️超出':''}
-                  </span>
-                </div>
-              </div>`;
-            }).join('')}
-          </div>`;
-        }).join('')}
-        ${Object.values(byPerson).every(v=>v.tasks.length===0)?`<div class="card"><div class="empty"><div class="empty-icon">✅</div><p>目前沒有待辦任務</p></div></div>`:''}
-      </div>`;
-  };
+  // ── 全員歷史記錄 ──
+  const historyView = () => {
+    const filterPerson = state.data.journalHistUser || '';
+    const filterMode   = state.data.journalHistMode  || 'date';  // 'date' | 'range'
+    const filterDate   = state.data.journalHistDate  || yesterday;
+    const filterStart  = state.data.journalHistStart || yesterday;
+    const filterEnd    = state.data.journalHistEnd   || yesterday;
 
-  // ── 歷史記錄（所有人，僅自己可編輯） ──
-  const myView = () => {
+    // 過濾 + 排序
+    let viewLogs = [...history];
+    if (filterPerson) viewLogs = viewLogs.filter(l => l.user_id === filterPerson);
+    if (filterMode === 'date') {
+      viewLogs = viewLogs.filter(l => l.date === filterDate);
+    } else {
+      viewLogs = viewLogs.filter(l => l.date >= filterStart && l.date <= filterEnd);
+    }
+    viewLogs.sort((a,b) => b.date > a.date ? 1 : b.date < a.date ? -1 : 0);
+
     // 依日期分組
     const grouped = {};
-    history.forEach(l => {
-      const d = l.date;
-      if (!grouped[d]) grouped[d] = [];
-      grouped[d].push(l);
+    viewLogs.forEach(l => { if (!grouped[l.date]) grouped[l.date] = []; grouped[l.date].push(l); });
+    const sortedDates = Object.keys(grouped).sort().reverse();
+
+    // 篩選列
+    const personOptions = profiles.filter(p => {
+      const hasHistory = history.some(l => l.user_id === p.id);
+      return hasHistory || p.journal_required;
     });
+
     return `
-      <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
-        <button class="btn btn-primary" onclick="modalEditJournal()">${hasSubmitted?'✏️ 修改今日日誌':'📝 填寫今日日誌'}</button>
-        ${hasSubmitted?`<span style="font-size:12px;color:#10b981">✅ 今日已填寫</span>`:''}
-      </div>
-      ${Object.keys(grouped).sort().reverse().map(date => `
-        <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:18px 0 8px">📅 ${date}</div>
-        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:4px">
-        ${grouped[date].map(log => {
-          const isMe = log.user_id === myId;
-          const tpl = _getTemplateForLog(log, jd);
-          const fields = log.fields || {};
-          const logProfile = profiles.find(p => p.id === log.user_id);
-          return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-              <div>
-                <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
-                <div style="font-size:11px;color:var(--muted)">${logProfile?.job_title||tpl.label}</div>
-              </div>
-              <div style="display:flex;gap:6px">
-                ${isMe ? `<button class="btn btn-sm btn-outline" onclick="modalEditJournal('${log.id}')">編輯</button>` : ''}
-                ${isAdmin ? `<button class="btn btn-sm btn-outline" style="color:var(--danger);border-color:var(--danger)" onclick="window.deleteJournal('${log.id}','${log.user_name||''}')">🗑</button>` : ''}
-              </div>
-            </div>
-            <div style="font-size:12px">
-              ${tpl.fields.map(f => {
-                const val = fields[f.key] || log[f.key];
-                const isEmpty = !val || (Array.isArray(val) && val.filter(i=>i?.desc?.trim()).length===0);
-                if (isEmpty && f.key !== 'issues') return '';
-                return `<div style="margin-bottom:8px">
-                  <div style="color:${f.color};font-weight:600;margin-bottom:4px">${f.label}</div>
-                  ${isEmpty ? `<div style="color:var(--muted)">無</div>` : _fmtJnlField(val)}
-                </div>`;
-              }).join('')}
-            </div>
-          </div>`;
-        }).join('')}
+      <div style="background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:14px 16px;margin-bottom:16px">
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <!-- 人員篩選 -->
+          <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+            <span style="font-size:12px;color:var(--muted);white-space:nowrap">人員：</span>
+            <button class="btn btn-sm ${!filterPerson?'btn-primary':'btn-outline'}"
+              onclick="state.data.journalHistUser='';renderApp()">全部</button>
+            ${personOptions.map(p=>`
+              <button class="btn btn-sm ${filterPerson===p.id?'btn-primary':'btn-outline'}"
+                onclick="state.data.journalHistUser='${p.id}';renderApp()">${p.name}</button>
+            `).join('')}
+          </div>
+          <!-- 日期模式切換 -->
+          <div style="display:flex;align-items:center;gap:6px;margin-left:auto">
+            <button class="btn btn-sm ${filterMode==='date'?'btn-primary':'btn-outline'}"
+              onclick="state.data.journalHistMode='date';renderApp()">單日</button>
+            <button class="btn btn-sm ${filterMode==='range'?'btn-primary':'btn-outline'}"
+              onclick="state.data.journalHistMode='range';renderApp()">區間</button>
+          </div>
         </div>
-      `).join('')}
-      ${history.length===0?`<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>還沒有日誌記錄，來填寫今天的吧！</p></div></div>`:''}`;
+        <!-- 日期輸入 -->
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap">
+          ${filterMode === 'date' ? `
+            <input type="date" class="form-control" style="width:160px"
+              value="${filterDate}"
+              onchange="state.data.journalHistDate=this.value;window.loadJournalHistoryFilter();renderApp()">
+            <button class="btn btn-outline btn-sm"
+              onclick="state.data.journalHistDate='${today}';window.loadJournalHistoryFilter();renderApp()">今天</button>
+            <button class="btn btn-outline btn-sm"
+              onclick="state.data.journalHistDate='${yesterday}';window.loadJournalHistoryFilter();renderApp()">昨天</button>
+          ` : `
+            <input type="date" class="form-control" style="width:140px"
+              value="${filterStart}"
+              onchange="state.data.journalHistStart=this.value;window.loadJournalHistoryFilter();renderApp()">
+            <span style="font-size:13px;color:var(--muted)">—</span>
+            <input type="date" class="form-control" style="width:140px"
+              value="${filterEnd}"
+              onchange="state.data.journalHistEnd=this.value;window.loadJournalHistoryFilter();renderApp()">
+          `}
+          <span style="font-size:12px;color:var(--muted)">${viewLogs.length} 筆</span>
+        </div>
+      </div>
+      ${sortedDates.length === 0
+        ? `<div class="card"><div class="empty"><div class="empty-icon">📋</div><p>這個條件沒有日誌記錄</p></div></div>`
+        : sortedDates.map(date => `
+          <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:18px 0 8px">📅 ${date}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:4px">
+            ${grouped[date].map(log => _jnlCard(log)).join('')}
+          </div>
+        `).join('')
+      }`;
   };
 
   return `
     <div class="tabs" style="margin-bottom:0">
-      <div class="tab ${tab==='今日全覽'?'active':''}" data-journal-tab="今日全覽">👥 全員日誌</div>
-      <div class="tab ${tab==='我的日誌'?'active':''}" data-journal-tab="我的日誌">📋 歷史記錄</div>
-      <div class="tab ${tab==='任務總覽'?'active':''}" data-journal-tab="任務總覽">📌 任務總覽</div>
+      <div class="tab ${tab==='今日總覽'?'active':''}" data-journal-tab="今日總覽">👥 今日總覽</div>
+      <div class="tab ${tab==='全員歷史記錄'?'active':''}" data-journal-tab="全員歷史記錄">📋 全員歷史記錄</div>
     </div>
-    ${tab==='今日全覽' ? `
+    ${tab==='今日總覽' ? `
     <div style="display:flex;align-items:center;gap:10px;padding:12px 0 14px;flex-wrap:wrap">
       <input type="date" class="form-control" style="width:160px" value="${jd.viewDate||today}" onchange="state.data.journal.viewDate=this.value;loadJournalForDate(this.value)">
       <button class="btn btn-outline btn-sm" onclick="state.data.journal.viewDate='${today}';loadJournalForDate('${today}')">今天</button>
-      <button class="btn btn-outline btn-sm" onclick="(()=>{const y=new Date();y.setDate(y.getDate()-1);const yd=_localDateStr(y);state.data.journal.viewDate=yd;loadJournalForDate(yd);})()">昨天</button>
+      <button class="btn btn-outline btn-sm" onclick="(()=>{const y=new Date('${today}'+'T00:00:00');y.setDate(y.getDate()-1);const yd=_localDateStr(y);state.data.journal.viewDate=yd;loadJournalForDate(yd);})()">昨天</button>
       <span style="font-size:12px;color:var(--muted)">${jd.viewDate&&jd.viewDate!==today?`查看：${jd.viewDate}`:'今天'}</span>
     </div>
     ${!hasSubmitted && (jd.viewDate||today)===today ? `
@@ -17001,9 +16962,9 @@ function renderJournal() {
         <div style="font-weight:700;font-size:14px">你今天還沒填寫日誌 📝</div>
         <div style="font-size:12px;opacity:.85;margin-top:2px">${myTpl.icon} ${myTpl.label} 模板 · 約 3～5 分鐘填完</div>
       </div>
-      <button class="btn" style="background:#fff;color:var(--accent-dark);font-weight:700;white-space:nowrap" onclick="modalEditJournal()">立即填寫</button>
+      <button class="btn" style="background:#fff;color:var(--accent-dark);font-weight:700;white-space:nowrap" onclick="window.modalEditJournal()">立即填寫</button>
     </div>` : ''}
-    ${todayView()}` : tab==='任務總覽' ? taskOverview() : myView()}`;
+    ${todayView()}` : historyView()}`;
 }
 
 window.loadJournalForDate = async function(date) {
@@ -17011,6 +16972,22 @@ window.loadJournalForDate = async function(date) {
   state.data.journal.today = data || [];
   state.data.journal.viewDate = date;
   renderApp();
+};
+
+// 全員歷史記錄：依篩選條件重新從 DB 拉資料（避免 300 筆快取不足的情況）
+window.loadJournalHistoryFilter = async function() {
+  const mode  = state.data.journalHistMode  || 'date';
+  const date  = state.data.journalHistDate;
+  const start = state.data.journalHistStart;
+  const end   = state.data.journalHistEnd;
+  let q = db.from('work_journals').select('*').order('date', { ascending: false }).limit(500);
+  if (mode === 'date' && date) {
+    q = q.eq('date', date);
+  } else if (mode === 'range' && start && end) {
+    q = q.gte('date', start).lte('date', end);
+  }
+  const { data } = await q;
+  if (data) state.data.journal.history = data;
 };
 
 // 新增一行日誌項目到指定欄位容器
@@ -17078,6 +17055,27 @@ window.modalEditJournal = async function(existingId = null) {
       </button>
     </div>`).join('')}
     <div style="font-size:11px;color:var(--muted);text-align:right">建議 3～5 分鐘完成，簡短清楚即可 ✍️</div>
+    ${(() => {
+      const myTodos = (jd.todos||[]).filter(t => t.assignee_id === myId);
+      if (myTodos.length === 0) return '';
+      const todayStr = _localToday();
+      const soon3d = new Date(Date.now()+3*86400000).toISOString().slice(0,10);
+      return `<div style="margin-top:16px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📌 你的未完成任務（共 ${myTodos.length} 件）</div>
+        ${myTodos.slice(0,6).map(t => {
+          const over = t.deadline && t.deadline < todayStr;
+          const warn = t.deadline && t.deadline <= soon3d && t.deadline >= todayStr;
+          return `<div style="display:flex;gap:8px;align-items:start;padding:4px 0;border-bottom:1px solid var(--border)">
+            <span style="font-size:13px;flex-shrink:0">${over?'🔴':warn?'🟡':'🟢'}</span>
+            <div style="font-size:12px">
+              <div style="font-weight:500">${t.title}</div>
+              <div style="color:var(--muted);font-size:11px">交件：${t.deadline||'未設定'}${t.estimated_completion?` · 預計完成：${t.estimated_completion}`:''}</div>
+            </div>
+          </div>`;
+        }).join('')}
+        ${myTodos.length > 6 ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;text-align:center">⋯ 還有 ${myTodos.length-6} 件任務</div>` : ''}
+      </div>`;
+    })()}
   `, [
     { label:'送出日誌', primary:true, onclick: async () => {
       const fields = {};
@@ -18283,6 +18281,10 @@ function closeModal() {
   document.getElementById('modal-overlay')?.remove();
 }
 
+// ── 將核心函式掛到 window，讓 HTML inline onclick 可以呼叫 ──
+window.closeModal = closeModal;
+window.db         = db;
+
 function showModal(title, body, footer = '', opts = {}) {
   // footer 可以是 HTML string，或 [{label, primary, onclick}] 的 array
   let footerHtml = '';
@@ -18335,6 +18337,7 @@ function showModal(title, body, footer = '', opts = {}) {
   }
   return overlay;
 }
+window.showModal = showModal;
 
 function modalAddOrder() {
   const today = new Date().toISOString().split('T')[0];
