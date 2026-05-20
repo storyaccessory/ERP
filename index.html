@@ -15911,6 +15911,10 @@ async function loadJournal() {
     db.from('profiles').select('id, name, role, journal_template, journal_required').order('name'),
     db.from('todos').select('*, profiles!todos_assignee_id_fkey(name)').neq('status','完成').order('deadline'),
   ]);
+  // 如有錯誤印到 console 方便除錯
+  if (todayRes.error)   console.error('[journal] today query:', todayRes.error.message);
+  if (histRes.error)    console.error('[journal] history query:', histRes.error.message);
+  if (profilesRes.error) console.error('[journal] profiles query:', profilesRes.error.message);
   state.data.journal = {
     today: todayRes.data || [],
     history: histRes.data || [],
@@ -17015,11 +17019,15 @@ window.modalEditJournal = async function(existingId = null) {
         date: logDate, template_type: tplKey,
         fields, updated_at: new Date().toISOString(),
       };
+      let dbErr;
       if (existing) {
-        await db.from('work_journals').update(payload).eq('id', existing.id);
+        const { error } = await db.from('work_journals').update(payload).eq('id', existing.id);
+        dbErr = error;
       } else {
-        await db.from('work_journals').insert(payload);
+        const { error } = await db.from('work_journals').insert(payload);
+        dbErr = error;
       }
+      if (dbErr) { showToast('儲存失敗：' + dbErr.message, 'error'); return; }
       showToast('日誌已送出！'); closeModal(); await loadJournal(); renderApp();
     }},
     { label:'取消', onclick: closeModal },
