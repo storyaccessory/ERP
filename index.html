@@ -15855,11 +15855,23 @@ function _getBookingWeekStart(dateStr) {
 async function loadBooking() {
   const today = new Date().toISOString().slice(0,10);
   const thisWeekStart = _getBookingWeekStart(today);
+  const viewMode = state.data.booking?.viewMode || 'week';
   const viewWeekStart = state.data.booking?.viewWeekStart || thisWeekStart;
+  const viewMonthStart = state.data.booking?.viewMonthStart || today.slice(0,7) + '-01';
 
-  const viewMon = new Date(viewWeekStart + 'T00:00:00');
-  const rangeStart = new Date(viewMon.getTime() - 7*86400000).toISOString().slice(0,10);
-  const rangeEnd   = new Date(viewMon.getTime() + 20*86400000).toISOString().slice(0,10);
+  let rangeStart, rangeEnd;
+  if (viewMode === 'month') {
+    const mFirst = new Date(viewMonthStart + 'T00:00:00');
+    const firstDow = mFirst.getDay();
+    const daysBack = firstDow === 0 ? 6 : firstDow - 1;
+    rangeStart = new Date(mFirst.getTime() - daysBack*86400000).toISOString().slice(0,10);
+    const mLast = new Date(mFirst.getFullYear(), mFirst.getMonth()+1, 0);
+    rangeEnd   = new Date(mLast.getTime() + 7*86400000).toISOString().slice(0,10);
+  } else {
+    const viewMon = new Date(viewWeekStart + 'T00:00:00');
+    rangeStart = new Date(viewMon.getTime() - 7*86400000).toISOString().slice(0,10);
+    rangeEnd   = new Date(viewMon.getTime() + 20*86400000).toISOString().slice(0,10);
+  }
 
   const { data } = await db.from('experience_bookings')
     .select('*')
@@ -15873,6 +15885,8 @@ async function loadBooking() {
     records: data || [],
     thisWeekStart,
     viewWeekStart,
+    viewMode,
+    viewMonthStart,
   };
 }
 
@@ -15880,9 +15894,129 @@ function renderBooking() {
   const bd = state.data.booking || {};
   const records = bd.records || [];
   const today = new Date().toISOString().slice(0,10);
+  const viewMode = bd.viewMode || 'week';
   const viewStart = bd.viewWeekStart || _getBookingWeekStart(today);
+  const viewMonthStart = bd.viewMonthStart || today.slice(0,7) + '-01';
+  const pendingCount = records.filter(r => r.status === '待確認').length;
 
-  // Mon–Fri only (5 days)
+  let navHtml;
+  if (viewMode === 'week') {
+    const weekEnd = new Date(viewStart + 'T00:00:00');
+    weekEnd.setDate(weekEnd.getDate() + 5);
+    const fmt = d => { const dt = new Date(d+'T00:00:00'); return `${dt.getMonth()+1}/${dt.getDate()}`; };
+    const weekLabel = `${fmt(viewStart)} – ${fmt(weekEnd.toISOString().slice(0,10))}`;
+    navHtml = `
+      <button class="btn btn-outline btn-sm" data-action="booking-prev-week">‹ 上週</button>
+      <span style="font-weight:600;font-size:15px">${weekLabel}</span>
+      <button class="btn btn-outline btn-sm" data-action="booking-next-week">下週 ›</button>
+      <button class="btn btn-outline btn-sm" data-action="booking-this-week">本週</button>`;
+  } else {
+    const mn = new Date(viewMonthStart + 'T00:00:00');
+    navHtml = `
+      <button class="btn btn-outline btn-sm" data-action="booking-prev-month">‹ 上月</button>
+      <span style="font-weight:600;font-size:15px">${mn.getFullYear()}年 ${mn.getMonth()+1}月</span>
+      <button class="btn btn-outline btn-sm" data-action="booking-next-month">下月 ›</button>
+      <button class="btn btn-outline btn-sm" data-action="booking-this-month">本月</button>`;
+  }
+
+  return `
+    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
+      <div style="display:flex;align-items:center;gap:8px">${navHtml}</div>
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <div style="display:flex;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+          <button class="btn btn-sm" style="border-radius:0;border:none;padding:5px 14px;background:${viewMode==='week'?'var(--accent)':'transparent'};color:${viewMode==='week'?'#fff':'var(--text)'}" data-action="booking-view-week">週</button>
+          <button class="btn btn-sm" style="border-radius:0;border:none;padding:5px 14px;border-left:1px solid var(--border);background:${viewMode==='month'?'var(--accent)':'transparent'};color:${viewMode==='month'?'#fff':'var(--text)'}" data-action="booking-view-month">月</button>
+        </div>
+        <input type="date" class="form-control" style="width:142px;font-size:12px;padding:5px 8px" onchange="window.bookingGotoDate(this.value)" title="跳至日期">
+        ${pendingCount > 0 ? `<span class="tag tag-orange">⏳ 待確認 ${pendingCount} 筆</span>` : ''}
+        <button class="btn btn-primary btn-sm" data-action="add-booking">+ 新增預約</button>
+      </div>
+    </div>
+  ` + (viewMode === 'month' ? _renderBookingMonth(bd, today) : _renderBookingWeek(bd, today));
+}
+
+function _renderBookingMonth(bd, today) {
+  const records = bd.records || [];
+  const viewMonthStart = bd.viewMonthStart || today.slice(0,7) + '-01';
+  const DAY_ZH = ['一','二','三','四','五','六','日'];
+  const mn = new Date(viewMonthStart + 'T00:00:00');
+  const year = mn.getFullYear(), month = mn.getMonth();
+  const firstDow = mn.getDay();
+  const startOffset = firstDow === 0 ? 6 : firstDow - 1;
+  const gridStart = new Date(mn.getTime() - startOffset * 86400000);
+
+  const cells = [];
+  const cur = new Date(gridStart);
+  for (let i = 0; i < 42; i++) { cells.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
+  while (cells.length > 7) {
+    const last7 = cells.slice(-7);
+    if (last7.every(d => new Date(d+'T00:00:00').getMonth() !== month)) cells.splice(-7); else break;
+  }
+
+  const dayMap = {};
+  records.forEach(r => {
+    if (!dayMap[r.booking_date]) dayMap[r.booking_date] = { pending:0, confirmed:0, holiday:false, holidayNote:'' };
+    if (r.source === '公休日') { dayMap[r.booking_date].holiday = true; dayMap[r.booking_date].holidayNote = r.notes||''; }
+    else if (r.status === '待確認') dayMap[r.booking_date].pending++;
+    else if (r.status === '已確認') dayMap[r.booking_date].confirmed++;
+  });
+
+  const weeks = [];
+  for (let w = 0; w < Math.ceil(cells.length/7); w++) weeks.push(cells.slice(w*7, w*7+7));
+
+  return `
+    <div style="border-radius:8px;border:1px solid var(--border);overflow:hidden">
+      <table style="width:100%;border-collapse:collapse">
+        <thead>
+          <tr style="background:var(--surface2)">
+            ${DAY_ZH.map(d => `<th style="padding:8px;text-align:center;font-size:12px;color:var(--muted);border-bottom:2px solid var(--border);font-weight:600">${d}</th>`).join('')}
+          </tr>
+        </thead>
+        <tbody>
+          ${weeks.map(week => `<tr>${week.map(d => {
+            const dt = new Date(d+'T00:00:00');
+            const dow = dt.getDay();
+            const isWeekend = dow===0||dow===6;
+            const inMonth = dt.getMonth()===month;
+            const isToday = d===today;
+            const info = dayMap[d]||{};
+            const isHoliday = info.holiday||isWeekend;
+            const isPast = d<today;
+            let bg = '#fff';
+            if (!inMonth) bg='#f8f9fa'; else if (isHoliday) bg='#fff5f5'; else if (isPast) bg='#fafafa';
+            let badge='';
+            if (isHoliday) {
+              const reason = isWeekend ? (dow===6?'週六':'週日') : (info.holidayNote||'公休');
+              badge=`<div style="font-size:10px;color:#e53935;margin-top:3px">${reason}</div>`;
+            } else {
+              if (info.pending>0) badge+=`<span style="display:inline-block;background:#fff8e1;color:#e65100;border-radius:3px;padding:1px 5px;font-size:10px;margin-top:2px;margin-right:2px">⏳${info.pending}</span>`;
+              if (info.confirmed>0) badge+=`<span style="display:inline-block;background:#e8f5e9;color:#1b5e20;border-radius:3px;padding:1px 5px;font-size:10px;margin-top:2px">✅${info.confirmed}</span>`;
+            }
+            const clickable = inMonth && !isHoliday;
+            return `<td style="padding:6px 8px;border:1px solid var(--border);vertical-align:top;height:70px;width:14.28%;background:${bg};cursor:${clickable?'pointer':'default'}" onclick="${clickable?`window.bookingGotoDate('${d}')`:''}" title="${clickable?'點擊切換到週視圖':''}">
+              <div style="font-size:13px;font-weight:${isToday?700:400};color:${inMonth?'var(--text)':'#bbb'};${isToday?'display:inline-flex;align-items:center;justify-content:center;background:var(--accent-dark);color:#fff;width:22px;height:22px;border-radius:50%;':''}">
+                ${dt.getDate()}
+              </div>
+              ${badge}
+            </td>`;
+          }).join('')}</tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="display:flex;gap:14px;margin-top:12px;font-size:12px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:5px"><span style="background:#fff8e1;color:#e65100;border-radius:3px;padding:1px 6px">⏳</span>待確認</div>
+      <div style="display:flex;align-items:center;gap:5px"><span style="background:#e8f5e9;color:#1b5e20;border-radius:3px;padding:1px 6px">✅</span>已確認</div>
+      <div style="display:flex;align-items:center;gap:5px"><span style="background:#fff5f5;color:#e53935;border-radius:3px;padding:1px 6px">公休</span>公休/週末（自動）</div>
+      <span style="color:var(--muted)">點工作日切換到週視圖</span>
+    </div>`;
+}
+
+function _renderBookingWeek(bd, today) {
+  const records = bd.records || [];
+  const viewStart = bd.viewWeekStart || _getBookingWeekStart(today);
+  const DAY_ZH = ['日','一','二','三','四','五','六'];
+
+  // Mon–Fri (5 days)
   const days = [];
   for (let i = 0; i < 5; i++) {
     const d = new Date(viewStart + 'T00:00:00');
@@ -15890,7 +16024,6 @@ function renderBooking() {
     days.push(d.toISOString().slice(0,10));
   }
 
-  // Group by date_slot (包含已取消，供顯示用)
   const bookingMap = {};
   records.forEach(r => {
     const key = `${r.booking_date}_${r.time_slot}`;
@@ -15898,28 +16031,7 @@ function renderBooking() {
     bookingMap[key].push(r);
   });
 
-  const pendingCount = records.filter(r => r.status === '待確認').length;
-  const DAY_ZH = ['日','一','二','三','四','五','六'];
-
-  const weekEnd = new Date(viewStart + 'T00:00:00');
-  weekEnd.setDate(weekEnd.getDate() + 5);
-  const fmt = d => { const dt = new Date(d+'T00:00:00'); return `${dt.getMonth()+1}/${dt.getDate()}`; };
-  const weekLabel = `${fmt(viewStart)} – ${fmt(weekEnd.toISOString().slice(0,10))}`;
-
   return `
-    <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:16px">
-      <div style="display:flex;align-items:center;gap:8px">
-        <button class="btn btn-outline btn-sm" data-action="booking-prev-week">‹ 上週</button>
-        <span style="font-weight:600;font-size:15px">${weekLabel}</span>
-        <button class="btn btn-outline btn-sm" data-action="booking-next-week">下週 ›</button>
-        <button class="btn btn-outline btn-sm" data-action="booking-this-week">本週</button>
-      </div>
-      <div style="display:flex;align-items:center;gap:8px">
-        ${pendingCount > 0 ? `<span class="tag tag-orange">⏳ 待確認 ${pendingCount} 筆</span>` : ''}
-        <button class="btn btn-primary btn-sm" data-action="add-booking">+ 新增預約</button>
-      </div>
-    </div>
-
     <div style="overflow-x:auto;border-radius:8px;border:1px solid var(--border)">
       <table style="width:100%;border-collapse:collapse;min-width:600px">
         <thead>
@@ -15928,15 +16040,15 @@ function renderBooking() {
             ${days.map(d => {
               const dt = new Date(d + 'T00:00:00');
               const isToday = d === today;
-              // Check if day is fully blocked (all active slots are manual blocks)
               const dayRecords = records.filter(r => r.booking_date === d && r.status !== '已取消');
               const isHoliday = dayRecords.some(r => r.source === '公休日');
+              const holidayNote = isHoliday ? (dayRecords.find(r=>r.source==='公休日')?.notes || '公休') : '';
               return `<th style="padding:8px 6px;text-align:center;font-size:12px;border-right:1px solid var(--border);border-bottom:2px solid var(--border);min-width:110px;background:${isHoliday?'#fef3f3':isToday?'var(--accent-light)':'inherit'}">
                 <div style="font-weight:700;color:${isHoliday?'#e53935':isToday?'var(--accent-dark)':'var(--text)'}">
                   ${dt.getMonth()+1}/${dt.getDate()} (${DAY_ZH[dt.getDay()]})
                 </div>
                 ${isHoliday
-                  ? `<div style="font-size:10px;color:#e53935;font-weight:600">公休</div>
+                  ? `<div style="font-size:10px;color:#e53935;font-weight:600">${holidayNote}</div>
                      <div data-bk-unholiday="${d}" onclick="event.stopPropagation();window.unblockHoliday('${d}')"
                        style="font-size:10px;color:#aaa;cursor:pointer;margin-top:2px">取消公休</div>`
                   : `${isToday ? '<div style="font-size:10px;color:var(--accent-dark);font-weight:600">今天</div>' : ''}
@@ -15953,6 +16065,7 @@ function renderBooking() {
           ${BOOKING_SLOTS.map(slot => {
             const sister = _sisterSlot(slot);
             const isHalfHour = slot.endsWith(':30');
+            const slotHour = parseInt(slot.split(':')[0]);
             return `
             <tr style="${isHalfHour ? 'border-bottom:2px solid var(--border)' : ''}">
               <td style="padding:6px 4px;text-align:center;font-size:11px;color:var(--muted);background:${isHalfHour?'#f5f7f6':'var(--surface2)'};border-right:1px solid var(--border);border-bottom:1px solid var(--border);white-space:nowrap;font-weight:600">
@@ -15968,22 +16081,26 @@ function renderBooking() {
                 const isDirectBooked  = activeHere.length > 0;
                 const isSisterBlocked = !isDirectBooked && activeSister.length > 0;
                 const isPast = d < today;
-                // 公休日判斷
                 const isHolidayDay = records.some(r => r.booking_date === d && r.source === '公休日' && r.status !== '已取消');
+                // 週一 16:00 前規則封鎖（管理員可點擊手動覆蓋）
+                const isMonRule = !isDirectBooked && new Date(d+'T00:00:00').getDay()===1 && slotHour < 16;
 
                 if (isHolidayDay && !isDirectBooked) {
                   return `<td style="padding:5px;vertical-align:middle;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:#fef3f3">
                     <div style="text-align:center;font-size:10px;color:#ef9a9a;padding:6px 0">公休</div>
                   </td>`;
                 }
-
                 if (isSisterBlocked) {
-                  // 同小時另一格已有人，顯示淡灰「同時段已滿」
                   return `<td style="padding:5px;vertical-align:middle;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:#f9fafb">
                     <div style="text-align:center;font-size:10px;color:#bbb;padding:6px 0">同時段已滿</div>
                   </td>`;
                 }
-
+                if (isMonRule) {
+                  return `<td style="padding:5px;vertical-align:middle;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:#f5f5f5;cursor:pointer"
+                    onclick="window.modalAddBooking('${d}','${slot}')" title="週一規則封鎖（點此手動新增）">
+                    <div style="text-align:center;font-size:10px;color:#ccc;padding:4px 0">週一保留<br><span style="font-size:9px">點此覆蓋</span></div>
+                  </td>`;
+                }
                 return `<td style="padding:5px;vertical-align:top;border-right:1px solid var(--border);border-bottom:1px solid var(--border);background:${isPast?'#fafafa':'#fff'};cursor:pointer;position:relative"
                   onclick="if(!event.target.closest('[data-bk-id]')&&!event.target.closest('[data-bk-block]'))window.modalChooseBookingAction('${d}','${slot}')">
                   ${!isDirectBooked && !isPast ? `
@@ -16023,8 +16140,9 @@ function renderBooking() {
       <div style="display:flex;align-items:center;gap:5px"><div style="width:12px;height:12px;border-radius:2px;background:#e8f5e9;border-left:3px solid #4caf50"></div>已確認</div>
       <div style="display:flex;align-items:center;gap:5px"><div style="width:12px;height:12px;border-radius:2px;background:#f3f3f3;border-left:3px solid #9e9e9e"></div>封鎖</div>
       <div style="display:flex;align-items:center;gap:5px"><div style="width:12px;height:12px;border-radius:2px;background:#fef3f3;border-left:3px solid #e53935"></div>公休</div>
+      <div style="display:flex;align-items:center;gap:5px"><div style="width:12px;height:12px;border-radius:2px;background:#f5f5f5;border:1px solid #ddd"></div>週一規則（16:00前）</div>
       <div style="display:flex;align-items:center;gap:5px;color:#bbb">同時段已滿 = 同小時另一格已有人</div>
-      <span style="color:var(--muted);margin-left:auto;font-size:11px">點格子新增預約，右上角🔒封鎖，欄位標題可標為公休</span>
+      <span style="color:var(--muted);margin-left:auto;font-size:11px">點格子新增、🔒封鎖、欄位標題可標公休</span>
     </div>`;
 }
 
@@ -16297,6 +16415,15 @@ window.unblockHoliday = async function(date) {
     .eq('booking_date', date)
     .eq('source', '公休日');
   showToast('已解除公休'); await loadBooking(); renderApp();
+};
+
+// 日期跳轉：切換到週視圖並定位到該週
+window.bookingGotoDate = function(dateStr) {
+  if (!dateStr) return;
+  if (!state.data.booking) state.data.booking = {};
+  state.data.booking.viewMode = 'week';
+  state.data.booking.viewWeekStart = _getBookingWeekStart(dateStr);
+  loadBooking().then(() => renderApp());
 };
 
 function renderJournal() {
@@ -19387,6 +19514,36 @@ async function handleAction(action, id, dataset) {
     case 'booking-this-week': {
       if (!state.data.booking) state.data.booking = {};
       state.data.booking.viewWeekStart = _getBookingWeekStart(new Date().toISOString().slice(0,10));
+      await loadBooking(); renderApp(); break;
+    }
+    case 'booking-view-week': {
+      if (!state.data.booking) state.data.booking = {};
+      state.data.booking.viewMode = 'week';
+      await loadBooking(); renderApp(); break;
+    }
+    case 'booking-view-month': {
+      if (!state.data.booking) state.data.booking = {};
+      state.data.booking.viewMode = 'month';
+      if (!state.data.booking.viewMonthStart) state.data.booking.viewMonthStart = new Date().toISOString().slice(0,7)+'-01';
+      await loadBooking(); renderApp(); break;
+    }
+    case 'booking-prev-month': {
+      if (!state.data.booking) state.data.booking = {};
+      const curM = state.data.booking.viewMonthStart || new Date().toISOString().slice(0,7)+'-01';
+      const mn1 = new Date(curM+'T00:00:00'); mn1.setMonth(mn1.getMonth()-1);
+      state.data.booking.viewMonthStart = mn1.toISOString().slice(0,7)+'-01';
+      await loadBooking(); renderApp(); break;
+    }
+    case 'booking-next-month': {
+      if (!state.data.booking) state.data.booking = {};
+      const curM = state.data.booking.viewMonthStart || new Date().toISOString().slice(0,7)+'-01';
+      const mn2 = new Date(curM+'T00:00:00'); mn2.setMonth(mn2.getMonth()+1);
+      state.data.booking.viewMonthStart = mn2.toISOString().slice(0,7)+'-01';
+      await loadBooking(); renderApp(); break;
+    }
+    case 'booking-this-month': {
+      if (!state.data.booking) state.data.booking = {};
+      state.data.booking.viewMonthStart = new Date().toISOString().slice(0,7)+'-01';
       await loadBooking(); renderApp(); break;
     }
     case 'add-booking':
