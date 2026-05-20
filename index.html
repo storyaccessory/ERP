@@ -17764,14 +17764,14 @@ async function loadCalendarEvents() {
   const cal = state.data.calNav || (() => { const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; })();
   const firstOfMonth = `${cal.y}-${String(cal.m+1).padStart(2,'0')}-01`;
   const lastOfMonth  = `${cal.y}-${String(cal.m+1).padStart(2,'0')}-${new Date(cal.y,cal.m+1,0).getDate()}`;
+  const sel = '*, profiles!calendar_events_assigned_to_fkey(id,name)';
   const { data } = await db.from('calendar_events')
-    .select('*')
+    .select(sel)
     .lte('start_date', lastOfMonth)
     .gte('end_date', firstOfMonth)
     .order('start_date');
-  // Also fetch single-day events in range
   const { data: singleDay } = await db.from('calendar_events')
-    .select('*')
+    .select(sel)
     .gte('start_date', firstOfMonth)
     .lte('start_date', lastOfMonth)
     .is('end_date', null);
@@ -17809,11 +17809,17 @@ function renderCalendar() {
   }
   const { y, m } = state.data.calNav;
   const now = new Date();
-  const todayStr = now.toISOString().slice(0,10);
+  const todayStr = _localToday();
   const firstDay = new Date(y, m, 1).getDay(); // 0=Sun
   const daysInMonth = new Date(y, m+1, 0).getDate();
   const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
-  const events = state.data.calEvents || [];
+  const calFilter = state.data.calFilter || 'all'; // 'all' | 'mine'
+  const myId = state.user?.id;
+  let allEvents = state.data.calEvents || [];
+  // Apply filter
+  const events = calFilter === 'mine'
+    ? allEvents.filter(ev => ev.assigned_to === myId || ev.created_by === myId)
+    : allEvents;
   const calBookings = state.data.calBookings || [];
 
   // build a map: dateStr → events[]
@@ -17872,7 +17878,8 @@ function renderCalendar() {
         } else {
           const ev = item.ev;
           const t = CAL_EVENT_TYPES[ev.event_type] || CAL_EVENT_TYPES.general;
-          return `<div style="font-size:9px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${t.bg};color:${t.color};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')">${ev.title}</div>`;
+          const assigneeName = ev.profiles?.name ? ` · ${ev.profiles.name}` : '';
+          return `<div style="font-size:9px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${t.bg};color:${t.color};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')">${ev.title}${assigneeName}</div>`;
         }
       }).join('')}
       ${more>0?`<div style="font-size:9px;color:var(--muted)">+${more}</div>`:''}
@@ -17886,10 +17893,20 @@ function renderCalendar() {
   <div class="cal-layout">
     <div>
       <div class="card" style="padding:12px">
-        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;gap:8px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px;gap:8px">
           <button class="btn btn-outline btn-sm" id="cal-prev" style="white-space:nowrap">‹ 上月</button>
           <span style="font-size:16px;font-weight:700;color:var(--accent-dark);white-space:nowrap">${y}年 ${monthNames[m]}</span>
           <button class="btn btn-outline btn-sm" id="cal-next" style="white-space:nowrap">下月 ›</button>
+        </div>
+        <div style="display:flex;gap:0;margin-bottom:10px;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+          <button id="cal-filter-all" onclick="state.data.calFilter='all';renderApp()"
+            style="flex:1;padding:6px 8px;font-size:12px;font-weight:600;border:none;cursor:pointer;transition:.15s;background:${calFilter==='all'?'var(--accent)':'#f5f5f5'};color:${calFilter==='all'?'#fff':'#888'}">
+            全公司
+          </button>
+          <button id="cal-filter-mine" onclick="state.data.calFilter='mine';renderApp()"
+            style="flex:1;padding:6px 8px;font-size:12px;font-weight:600;border:none;cursor:pointer;transition:.15s;background:${calFilter==='mine'?'var(--accent)':'#f5f5f5'};color:${calFilter==='mine'?'#fff':'#888'}">
+            我的
+          </button>
         </div>
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">
           ${['日','一','二','三','四','五','六'].map((d,i)=>`<div style="font-size:11px;font-weight:600;color:${i===0||i===6?'#9e9e9e':'var(--muted)'};text-align:center;padding:3px 0">${d}</div>`).join('')}
@@ -17909,10 +17926,12 @@ function renderCalendar() {
       ${upcoming.map(ev=>{
         const t = CAL_EVENT_TYPES[ev.event_type]||CAL_EVENT_TYPES.general;
         const isMulti = ev.end_date && ev.end_date !== ev.start_date;
+        const assigneeName = ev.profiles?.name || '';
         return `<div class="card" style="margin-bottom:8px;padding:10px 12px;border-left:3px solid ${t.color};cursor:pointer" onclick="calViewEvent('${ev.id}')">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
             <span style="font-size:10px;background:${t.bg};color:${t.color};border-radius:3px;padding:1px 5px;font-weight:700">${t.label}</span>
             <span style="font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.title}</span>
+            ${assigneeName?`<span style="font-size:11px;color:var(--muted);white-space:nowrap">${assigneeName}</span>`:''}
           </div>
           <div style="font-size:11px;color:var(--muted)">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}</div>
           ${ev.description?`<div style="font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.description}</div>`:''}
@@ -17923,28 +17942,39 @@ function renderCalendar() {
 }
 
 async function modalCalEvent(existing=null) {
-  const today = new Date().toISOString().slice(0,10);
+  const today = _localToday();
   const id = existing?._prefill ? null : existing?.id;
+  const users = state.data.users || [];
+  const existingAssignee = existing?.assigned_to || existing?.profiles?.id || '';
   showModal(id?'編輯行事曆事項':'新增行事曆事項', `
     <div class="form-group">
       <label>標題 <span style="color:var(--danger)">*</span></label>
-      <input class="form-control" id="cal-title" value="${existing?.title||''}" placeholder="事項名稱">
+      <input class="form-control" id="cal-title" value="${(existing?.title||'').replace(/"/g,'&quot;')}" placeholder="事項名稱">
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group">
-        <label>類型</label>
+        <label>分類</label>
         <select class="form-control" id="cal-type">
           ${Object.entries(CAL_EVENT_TYPES).map(([k,t])=>`<option value="${k}" ${(existing?.event_type||'general')===k?'selected':''}>${t.label}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
+        <label>負責人員</label>
+        <select class="form-control" id="cal-assignee">
+          <option value="">（未指定）</option>
+          ${users.map(u=>`<option value="${u.id}" ${existingAssignee===u.id?'selected':''}>${u.name}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
         <label>開始日期 <span style="color:var(--danger)">*</span></label>
         <input class="form-control" id="cal-start" type="date" value="${existing?.start_date||today}">
       </div>
-    </div>
-    <div class="form-group">
-      <label>結束日期 <span style="font-size:11px;color:var(--muted);font-weight:400">（留空表示單日）</span></label>
-      <input class="form-control" id="cal-end" type="date" value="${existing?.end_date||''}">
+      <div class="form-group">
+        <label>結束日期 <span style="font-size:11px;color:var(--muted);font-weight:400">（留空表示單日）</span></label>
+        <input class="form-control" id="cal-end" type="date" value="${existing?.end_date&&existing.end_date!==existing.start_date?existing.end_date:''}">
+      </div>
     </div>
     <div class="form-group">
       <label>說明</label>
@@ -17963,12 +17993,14 @@ async function modalCalEvent(existing=null) {
       const startDate = document.getElementById('cal-start').value;
       if (!startDate) { showToast('請選開始日期','error'); return; }
       const endDate = document.getElementById('cal-end').value || null;
+      const assignedTo = document.getElementById('cal-assignee').value || null;
       const payload = {
         title,
         event_type: document.getElementById('cal-type').value,
         start_date: startDate,
         end_date: endDate || startDate,
         description: document.getElementById('cal-desc').value.trim() || null,
+        assigned_to: assignedTo,
       };
       if (id) {
         await db.from('calendar_events').update(payload).eq('id', id);
@@ -17989,10 +18021,12 @@ window.calViewEvent = function(id) {
   if (!ev) return;
   const t = CAL_EVENT_TYPES[ev.event_type]||CAL_EVENT_TYPES.general;
   const isMulti = ev.end_date && ev.end_date !== ev.start_date;
+  const assigneeName = ev.profiles?.name || '';
   showModal(ev.title, `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
       <span style="background:${t.bg};color:${t.color};border-radius:4px;padding:3px 10px;font-size:13px;font-weight:700">${t.label}</span>
       <span style="font-size:13px;color:var(--muted)">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}</span>
+      ${assigneeName?`<span style="font-size:13px;color:var(--text);background:#f5f5f5;border-radius:4px;padding:2px 10px">👤 ${assigneeName}</span>`:''}
     </div>
     ${ev.description?`<div style="font-size:14px;line-height:1.7;color:var(--text)">${ev.description}</div>`:'<div style="color:var(--muted);font-size:13px">無備註</div>'}
   `, [
