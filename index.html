@@ -15868,10 +15868,8 @@ function _fmtJnlField(val) {
   let items = []; // [{desc, qty}]
 
   if (Array.isArray(val)) {
-    // 新格式
     items = val.filter(i => i && i.desc && i.desc.trim()).map(i => ({ desc: i.desc.trim(), qty: (i.qty||'').trim() }));
   } else if (typeof val === 'string' && val.trim()) {
-    // 舊格式：字串 → 解析成 items
     let parts = val.split(/[\n、]/).map(s => s.trim()).filter(Boolean);
     if (parts.length === 1) {
       const bySpace = val.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
@@ -15882,16 +15880,11 @@ function _fmtJnlField(val) {
 
   if (items.length === 0) return '';
 
-  if (items.length === 1) {
-    const { desc, qty } = items[0];
-    const qtyTag = qty ? ` <span style="background:#f0f0f0;border-radius:4px;padding:0 6px;font-size:11px;color:#666;font-weight:600">${esc(qty)}</span>` : '';
-    return `<div style="font-size:13px;line-height:1.7">${esc(desc)}${qtyTag}</div>`;
-  }
-
+  // 統一用 bullet list，數量顯示為 *N
   return `<ul style="margin:0;padding-left:18px;font-size:13px;line-height:1.9">
     ${items.map(({ desc, qty }) => {
-      const qtyTag = qty ? ` <span style="background:#f0f0f0;border-radius:4px;padding:0 6px;font-size:11px;color:#666;font-weight:600">${esc(qty)}</span>` : '';
-      return `<li style="margin-bottom:2px">${esc(desc)}${qtyTag}</li>`;
+      const qtyStr = qty ? ` <span style="color:#888;font-size:12px">*${esc(qty)}</span>` : '';
+      return `<li style="margin-bottom:2px">${esc(desc)}${qtyStr}</li>`;
     }).join('')}
   </ul>`;
 }
@@ -16781,22 +16774,24 @@ function renderJournal() {
           const isMe = log.user_id === myId;
           const tpl = _getTemplateForLog(log, jd);
           const fields = log.fields || {};
-          const filledFields = tpl.fields.filter(f => fields[f.key] || log[f.key]);
+          const logProfile = profiles.find(p => p.id === log.user_id);
           const myTasks = allTodos.filter(t => t.assignee_id === log.user_id);
           return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
               <div>
                 <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
-                <div style="font-size:11px;color:var(--muted)">${tpl.icon} ${tpl.label}</div>
+                <div style="font-size:11px;color:var(--muted)">${logProfile?.job_title||tpl.label}</div>
               </div>
               <div style="font-size:11px;color:var(--muted)">${log.updated_at ? new Date(log.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
             </div>
-            ${filledFields.map(f => {
+            ${tpl.fields.map(f => {
               const val = fields[f.key] || log[f.key];
-              return val ? `<div style="margin-bottom:10px">
+              const isEmpty = !val || (Array.isArray(val) && val.filter(i=>i?.desc?.trim()).length===0);
+              if (isEmpty && f.key !== 'issues') return '';
+              return `<div style="margin-bottom:10px">
                 <div style="font-size:11px;font-weight:600;color:${f.color};margin-bottom:4px">${f.label}</div>
-                ${_fmtJnlField(val)}
-              </div>` : '';
+                ${isEmpty ? `<div style="font-size:13px;color:var(--muted)">無</div>` : _fmtJnlField(val)}
+              </div>`;
             }).join('')}
             ${myTasks.length > 0 ? `
             <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
@@ -16896,12 +16891,12 @@ function renderJournal() {
           const isMe = log.user_id === myId;
           const tpl = _getTemplateForLog(log, jd);
           const fields = log.fields || {};
-          const filledFields = tpl.fields.filter(f => fields[f.key] || log[f.key]);
+          const logProfile = profiles.find(p => p.id === log.user_id);
           return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
               <div>
                 <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
-                <div style="font-size:11px;color:var(--muted)">${tpl.label}</div>
+                <div style="font-size:11px;color:var(--muted)">${logProfile?.job_title||tpl.label}</div>
               </div>
               <div style="display:flex;gap:6px">
                 ${isMe ? `<button class="btn btn-sm btn-outline" onclick="modalEditJournal('${log.id}')">編輯</button>` : ''}
@@ -16909,12 +16904,14 @@ function renderJournal() {
               </div>
             </div>
             <div style="font-size:12px">
-              ${filledFields.map(f => {
+              ${tpl.fields.map(f => {
                 const val = fields[f.key] || log[f.key];
-                return val ? `<div style="margin-bottom:8px">
+                const isEmpty = !val || (Array.isArray(val) && val.filter(i=>i?.desc?.trim()).length===0);
+                if (isEmpty && f.key !== 'issues') return '';
+                return `<div style="margin-bottom:8px">
                   <div style="color:${f.color};font-weight:600;margin-bottom:4px">${f.label}</div>
-                  ${_fmtJnlField(val)}
-                </div>` : '';
+                  ${isEmpty ? `<div style="color:var(--muted)">無</div>` : _fmtJnlField(val)}
+                </div>`;
               }).join('')}
             </div>
           </div>`;
