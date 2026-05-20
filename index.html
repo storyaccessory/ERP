@@ -18920,8 +18920,11 @@ function closeModal() {
 }
 
 // ── 將核心函式掛到 window，讓 HTML inline onclick 可以呼叫 ──
-window.closeModal = closeModal;
-window.db         = db;
+window.closeModal    = closeModal;
+window.db            = db;
+window.renderApp     = renderApp;
+window._localToday   = _localToday;
+window._localDateStr = _localDateStr;
 
 function showModal(title, body, footer = '', opts = {}) {
   // footer 可以是 HTML string，或 [{label, primary, onclick}] 的 array
