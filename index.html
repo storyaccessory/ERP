@@ -957,6 +957,8 @@ function canAccessPage(pageKey) {
   const perms = Array.isArray(state.profile?.permissions) ? state.profile.permissions : null;
   if (pageKey === 'dashboard') return true;
   if (pageKey === 'settings') return true;
+  if (pageKey === 'journal')  return true;  // 工作日誌全員可見
+  if (pageKey === 'sales')    return true;  // 業績儀表板全員可見
   if (pageKey === 'users') return role === 'admin' || adminEmails.includes(email);
   // 沒有任何 permissions 設定時，顯示全部（避免鎖死）
   if (!perms || perms.length === 0) return true;
