@@ -15858,15 +15858,26 @@ function _sisterSlot(slot) {
   return m === 0 ? `${h}:30` : `${h}:00`;
 }
 
+// 用本地時間格式化日期，避免 toISOString() UTC 偏移問題
+function _localDateStr(d) {
+  const y = d.getFullYear();
+  const m = String(d.getMonth()+1).padStart(2,'0');
+  const day = String(d.getDate()).padStart(2,'0');
+  return `${y}-${m}-${day}`;
+}
+// 取今日本地日期字串
+function _localToday() {
+  return _localDateStr(new Date());
+}
 function _getBookingWeekStart(dateStr) {
   const d = new Date(dateStr + 'T00:00:00');
   const dow = d.getDay(); // 0=Sun → offset 0, 1=Mon → offset 1, …
   d.setDate(d.getDate() - dow);
-  return d.toISOString().slice(0,10);
+  return _localDateStr(d);
 }
 
 async function loadBooking() {
-  const today = new Date().toISOString().slice(0,10);
+  const today = _localToday();
   const thisWeekStart = _getBookingWeekStart(today);
   const viewMode = state.data.booking?.viewMode || 'week';
   const viewWeekStart = state.data.booking?.viewWeekStart || thisWeekStart;
@@ -15906,7 +15917,7 @@ async function loadBooking() {
 function renderBooking() {
   const bd = state.data.booking || {};
   const records = bd.records || [];
-  const today = new Date().toISOString().slice(0,10);
+  const today = _localToday();
   const viewMode = bd.viewMode || 'week';
   const viewStart = bd.viewWeekStart || _getBookingWeekStart(today);
   const viewMonthStart = bd.viewMonthStart || today.slice(0,7) + '-01';
@@ -15917,7 +15928,7 @@ function renderBooking() {
     const weekEnd = new Date(viewStart + 'T00:00:00');
     weekEnd.setDate(weekEnd.getDate() + 6);
     const fmt = d => { const dt = new Date(d+'T00:00:00'); return `${dt.getMonth()+1}/${dt.getDate()}`; };
-    const weekLabel = `${fmt(viewStart)} – ${fmt(weekEnd.toISOString().slice(0,10))}`;
+    const weekLabel = `${fmt(viewStart)} – ${fmt(_localDateStr(weekEnd))}`;
     navHtml = `
       <button class="btn btn-outline btn-sm" data-action="booking-prev-week">‹ 上週</button>
       <span style="font-weight:600;font-size:15px">${weekLabel}</span>
@@ -15961,7 +15972,7 @@ function _renderBookingMonth(bd, today) {
 
   const cells = [];
   const cur = new Date(gridStart);
-  for (let i = 0; i < 42; i++) { cells.push(cur.toISOString().slice(0,10)); cur.setDate(cur.getDate()+1); }
+  for (let i = 0; i < 42; i++) { cells.push(_localDateStr(cur)); cur.setDate(cur.getDate()+1); }
   while (cells.length > 7) {
     const last7 = cells.slice(-7);
     if (last7.every(d => new Date(d+'T00:00:00').getMonth() !== month)) cells.splice(-7); else break;
@@ -16054,7 +16065,7 @@ function _renderBookingWeek(bd, today) {
   for (let i = 0; i < 7; i++) {
     const d = new Date(viewStart + 'T00:00:00');
     d.setDate(d.getDate() + i);
-    days.push(d.toISOString().slice(0,10));
+    days.push(_localDateStr(d));
   }
 
   const bookingMap = {};
@@ -16231,7 +16242,7 @@ window.modalAddBooking = function(defaultDate = '', defaultSlot = '') {
   showModal('新增體驗預約', `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group"><label>預約日期</label>
-        <input type="date" class="form-control" id="bk-date" value="${defaultDate}" min="${new Date().toISOString().slice(0,10)}">
+        <input type="date" class="form-control" id="bk-date" value="${defaultDate}" min="${_localToday()}">
       </div>
       <div class="form-group"><label>時段（每次30分鐘）</label>
         <select class="form-control" id="bk-slot">
@@ -19680,7 +19691,7 @@ async function handleAction(action, id, dataset) {
       const d = new Date((curr||new Date().toISOString().slice(0,10))+'T00:00:00');
       d.setDate(d.getDate()-7);
       if (!state.data.booking) state.data.booking = {};
-      state.data.booking.viewWeekStart = d.toISOString().slice(0,10);
+      state.data.booking.viewWeekStart = _localDateStr(d);
       await loadBooking(); renderApp(); break;
     }
     case 'booking-next-week': {
@@ -19688,12 +19699,12 @@ async function handleAction(action, id, dataset) {
       const d = new Date((curr||new Date().toISOString().slice(0,10))+'T00:00:00');
       d.setDate(d.getDate()+7);
       if (!state.data.booking) state.data.booking = {};
-      state.data.booking.viewWeekStart = d.toISOString().slice(0,10);
+      state.data.booking.viewWeekStart = _localDateStr(d);
       await loadBooking(); renderApp(); break;
     }
     case 'booking-this-week': {
       if (!state.data.booking) state.data.booking = {};
-      state.data.booking.viewWeekStart = _getBookingWeekStart(new Date().toISOString().slice(0,10));
+      state.data.booking.viewWeekStart = _getBookingWeekStart(_localToday());
       await loadBooking(); renderApp(); break;
     }
     case 'booking-view-week': {
