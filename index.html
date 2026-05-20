@@ -15907,7 +15907,7 @@ async function loadJournal() {
   const today = new Date().toISOString().slice(0,10);
   const [todayRes, histRes, profilesRes, todosRes] = await Promise.all([
     db.from('work_journals').select('*').eq('date', today).order('created_at'),
-    db.from('work_journals').select('*').eq('user_id', state.user.id).order('date', { ascending: false }).limit(90),
+    db.from('work_journals').select('*').order('date', { ascending: false }).limit(300),
     db.from('profiles').select('id, name, role, journal_template, journal_required').order('name'),
     db.from('todos').select('*, profiles!todos_assignee_id_fkey(name)').neq('status','完成').order('deadline'),
   ]);
@@ -16860,35 +16860,40 @@ function renderJournal() {
       </div>`;
   };
 
-  // ── 我的日誌（歷史） ──
+  // ── 歷史記錄（所有人，僅自己可編輯） ──
   const myView = () => {
+    // 依日期分組
     const grouped = {};
     history.forEach(l => {
-      const ym = l.date?.slice(0,7);
-      if (!grouped[ym]) grouped[ym] = [];
-      grouped[ym].push(l);
+      const d = l.date;
+      if (!grouped[d]) grouped[d] = [];
+      grouped[d].push(l);
     });
     return `
       <div style="display:flex;align-items:center;gap:12px;margin-bottom:16px;flex-wrap:wrap">
         <button class="btn btn-primary" onclick="modalEditJournal()">${hasSubmitted?'✏️ 修改今日日誌':'📝 填寫今日日誌'}</button>
         ${hasSubmitted?`<span style="font-size:12px;color:#10b981">✅ 今日已填寫</span>`:''}
-        <span style="font-size:12px;color:var(--muted);margin-left:auto">${myTpl.icon} 使用模板：${myTpl.label}</span>
       </div>
-      ${Object.keys(grouped).sort().reverse().map(ym => `
-        <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:18px 0 8px">${ym}</div>
-        ${grouped[ym].map(log => {
+      ${Object.keys(grouped).sort().reverse().map(date => `
+        <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:18px 0 8px">📅 ${date}</div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:4px">
+        ${grouped[date].map(log => {
+          const isMe = log.user_id === myId;
           const tpl = _getTemplateForLog(log, jd);
           const fields = log.fields || {};
           const filledFields = tpl.fields.filter(f => fields[f.key] || log[f.key]);
-          return `<div class="card" style="margin-bottom:10px">
+          return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-              <div style="font-size:14px;font-weight:600">📅 ${log.date} <span style="font-size:11px;color:var(--muted);font-weight:400">${tpl.icon} ${tpl.label}</span></div>
-              <button class="btn btn-sm btn-outline" onclick="modalEditJournal('${log.id}')">編輯</button>
+              <div>
+                <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
+                <div style="font-size:11px;color:var(--muted)">${tpl.label}</div>
+              </div>
+              ${isMe ? `<button class="btn btn-sm btn-outline" onclick="modalEditJournal('${log.id}')">編輯</button>` : ''}
             </div>
-            <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:10px;font-size:12px">
+            <div style="font-size:12px">
               ${filledFields.map(f => {
                 const val = fields[f.key] || log[f.key];
-                return val ? `<div>
+                return val ? `<div style="margin-bottom:8px">
                   <div style="color:${f.color};font-weight:600;margin-bottom:4px">${f.label}</div>
                   ${_fmtJnlField(val)}
                 </div>` : '';
@@ -16896,6 +16901,7 @@ function renderJournal() {
             </div>
           </div>`;
         }).join('')}
+        </div>
       `).join('')}
       ${history.length===0?`<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>還沒有日誌記錄，來填寫今天的吧！</p></div></div>`:''}`;
   };
@@ -16903,7 +16909,7 @@ function renderJournal() {
   return `
     <div class="tabs" style="margin-bottom:0">
       <div class="tab ${tab==='今日全覽'?'active':''}" data-journal-tab="今日全覽">👥 全員日誌</div>
-      <div class="tab ${tab==='我的日誌'?'active':''}" data-journal-tab="我的日誌">📋 我的日誌</div>
+      <div class="tab ${tab==='我的日誌'?'active':''}" data-journal-tab="我的日誌">📋 歷史記錄</div>
       <div class="tab ${tab==='任務總覽'?'active':''}" data-journal-tab="任務總覽">📌 任務總覽</div>
     </div>
     ${tab==='今日全覽' ? `
