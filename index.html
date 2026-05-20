@@ -17193,9 +17193,16 @@ function renderShipments() {
     grandTotal += columns.reduce((s,c) => s + (data[c.id]||0), 0);
   });
 
-  // 按平台分組 header
+  // 當月 → 顯示全部欄位；過去月份 → 只顯示有資料的欄位
+  const currentYm = _localToday().slice(0,7);
+  const isPastMonth = ym < currentYm;
+  const visibleColumns = isPastMonth
+    ? columns.filter(c => (colTotals[c.id] || 0) > 0)
+    : columns;
+
+  // 按平台分組 header（用 visibleColumns）
   const platforms = [];
-  columns.forEach(c => {
+  visibleColumns.forEach(c => {
     const last = platforms[platforms.length-1];
     if (last && last.name === c.platform) { last.span++; last.cols.push(c); }
     else platforms.push({ name: c.platform, span: 1, cols: [c] });
@@ -17216,16 +17223,21 @@ function renderShipments() {
       <table style="border-collapse:collapse;min-width:100%;font-size:12px;white-space:nowrap">
         <thead>
           <tr style="background:var(--surface)">
-            <th style="padding:6px 8px;border:1px solid var(--border);position:sticky;left:0;background:var(--surface);min-width:70px;z-index:2">日期</th>
-            ${platforms.map(p=>`<th colspan="${p.span}" style="padding:5px 4px;border:1px solid var(--border);text-align:center;background:#f0f7f4;color:var(--accent-dark);font-weight:700">${p.name}</th>`).join('')}
-            <th style="padding:6px 4px;border:1px solid var(--border);text-align:center;background:#e8f5e9;color:#2e7d32;font-weight:700">總數</th>
-            <th style="padding:6px 4px;border:1px solid var(--border);text-align:center;background:#fff8e1;color:#f57f17;font-weight:700;min-width:60px">包好未出</th>
+            <th rowspan="2" style="padding:6px 8px;border:1px solid var(--border);position:sticky;left:0;background:var(--surface);min-width:70px;z-index:2;vertical-align:middle">日期</th>
+            ${platforms.map((p,pi) => {
+              const colors = ['#e8f5e9','#e3f2fd','#fff3e0','#fce4ec','#f3e5f5','#e0f7fa','#fff8e1','#f1f8e9','#fbe9e7'];
+              const bg = colors[pi % colors.length];
+              if (p.span === 1 && !p.cols[0].method) {
+                // 單欄平台 → rowspan=2
+                return `<th rowspan="2" style="padding:5px 4px;border:1px solid var(--border);text-align:center;background:${bg};color:#333;font-weight:700;width:${COL_W}px;min-width:${COL_W}px;vertical-align:middle">${p.name}</th>`;
+              }
+              return `<th colspan="${p.span}" style="padding:5px 4px;border:1px solid var(--border);text-align:center;background:${bg};color:#333;font-weight:700">${p.name}</th>`;
+            }).join('')}
+            <th rowspan="2" style="padding:6px 4px;border:1px solid var(--border);text-align:center;background:#e8f5e9;color:#2e7d32;font-weight:700;vertical-align:middle">總數</th>
+            <th rowspan="2" style="padding:6px 4px;border:1px solid var(--border);text-align:center;background:#fff8e1;color:#f57f17;font-weight:700;min-width:60px;vertical-align:middle">包好未出</th>
           </tr>
           <tr style="background:#fafafa">
-            <th style="padding:5px 8px;border:1px solid var(--border);position:sticky;left:0;background:#fafafa;z-index:2;font-size:11px;color:var(--muted)">物流</th>
-            ${columns.map(c=>`<th style="padding:4px 2px;border:1px solid var(--border);text-align:center;font-size:11px;color:var(--muted);width:${COL_W}px;min-width:${COL_W}px">${c.method||'—'}</th>`).join('')}
-            <th style="border:1px solid var(--border)"></th>
-            <th style="border:1px solid var(--border)"></th>
+            ${visibleColumns.filter(c=>c.method).map(c=>`<th style="padding:4px 2px;border:1px solid var(--border);text-align:center;font-size:11px;color:var(--muted);width:${COL_W}px;min-width:${COL_W}px">${c.method}</th>`).join('')}
           </tr>
         </thead>
         <tbody>
@@ -17237,13 +17249,13 @@ function renderShipments() {
             const isToday = dateStr === _localToday();
             const row = rowMap[dateStr];
             const data = row?.data || {};
-            const rowTotal = columns.reduce((s,c)=>s+(data[c.id]||0),0);
+            const rowTotal = visibleColumns.reduce((s,c)=>s+(data[c.id]||0),0);
             const packed = row?.packed_not_shipped || 0;
             return `<tr style="background:${isToday?'#fffde7':isWeekend?'#fafafa':'#fff'}" id="srow-${dateStr}">
               <td style="padding:4px 8px;border:1px solid var(--border);position:sticky;left:0;background:${isToday?'#fffde7':isWeekend?'#fafafa':'#fff'};z-index:1;font-size:12px;color:${isWeekend?'#ef5350':'var(--text)'};font-weight:${isToday?'700':'400'}">
                 ${day}<span style="font-size:10px;margin-left:3px;color:${isWeekend?'#ef5350':'var(--muted)'}">（${dow}）</span>
               </td>
-              ${columns.map(c=>{
+              ${visibleColumns.map(c=>{
                 const v = data[c.id]||0;
                 const bg = v > 0 ? '#fff' : '#f9f9f9';
                 return `<td style="padding:2px 3px;border:1px solid var(--border);text-align:center">
@@ -17266,7 +17278,7 @@ function renderShipments() {
         <tfoot>
           <tr style="background:#e8f5e9;font-weight:700">
             <td style="padding:6px 8px;border:1px solid var(--border);position:sticky;left:0;background:#e8f5e9;z-index:1">月合計</td>
-            ${columns.map(c=>`<td style="padding:6px 4px;border:1px solid var(--border);text-align:center;color:#2e7d32">${colTotals[c.id]||''}</td>`).join('')}
+            ${visibleColumns.map(c=>`<td style="padding:6px 4px;border:1px solid var(--border);text-align:center;color:#2e7d32">${colTotals[c.id]||''}</td>`).join('')}
             <td style="padding:6px 4px;border:1px solid var(--border);text-align:center;color:#2e7d32;font-size:14px">${grandTotal||''}</td>
             <td style="border:1px solid var(--border)"></td>
           </tr>
