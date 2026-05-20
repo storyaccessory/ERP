@@ -16509,9 +16509,14 @@ window.modalPendingBookings = function() {
   );
 };
 
-window.modalViewBooking = function(bookingId) {
-  const b = (state.data.booking?.records||[]).find(r=>r.id===bookingId);
-  if (!b) return;
+window.modalViewBooking = async function(bookingId) {
+  let b = (state.data.booking?.records||[]).find(r=>r.id===bookingId);
+  if (!b) {
+    // booking 頁面資料未載入時，直接從 DB 撈單筆
+    const { data } = await db.from('experience_bookings').select('*').eq('id', bookingId).single();
+    if (!data) { showToast('找不到此預約', 'error'); return; }
+    b = data;
+  }
   const isBlock = b.source === '人工封鎖';
   const sc = b.status==='已確認'?'tag-green':b.status==='已取消'?'tag-grey':'tag-orange';
   const slotEnd = _slotEnd(b.time_slot||'13:00');
@@ -16586,9 +16591,13 @@ window.modalViewBooking = function(bookingId) {
 };
 
 // 編輯預約
-window.modalEditBooking = function(bookingId) {
-  const b = (state.data.booking?.records||[]).find(r=>r.id===bookingId);
-  if (!b) return;
+window.modalEditBooking = async function(bookingId) {
+  let b = (state.data.booking?.records||[]).find(r=>r.id===bookingId);
+  if (!b) {
+    const { data } = await db.from('experience_bookings').select('*').eq('id', bookingId).single();
+    if (!data) { showToast('找不到此預約', 'error'); return; }
+    b = data;
+  }
   const STATUS_OPTS = ['待確認','已確認','已取消'];
   showModal('✏️ 編輯預約', `
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -16763,12 +16772,22 @@ function renderJournal() {
 
   // ── 全員日誌總覽 ──
   const todayView = () => {
-    const viewLogs = jd.today || [];
-    const submittedIds = new Set(viewLogs.map(l=>l.user_id));
+    const allLogs = jd.today || [];
+    const filterUser = state.data.journalFilterUser || '';
+    const viewLogs = filterUser ? allLogs.filter(l => l.user_id === filterUser) : allLogs;
+    const submittedIds = new Set(allLogs.map(l=>l.user_id));
     const missing = profiles.filter(p => p.journal_required && !submittedIds.has(p.id));
+    const filteredMissing = filterUser ? [] : missing;
     return `
-      ${viewLogs.length === 0 && missing.length === 0 ?
-        `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>這天還沒有人填寫日誌</p></div></div>` : ''}
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
+        <span style="font-size:12px;color:var(--muted)">篩選人員：</span>
+        <button class="btn btn-sm ${!filterUser?'btn-primary':'btn-outline'}" onclick="state.data.journalFilterUser='';renderApp()">全部</button>
+        ${profiles.filter(p=>submittedIds.has(p.id)||p.journal_required).map(p=>`
+          <button class="btn btn-sm ${filterUser===p.id?'btn-primary':'btn-outline'}" onclick="state.data.journalFilterUser='${p.id}';renderApp()">${p.name}</button>
+        `).join('')}
+      </div>
+      ${viewLogs.length === 0 && filteredMissing.length === 0 ?
+        `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>${filterUser?'此人員這天沒有填寫日誌':'這天還沒有人填寫日誌'}</p></div></div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
         ${viewLogs.map(log => {
           const isMe = log.user_id === myId;
@@ -16819,7 +16838,7 @@ function renderJournal() {
             </div>` : ''}
           </div>`;
         }).join('')}
-        ${missing.map(p => {
+        ${filteredMissing.map(p => {
           const myTasks = allTodos.filter(t => t.assignee_id === p.id);
           return `<div class="card" style="border-left:4px solid var(--border);opacity:.7">
             <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
