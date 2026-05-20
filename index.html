@@ -166,12 +166,12 @@ input[type=number] { -moz-appearance: textfield; }
 @media (max-width: 700px) { .cards-4,.cards-3 { grid-template-columns: repeat(2,1fr); } .cards-2 { grid-template-columns: repeat(2,1fr); } }
 /* 行事曆 layout */
 .cal-layout { display:grid; grid-template-columns:1fr 280px; gap:16px; align-items:start; }
-.cal-cell { min-height:56px; }
-.cal-cell-empty { min-height:56px; }
+.cal-cell { min-height:88px; }
+.cal-cell-empty { min-height:88px; }
 @media (max-width: 700px) {
   .cal-layout { grid-template-columns:1fr; }
-  .cal-cell { min-height:44px; }
-  .cal-cell-empty { min-height:44px; }
+  .cal-cell { min-height:52px; }
+  .cal-cell-empty { min-height:52px; }
   /* 會計儀表盤 5格 → 手機 2欄 */
   .acct-dashboard-admin { grid-template-columns:repeat(2,1fr) !important; }
 }
@@ -17860,8 +17860,8 @@ function renderCalendar() {
     const more = dayItems.length - shown.length;
     const isWeekend = new Date(y,m,d).getDay() === 0 || new Date(y,m,d).getDay() === 6;
 
-    cells.push(`<div class="cal-cell" data-date="${ds}" style="border:1px solid var(--border);border-radius:6px;padding:3px;cursor:pointer;background:${isToday?'#e8f5f4':isWeekend?'#fafafa':'#fff'};${isToday?'outline:2px solid var(--accent);':''}">
-      <div style="font-size:11px;font-weight:${isToday?700:400};color:${isToday?'var(--accent-dark)':isWeekend?'#9e9e9e':'var(--text)'};margin-bottom:2px">${d}</div>
+    cells.push(`<div class="cal-cell" data-date="${ds}" style="border:1px solid ${isToday?'#e53935':isWeekend?'#e8e8e8':'var(--border)'};border-radius:6px;padding:4px 5px;cursor:pointer;background:${isToday?'#fff5f5':isWeekend?'#fafafa':'#fff'};${isToday?'outline:2px solid #e53935;':''}">
+      <div style="font-size:12px;font-weight:${isToday?800:400};color:${isToday?'#c62828':isWeekend?'#bbb':'var(--text)'};margin-bottom:3px">${isToday?`<span style="display:inline-flex;align-items:center;justify-content:center;background:#e53935;color:#fff;width:21px;height:21px;border-radius:50%;font-size:11px">${d}</span>`:d}</div>
       ${shown.map(item => {
         if (item._type === 'booking') {
           const b = item.b;
