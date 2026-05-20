@@ -594,7 +594,7 @@ function getNavOrder() {
     if (saved && Array.isArray(saved)) return saved;
   } catch(e) {}
   // 預設順序：各 section 的 page keys
-  return ['業務追蹤', '商品管理', '製作部', '物料管理', '財務', '系統'];
+  return ['業務追蹤', '行政客服', '商品管理', '製作部', '物料管理', '財務', '系統'];
 }
 function saveNavOrder(order) {
   localStorage.setItem('story_nav_order', JSON.stringify(order));
