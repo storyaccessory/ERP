@@ -20026,26 +20026,26 @@ async function handleAction(action, id, dataset) {
     case 'booking-view-month': {
       if (!state.data.booking) state.data.booking = {};
       state.data.booking.viewMode = 'month';
-      if (!state.data.booking.viewMonthStart) state.data.booking.viewMonthStart = new Date().toISOString().slice(0,7)+'-01';
+      if (!state.data.booking.viewMonthStart) state.data.booking.viewMonthStart = _localToday().slice(0,7)+'-01';
       await loadBooking(); renderApp(); break;
     }
     case 'booking-prev-month': {
       if (!state.data.booking) state.data.booking = {};
-      const curM = state.data.booking.viewMonthStart || new Date().toISOString().slice(0,7)+'-01';
+      const curM = state.data.booking.viewMonthStart || _localToday().slice(0,7)+'-01';
       const mn1 = new Date(curM+'T00:00:00'); mn1.setMonth(mn1.getMonth()-1);
-      state.data.booking.viewMonthStart = mn1.toISOString().slice(0,7)+'-01';
+      state.data.booking.viewMonthStart = _localDateStr(mn1).slice(0,7)+'-01';
       await loadBooking(); renderApp(); break;
     }
     case 'booking-next-month': {
       if (!state.data.booking) state.data.booking = {};
-      const curM = state.data.booking.viewMonthStart || new Date().toISOString().slice(0,7)+'-01';
+      const curM = state.data.booking.viewMonthStart || _localToday().slice(0,7)+'-01';
       const mn2 = new Date(curM+'T00:00:00'); mn2.setMonth(mn2.getMonth()+1);
-      state.data.booking.viewMonthStart = mn2.toISOString().slice(0,7)+'-01';
+      state.data.booking.viewMonthStart = _localDateStr(mn2).slice(0,7)+'-01';
       await loadBooking(); renderApp(); break;
     }
     case 'booking-this-month': {
       if (!state.data.booking) state.data.booking = {};
-      state.data.booking.viewMonthStart = new Date().toISOString().slice(0,7)+'-01';
+      state.data.booking.viewMonthStart = _localToday().slice(0,7)+'-01';
       await loadBooking(); renderApp(); break;
     }
     case 'add-booking':
