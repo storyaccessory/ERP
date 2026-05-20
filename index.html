@@ -16932,7 +16932,7 @@ window.loadJournalForDate = async function(date) {
 };
 
 // 新增一行日誌項目到指定欄位容器
-window._jnlAddRow = function(fieldKey, hasQty, descVal='', qtyVal='') {
+window._jnlAddRow = function(fieldKey, hasQty, descVal='', qtyVal='', placeholderText='描述內容') {
   const container = document.getElementById(`jnl-rows-${fieldKey}`);
   if (!container) return;
   const row = document.createElement('div');
@@ -16940,7 +16940,7 @@ window._jnlAddRow = function(fieldKey, hasQty, descVal='', qtyVal='') {
   row.innerHTML = `
     <input class="form-control jnl-desc" data-field="${fieldKey}"
       value="${descVal.replace(/"/g,'&quot;')}"
-      placeholder="描述內容"
+      placeholder="${placeholderText.replace(/"/g,'&quot;')}"
       style="flex:1;font-size:13px">
     ${hasQty ? `<input class="form-control jnl-qty" data-field="${fieldKey}"
       value="${qtyVal.replace(/"/g,'&quot;')}"
@@ -17039,7 +17039,11 @@ window.modalEditJournal = async function(existingId = null) {
       }
       // 沒資料時給一個空行
       if (items.length === 0) items = [{ desc: '', qty: '' }];
-      items.forEach(item => window._jnlAddRow(f.key, !!f.hasQty, item.desc||'', item.qty||''));
+      items.forEach((item, idx) => {
+        // 第一個空白行顯示職位專屬範例 placeholder
+        const ph = (idx === 0 && !item.desc) ? (f.placeholder || '描述內容') : '描述內容';
+        window._jnlAddRow(f.key, !!f.hasQty, item.desc||'', item.qty||'', ph);
+      });
     });
   }, 60);
 };
