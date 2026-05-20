@@ -7102,15 +7102,87 @@ window.pickupCollapse = function(prefix) {
 function renderTodos() {
   const todos = state.data.todos || [];
   const today = new Date().toISOString().split('T')[0];
+  const soon = new Date(Date.now()+3*86400000).toISOString().split('T')[0];
   const tab = state.data.todoTab || '全部';
+  const overdueCount = todos.filter(td=>td.deadline&&td.deadline<today&&td.status!=='完成').length;
+
   const filtered = tab === '個人' ? todos.filter(t=>!t.is_team) :
                    tab === '團隊' ? todos.filter(t=>t.is_team) :
                    tab === '逾期' ? todos.filter(t=>t.deadline && t.deadline < today && t.status !== '完成') :
-                   todos;
+                   tab === '任務板' ? todos : todos;
 
+  // ── 任務板 view (按負責人分組) ──
+  if (tab === '任務板') {
+    const active = todos.filter(t => t.status !== '完成');
+    const byPerson = {};
+    active.forEach(t => {
+      const name = t.profiles?.name || '未指派';
+      if (!byPerson[name]) byPerson[name] = [];
+      byPerson[name].push(t);
+    });
+    const dateColor = (deadline, est) => {
+      if (!deadline) return 'var(--muted)';
+      if (deadline < today) return 'var(--danger)';
+      if (deadline <= soon) return '#f59e0b';
+      return '#10b981';
+    };
+    const dateIcon = (deadline) => {
+      if (!deadline) return '';
+      if (deadline < today) return '🔴';
+      if (deadline <= soon) return '🟡';
+      return '🟢';
+    };
+    return `
+      <div class="tabs">
+        ${['全部','個人','團隊','逾期','任務板'].map(t=>`<div class="tab ${tab===t?'active':''}" data-todo-tab="${t}">${t}${t==='逾期'?` <span style="color:var(--danger)">(${overdueCount})</span>`:''}</div>`).join('')}
+      </div>
+      <div class="search-bar">
+        <button class="btn btn-primary" id="add-todo-btn">+ 新增待辦</button>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+        ${Object.keys(byPerson).sort().map(name => {
+          const tasks = byPerson[name].sort((a,b)=>(a.deadline||'9')>(b.deadline||'9')?1:-1);
+          return `<div class="card">
+            <div style="font-size:14px;font-weight:700;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid var(--border)">${name} <span style="font-size:12px;color:var(--muted);font-weight:400">${tasks.length} 件待辦</span></div>
+            ${tasks.map(t => {
+              const isOverdue = t.deadline && t.deadline < today;
+              const isWarn = t.deadline && t.deadline <= soon && t.deadline >= today;
+              return `<div style="padding:8px 0;border-bottom:1px solid var(--border)">
+                <div style="display:flex;justify-content:space-between;align-items:start;gap:6px">
+                  <div>
+                    <span class="dot ${t.priority==='緊急'?'dot-red':t.priority==='高'?'dot-orange':t.priority==='一般'?'dot-teal':'dot-grey'}"></span>
+                    <strong style="font-size:13px">${t.title}</strong>
+                  </div>
+                  <button class="btn-table" style="flex-shrink:0" data-action="edit-todo" data-id="${t.id}">編輯</button>
+                </div>
+                <div style="margin-top:5px;font-size:11px;display:flex;gap:10px;flex-wrap:wrap">
+                  ${t.deadline ? `<span style="color:${isOverdue?'var(--danger)':isWarn?'#f59e0b':'var(--muted)'}">
+                    ${dateIcon(t.deadline)} 交件：${t.deadline}${isOverdue?' ⚠️逾期':''}
+                  </span>` : ''}
+                  ${t.estimated_completion ? `<span style="color:${t.estimated_completion>t.deadline?'var(--danger)':'#10b981'}">
+                    📋 預計：${t.estimated_completion}${t.deadline&&t.estimated_completion>t.deadline?' ⚠️超出交件日':''}
+                  </span>` : `<span style="color:var(--muted);font-style:italic">預計完成日未填</span>`}
+                </div>
+                ${t.status!=='完成'?`<button class="btn-table" style="margin-top:4px;background:var(--accent-light);color:var(--accent-dark)" data-action="done-todo" data-id="${t.id}">✓ 完成</button>`:''}
+              </div>`;
+            }).join('')}
+            ${tasks.length===0?`<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">沒有待辦事項 ✅</div>`:''}
+          </div>`;
+        }).join('')}
+        ${Object.keys(byPerson).length===0?`<div class="card"><div class="empty"><div class="empty-icon">✅</div><p>目前沒有進行中的任務</p></div></div>`:''}
+      </div>`;
+  }
+
+  // ── 一般列表 view ──
+  const dateStatus = (t) => {
+    if (!t.deadline || t.status === '完成') return '';
+    if (t.deadline < today) return 'var(--danger)';
+    if (t.deadline <= soon) return '#f59e0b';
+    return 'inherit';
+  };
   return `
     <div class="tabs">
-      ${['全部','個人','團隊','逾期'].map(t=>`<div class="tab ${tab===t?'active':''}" data-todo-tab="${t}">${t}${t==='逾期'?` <span style="color:var(--danger)">(${todos.filter(td=>td.deadline&&td.deadline<today&&td.status!=='完成').length})</span>`:''}</div>`).join('')}
+      ${['全部','個人','團隊','逾期','任務板'].map(t=>`<div class="tab ${tab===t?'active':''}" data-todo-tab="${t}">${t}${t==='逾期'?` <span style="color:var(--danger)">(${overdueCount})</span>`:''}</div>`).join('')}
     </div>
     <div class="search-bar">
       <input class="search-input" placeholder="搜尋待辦事項…">
@@ -7121,25 +7193,30 @@ function renderTodos() {
         <table>
           <thead><tr>
             <th>優先</th><th>標題</th><th>類型</th><th>負責人</th>
-            <th>截止日</th><th>狀態</th><th>操作</th>
+            <th>🗓 交件日</th><th>📋 預計完成</th><th>狀態</th><th>操作</th>
           </tr></thead>
           <tbody>
-          ${filtered.length === 0 ? `<tr><td colspan="7"><div class="empty"><div class="empty-icon">✅</div><p>沒有待辦事項</p></div></td></tr>` :
-            filtered.map(t => `<tr>
-              <td><span class="dot ${t.priority==='緊急'?'dot-red':t.priority==='高'?'dot-orange':t.priority==='一般'?'dot-teal':'dot-grey'}"></span>${t.priority}</td>
-              <td><strong>${t.title}</strong>${t.description?`<div style="font-size:11px;color:var(--muted)">${t.description.slice(0,40)}</div>`:''}</td>
-              <td><span class="tag ${t.is_team?'tag-blue':'tag-grey'}">${t.is_team?'團隊':'個人'}</span></td>
-              <td>${t.profiles?.name||'—'}</td>
-              <td style="color:${t.deadline&&t.deadline<today&&t.status!=='完成'?'var(--danger)':'inherit'}">${t.deadline||'—'}</td>
-              <td><span class="tag ${t.status==='完成'?'tag-green':t.status==='進行中'?'tag-blue':'tag-grey'}">${t.status}</span></td>
-              <td>
-                <div class="action-btns">
-                  ${t.status!=='完成'?`<button class="btn-table" style="background:var(--accent-light);color:var(--accent-dark)" data-action="done-todo" data-id="${t.id}">✓ 完成</button>`:''}
-                  <button class="btn-table" data-action="edit-todo" data-id="${t.id}">編輯</button>
-                  <button class="btn-table" style="background:#fff0f0;color:#e53935;border:1px solid #ffcdd2;" onclick="window._delTodo('${t.id}')">🗑 刪除</button>
-                </div>
-              </td>
-            </tr>`).join('')}
+          ${filtered.length === 0 ? `<tr><td colspan="8"><div class="empty"><div class="empty-icon">✅</div><p>沒有待辦事項</p></div></td></tr>` :
+            filtered.map(t => {
+              const dlColor = dateStatus(t);
+              const estOver = t.estimated_completion && t.deadline && t.estimated_completion > t.deadline;
+              return `<tr>
+                <td><span class="dot ${t.priority==='緊急'?'dot-red':t.priority==='高'?'dot-orange':t.priority==='一般'?'dot-teal':'dot-grey'}"></span>${t.priority}</td>
+                <td><strong>${t.title}</strong>${t.description?`<div style="font-size:11px;color:var(--muted)">${t.description.slice(0,40)}</div>`:''}</td>
+                <td><span class="tag ${t.is_team?'tag-blue':'tag-grey'}">${t.is_team?'團隊':'個人'}</span></td>
+                <td>${t.profiles?.name||'—'}</td>
+                <td style="color:${dlColor};font-weight:${t.deadline&&t.deadline<today?'600':'400'}">${t.deadline||(t.status!=='完成'?'<span style="color:var(--muted);font-size:11px">未設定</span>':'—')}</td>
+                <td style="color:${estOver?'var(--danger)':'inherit'}">${t.estimated_completion||`<span style="color:var(--muted);font-size:11px;font-style:italic">員工未填</span>`}${estOver?' ⚠️':''}</td>
+                <td><span class="tag ${t.status==='完成'?'tag-green':t.status==='進行中'?'tag-blue':'tag-grey'}">${t.status}</span></td>
+                <td>
+                  <div class="action-btns">
+                    ${t.status!=='完成'?`<button class="btn-table" style="background:var(--accent-light);color:var(--accent-dark)" data-action="done-todo" data-id="${t.id}">✓ 完成</button>`:''}
+                    <button class="btn-table" data-action="edit-todo" data-id="${t.id}">編輯</button>
+                    <button class="btn-table" style="background:#fff0f0;color:#e53935;border:1px solid #ffcdd2;" onclick="window._delTodo('${t.id}')">🗑 刪除</button>
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
@@ -15721,15 +15798,17 @@ function _getTemplateForLog(log, jd) {
 
 async function loadJournal() {
   const today = new Date().toISOString().slice(0,10);
-  const [todayRes, histRes, profilesRes] = await Promise.all([
+  const [todayRes, histRes, profilesRes, todosRes] = await Promise.all([
     db.from('work_journals').select('*').eq('date', today).order('created_at'),
     db.from('work_journals').select('*').eq('user_id', state.user.id).order('date', { ascending: false }).limit(90),
     db.from('profiles').select('id, name, role, journal_template').order('name'),
+    db.from('todos').select('*, profiles!todos_assignee_id_fkey(name)').neq('status','完成').order('deadline'),
   ]);
   state.data.journal = {
     today: todayRes.data || [],
     history: histRes.data || [],
     profiles: profilesRes.data || [],
+    todos: todosRes.data || [],
     todayDate: today,
   };
 }
@@ -15746,20 +15825,24 @@ function renderJournal() {
   const hasSubmitted = !!myLog;
   const myTpl = _getMyTemplate(jd);
 
-  // ── 今日全覽 ──
+  const allTodos = jd.todos || [];
+  const today3d = new Date(Date.now()+3*86400000).toISOString().slice(0,10);
+
+  // ── 全員日誌總覽 ──
   const todayView = () => {
-    const submittedIds = new Set(todayLogs.map(l=>l.user_id));
+    const viewLogs = jd.today || [];
+    const submittedIds = new Set(viewLogs.map(l=>l.user_id));
     const missing = profiles.filter(p => !submittedIds.has(p.id));
     return `
-      ${todayLogs.length === 0 && missing.length === 0 ?
-        `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>今天還沒有人填寫日誌</p></div></div>` : ''}
+      ${viewLogs.length === 0 && missing.length === 0 ?
+        `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>這天還沒有人填寫日誌</p></div></div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
-        ${todayLogs.map(log => {
+        ${viewLogs.map(log => {
           const isMe = log.user_id === myId;
           const tpl = _getTemplateForLog(log, jd);
           const fields = log.fields || {};
-          // 有值的欄位
           const filledFields = tpl.fields.filter(f => fields[f.key] || log[f.key]);
+          const myTasks = allTodos.filter(t => t.assignee_id === log.user_id);
           return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
             <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
               <div>
@@ -15775,14 +15858,77 @@ function renderJournal() {
                 <div style="font-size:13px;white-space:pre-wrap;line-height:1.5">${val}</div>
               </div>` : '';
             }).join('')}
-            ${isMe ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><button class="btn btn-sm btn-outline" onclick="modalEditJournal()">✏️ 修改</button></div>` : ''}
+            ${myTasks.length > 0 ? `
+            <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+              <div style="font-size:11px;font-weight:600;color:var(--muted);margin-bottom:6px">📌 手上任務（${myTasks.length} 件未完成）</div>
+              ${myTasks.slice(0,4).map(t => {
+                const over = t.deadline && t.deadline < today;
+                const warn = t.deadline && t.deadline <= today3d && t.deadline >= today;
+                const estOver = t.estimated_completion && t.deadline && t.estimated_completion > t.deadline;
+                return `<div style="font-size:12px;padding:3px 0;display:flex;gap:6px;align-items:start">
+                  <span>${over?'🔴':warn?'🟡':'🟢'}</span>
+                  <div>
+                    <div style="font-weight:500">${t.title}</div>
+                    <div style="color:var(--muted);font-size:11px">
+                      交件：${t.deadline||'未設定'}
+                      ${t.estimated_completion?` · 預計：<span style="color:${estOver?'var(--danger)':'#10b981'}">${t.estimated_completion}${estOver?' ⚠️':''}</span>`:'<span style="color:#f59e0b"> · 預計完成日未填</span>'}
+                    </div>
+                  </div>
+                </div>`;
+              }).join('')}
+              ${myTasks.length > 4 ? `<div style="font-size:11px;color:var(--muted);margin-top:4px">⋯ 還有 ${myTasks.length-4} 件</div>` : ''}
+            </div>` : ''}
+            ${isMe ? `<div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)"><button class="btn btn-sm btn-outline" onclick="modalEditJournal()">✏️ 修改日誌</button></div>` : ''}
           </div>`;
         }).join('')}
-        ${missing.map(p => `
-          <div class="card" style="border-left:4px solid var(--border);opacity:.45">
+        ${missing.map(p => {
+          const myTasks = allTodos.filter(t => t.assignee_id === p.id);
+          return `<div class="card" style="border-left:4px solid var(--border);opacity:.7">
             <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:4px">尚未填寫今日日誌</div>
-          </div>`).join('')}
+            <div style="font-size:12px;color:var(--muted);margin-top:4px;margin-bottom:8px">尚未填寫日誌</div>
+            ${myTasks.length > 0 ? `<div style="font-size:11px;color:var(--muted)">${myTasks.length} 件未完成任務 · 最近截止：${myTasks.find(t=>t.deadline)?.deadline||'—'}</div>` : ''}
+          </div>`;
+        }).join('')}
+      </div>`;
+  };
+
+  // ── 任務總覽 (所有人的待辦) ──
+  const taskOverview = () => {
+    const byPerson = {};
+    profiles.forEach(p => { byPerson[p.name] = { profile: p, tasks: [] }; });
+    allTodos.forEach(t => {
+      const name = t.profiles?.name || '未指派';
+      if (!byPerson[name]) byPerson[name] = { profile: null, tasks: [] };
+      byPerson[name].tasks.push(t);
+    });
+    return `
+      <div style="margin:12px 0 14px;font-size:12px;color:var(--muted)">顯示所有人的未完成任務 · 含交件日與預計完成日</div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px">
+        ${Object.entries(byPerson).filter(([,v])=>v.tasks.length>0).sort((a,b)=>a[0]>b[0]?1:-1).map(([name, v]) => {
+          const tasks = v.tasks.sort((a,b)=>(a.deadline||'9')>(b.deadline||'9')?1:-1);
+          const overdueN = tasks.filter(t=>t.deadline&&t.deadline<today).length;
+          return `<div class="card">
+            <div style="display:flex;justify-content:space-between;margin-bottom:10px;padding-bottom:8px;border-bottom:2px solid var(--border)">
+              <div style="font-size:14px;font-weight:700">${name}</div>
+              <div style="font-size:11px;color:var(--muted)">${tasks.length} 件${overdueN>0?` · <span style="color:var(--danger)">${overdueN} 逾期</span>`:''}</div>
+            </div>
+            ${tasks.map(t => {
+              const over = t.deadline && t.deadline < today;
+              const warn = t.deadline && t.deadline <= today3d && t.deadline >= today;
+              const estOver = t.estimated_completion && t.deadline && t.estimated_completion > t.deadline;
+              return `<div style="padding:6px 0;border-bottom:1px solid var(--border)">
+                <div style="font-size:13px;font-weight:500">${over?'🔴':warn?'🟡':'🟢'} ${t.title}</div>
+                <div style="font-size:11px;color:var(--muted);margin-top:3px;display:flex;gap:8px;flex-wrap:wrap">
+                  <span style="color:${over?'var(--danger)':warn?'#f59e0b':'inherit'}">交件：${t.deadline||'未設定'}</span>
+                  <span style="color:${estOver?'var(--danger)':t.estimated_completion?'#10b981':'#f59e0b'}">
+                    預計：${t.estimated_completion||'未填'}${estOver?' ⚠️超出':''}
+                  </span>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>`;
+        }).join('')}
+        ${Object.values(byPerson).every(v=>v.tasks.length===0)?`<div class="card"><div class="empty"><div class="empty-icon">✅</div><p>目前沒有待辦任務</p></div></div>`:''}
       </div>`;
   };
 
@@ -15827,11 +15973,19 @@ function renderJournal() {
   };
 
   return `
-    <div class="tabs" style="margin-bottom:16px">
-      <div class="tab ${tab==='今日全覽'?'active':''}" data-journal-tab="今日全覽">👥 今日全覽</div>
+    <div class="tabs" style="margin-bottom:0">
+      <div class="tab ${tab==='今日全覽'?'active':''}" data-journal-tab="今日全覽">👥 全員日誌</div>
       <div class="tab ${tab==='我的日誌'?'active':''}" data-journal-tab="我的日誌">📋 我的日誌</div>
+      <div class="tab ${tab==='任務總覽'?'active':''}" data-journal-tab="任務總覽">📌 任務總覽</div>
     </div>
-    ${!hasSubmitted && tab==='今日全覽' ? `
+    ${tab==='今日全覽' ? `
+    <div style="display:flex;align-items:center;gap:10px;padding:12px 0 14px;flex-wrap:wrap">
+      <input type="date" class="form-control" style="width:160px" value="${jd.viewDate||today}" onchange="state.data.journal.viewDate=this.value;loadJournalForDate(this.value)">
+      <button class="btn btn-outline btn-sm" onclick="state.data.journal.viewDate='${today}';loadJournalForDate('${today}')">今天</button>
+      <button class="btn btn-outline btn-sm" onclick="state.data.journal.viewDate='${new Date(Date.now()-86400000).toISOString().slice(0,10)}';loadJournalForDate(state.data.journal.viewDate)">昨天</button>
+      <span style="font-size:12px;color:var(--muted)">${jd.viewDate&&jd.viewDate!==today?`查看：${jd.viewDate}`:'今天'}</span>
+    </div>
+    ${!hasSubmitted && (jd.viewDate||today)===today ? `
     <div style="background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
       <div>
         <div style="font-weight:700;font-size:14px">你今天還沒填寫日誌 📝</div>
@@ -15839,8 +15993,15 @@ function renderJournal() {
       </div>
       <button class="btn" style="background:#fff;color:var(--accent-dark);font-weight:700;white-space:nowrap" onclick="modalEditJournal()">立即填寫</button>
     </div>` : ''}
-    ${tab==='今日全覽' ? todayView() : myView()}`;
+    ${todayView()}` : tab==='任務總覽' ? taskOverview() : myView()}`;
 }
+
+window.loadJournalForDate = async function(date) {
+  const { data } = await db.from('work_journals').select('*').eq('date', date).order('created_at');
+  state.data.journal.today = data || [];
+  state.data.journal.viewDate = date;
+  renderApp();
+};
 
 window.modalEditJournal = async function(existingId = null) {
   const jd = state.data.journal || {};
@@ -17045,51 +17206,65 @@ function modalAddOrder() {
   };
 }
 
-function modalAddTodo() {
-  showModal('新增待辦事項', `
-    <div class="form-group"><label>標題 *</label><input class="form-control" id="m-title" placeholder="待辦事項標題"></div>
-    <div class="form-group"><label>說明</label><textarea class="form-control" id="m-desc" rows="2"></textarea></div>
+function modalAddTodo(existing = null) {
+  const isEdit = !!existing;
+  showModal(isEdit ? '編輯待辦事項' : '新增待辦事項', `
+    <div class="form-group"><label>標題 *</label><input class="form-control" id="m-title" placeholder="待辦事項標題" value="${existing?.title||''}"></div>
+    <div class="form-group"><label>說明</label><textarea class="form-control" id="m-desc" rows="2">${existing?.description||''}</textarea></div>
     <div class="form-row form-row-2">
       <div class="form-group"><label>優先度</label>
         <select class="form-control" id="m-priority">
-          <option>緊急</option><option>高</option><option selected>一般</option><option>低</option>
+          ${['緊急','高','一般','低'].map(p=>`<option ${(existing?.priority||'一般')===p?'selected':''}>${p}</option>`).join('')}
         </select>
       </div>
-      <div class="form-group"><label>截止日</label><input class="form-control" type="date" id="m-deadline"></div>
+      <div class="form-group"><label>🗓 最終交件日（主管設定）</label><input class="form-control" type="date" id="m-deadline" value="${existing?.deadline||''}"></div>
     </div>
     <div class="form-row form-row-2">
       <div class="form-group"><label>類型</label>
         <select class="form-control" id="m-is-team">
-          <option value="false">個人待辦</option>
-          <option value="true">團隊共用</option>
+          <option value="false" ${!(existing?.is_team)?'selected':''}>個人待辦</option>
+          <option value="true" ${existing?.is_team?'selected':''}>團隊共用</option>
         </select>
       </div>
       <div class="form-group"><label>指派給</label>
         <select class="form-control" id="m-assignee">
-          <option value="${state.user?.id}">自己（${state.profile?.name}）</option>
-          ${(state.data.users||[]).filter(u=>u.id!==state.user?.id).map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}
+          <option value="${state.user?.id}" ${(!existing||existing.assignee_id===state.user?.id)?'selected':''}>自己（${state.profile?.name}）</option>
+          ${(state.data.users||[]).filter(u=>u.id!==state.user?.id).map(u=>`<option value="${u.id}" ${existing?.assignee_id===u.id?'selected':''}>${u.name}</option>`).join('')}
         </select>
       </div>
     </div>
+    <div class="form-group">
+      <label>📋 預計完成日（員工自填）</label>
+      <input class="form-control" type="date" id="m-est-completion" value="${existing?.estimated_completion||''}">
+      <div style="font-size:11px;color:var(--muted);margin-top:3px">員工自行評估的完成時間，可能早於交件日；若超過交件日會出現警示</div>
+    </div>
   `, `
     <button class="btn btn-outline" onclick="document.getElementById('modal-overlay').remove()">取消</button>
-    <button class="btn btn-primary" id="save-todo-btn">儲存</button>
+    <button class="btn btn-primary" id="save-todo-btn">${isEdit?'更新':'儲存'}</button>
   `);
 
   document.getElementById('save-todo-btn').onclick = async () => {
     const title = document.getElementById('m-title').value.trim();
     if (!title) { showToast('請填寫標題', 'error'); return; }
     const isTeam = document.getElementById('m-is-team').value === 'true';
-    const { error } = await db.from('todos').insert({
+    const payload = {
       title, description: document.getElementById('m-desc').value,
       priority: document.getElementById('m-priority').value,
       deadline: document.getElementById('m-deadline').value || null,
+      estimated_completion: document.getElementById('m-est-completion').value || null,
       is_team: isTeam,
       assignee_id: document.getElementById('m-assignee').value || state.user?.id,
-      created_by: state.user?.id,
-    });
-    if (error) { showToast('儲存失敗', 'error'); return; }
-    showToast('待辦事項已新增！');
+    };
+    if (isEdit) {
+      const { error } = await db.from('todos').update(payload).eq('id', existing.id);
+      if (error) { showToast('更新失敗', 'error'); return; }
+      showToast('已更新！');
+    } else {
+      payload.created_by = state.user?.id;
+      const { error } = await db.from('todos').insert(payload);
+      if (error) { showToast('儲存失敗', 'error'); return; }
+      showToast('待辦事項已新增！');
+    }
     document.getElementById('modal-overlay')?.remove();
     await loadTodos(); if (state.page === 'todos') renderApp();
     await loadDashboard(); if (state.page === 'dashboard') renderApp();
@@ -18070,6 +18245,13 @@ window._delTodo = async function(id) {
 
 async function handleAction(action, id, dataset) {
   switch(action) {
+    case 'edit-todo': {
+      if (!(state.data.users||[]).length) await loadUsers();
+      const t = (state.data.todos||[]).find(t=>t.id===id);
+      if (t) modalAddTodo(t);
+      break;
+    }
+
     case 'done-todo':
       await db.from('todos').update({ status:'完成', completed_at: new Date().toISOString() }).eq('id', id);
       showToast('已標記完成！');
