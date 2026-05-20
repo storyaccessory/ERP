@@ -14471,8 +14471,8 @@ function renderUsers() {
         <div style="display:flex;align-items:center;gap:12px;margin-bottom:${isAdminUser?'0':'14px'}">
           <div class="avatar" style="width:40px;height:40px;font-size:18px;flex-shrink:0">${(u.name||'U')[0]}</div>
           <div style="flex:1">
-            <div style="font-weight:600;font-size:15px">${u.name}</div>
-            <div style="font-size:12px;color:var(--muted)">${u.email}</div>
+            <div style="font-weight:600;font-size:15px">${u.name}${u.employee_no?` <span style="font-size:11px;color:var(--muted);font-weight:400">#${u.employee_no}</span>`:''}</div>
+            <div style="font-size:12px;color:var(--muted)">${u.job_title?`${u.job_title} · `:''} ${u.email}</div>
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
             <span class="tag ${ROLE_COLOR[u.role]||'tag-grey'}">${ROLE_LABEL[u.role]||u.role}</span>
@@ -14550,7 +14550,11 @@ window.modalEditUser = function(userId) {
   const u = (state.data.users||[]).find(u=>u.id===userId);
   if (!u) return;
   showModal(`編輯帳號 — ${u.name}`, `
-    <div class="form-group"><label>姓名</label><input class="form-control" id="eu-name" value="${u.name||''}"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>姓名</label><input class="form-control" id="eu-name" value="${u.name||''}"></div>
+      <div class="form-group"><label>員工編號</label><input class="form-control" id="eu-emp-no" value="${u.employee_no||''}" placeholder="例：S001"></div>
+    </div>
+    <div class="form-group"><label>職稱</label><input class="form-control" id="eu-job-title" value="${u.job_title||''}" placeholder="例：視覺設計師、金工師傅"></div>
     <div class="form-group"><label>角色</label>
       <select class="form-control" id="eu-role">
         <option value="admin" ${u.role==='admin'?'selected':''}>系統管理員</option>
@@ -14581,11 +14585,13 @@ window.modalEditUser = function(userId) {
   `, [
     { label:'儲存', primary:true, onclick: async ()=>{
       const name = document.getElementById('eu-name').value.trim();
+      const employee_no = document.getElementById('eu-emp-no').value.trim() || null;
+      const job_title = document.getElementById('eu-job-title').value.trim() || null;
       const role = document.getElementById('eu-role').value;
       const journal_template = document.getElementById('eu-journal-tpl').value || null;
       const journal_required = document.getElementById('eu-journal-required').checked;
       if (!name) { showToast('請填姓名','error'); return; }
-      const { error } = await db.from('profiles').update({ name, role, journal_template, journal_required }).eq('id', userId);
+      const { error } = await db.from('profiles').update({ name, employee_no, job_title, role, journal_template, journal_required }).eq('id', userId);
       if (error) { showToast('更新失敗：'+error.message,'error'); return; }
       showToast('已更新'); closeModal(); await loadUsers(); renderApp();
     }},
@@ -16950,6 +16956,15 @@ window.loadJournalForDate = async function(date) {
 };
 
 // 新增一行日誌項目到指定欄位容器
+window.deleteJournal = async function(id, userName) {
+  if (!confirm(`確定要刪除「${userName}」的這篇日誌？此操作無法復原。`)) return;
+  const { error } = await db.from('work_journals').delete().eq('id', id);
+  if (error) { showToast('刪除失敗：' + error.message, 'error'); return; }
+  showToast('日誌已刪除');
+  await loadJournal();
+  renderApp();
+};
+
 window._jnlAddRow = function(fieldKey, hasQty, descVal='', qtyVal='', placeholderText='描述內容') {
   const container = document.getElementById(`jnl-rows-${fieldKey}`);
   if (!container) return;
