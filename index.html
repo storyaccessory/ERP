@@ -576,9 +576,7 @@ const PAGES = {
   sales:      { label: '業績儀表板',   icon: '📈', section: '業務追蹤' },
   // 財務
   wages:      { label: '鑄件工資月結', icon: '💴', section: '財務' },
-  jinbaosan:  { label: '金寶山月結',   icon: '🏔️', section: '財務' },
-  plate:      { label: '電鍍廠月結',   icon: '⚡', section: '財務' },
-  foundry:    { label: '鑄造廠月結',   icon: '🔥', section: '財務' },
+  vendors:    { label: '廠商月結',     icon: '📑', section: '財務' },
   accounting: { label: '會計月結',     icon: '📊', section: '財務' },
   costs:      { label: '成本管理',     icon: '💰', section: '財務' },
   peripheral: { label: '周邊成本',     icon: '📦', section: '財務' },
@@ -685,9 +683,7 @@ async function loadPageData(page) {
     costs:      loadCosts,
     users:      loadUsers,
     wages:      loadWages,
-    jinbaosan:  loadJinbaosan,
-    plate:      loadPlate,
-    foundry:    loadFoundry,
+    vendors:    loadVendors,
     goldsmith:  loadGoldsmith,
     peripheral: loadPeripheral,
   };
@@ -16058,6 +16054,24 @@ window.modalEditJournal = async function(existingId = null) {
 };
 
 // ══════════════════════════════════════════════
+// 廠商月結（金寶山 + 電鍍廠 + 鑄造廠）
+// ══════════════════════════════════════════════
+async function loadVendors() {
+  await Promise.all([loadJinbaosan(), loadPlate(), loadFoundry()]);
+}
+
+function renderVendors() {
+  const tab = state.data.vendorTab || '金寶山';
+  return `
+    <div class="tabs" style="margin-bottom:16px">
+      <div class="tab ${tab==='金寶山'?'active':''}" data-vendor-tab="金寶山">🏔️ 金寶山</div>
+      <div class="tab ${tab==='電鍍廠'?'active':''}" data-vendor-tab="電鍍廠">⚡ 電鍍廠</div>
+      <div class="tab ${tab==='鑄造廠'?'active':''}" data-vendor-tab="鑄造廠">🔥 鑄造廠</div>
+    </div>
+    ${tab==='金寶山' ? _renderJinbaosanContent() : tab==='電鍍廠' ? _renderPlateContent() : _renderFoundryContent()}`;
+}
+
+// ══════════════════════════════════════════════
 // 金寶山月結
 // ══════════════════════════════════════════════
 async function loadJinbaosan() {
@@ -16065,7 +16079,8 @@ async function loadJinbaosan() {
   state.data.jinbaosan = data || [];
 }
 
-function renderJinbaosan() {
+function renderJinbaosan() { return _renderJinbaosanContent(); }
+function _renderJinbaosanContent() {
   const records = state.data.jinbaosan || [];
   const filterYm = state.data.jinbaosanYm || new Date().toISOString().slice(0,7);
   const filtered = records.filter(r => r.year_month === filterYm);
@@ -16219,7 +16234,8 @@ async function loadPlate() {
   state.data.plate = data || [];
 }
 
-function renderPlate() {
+function renderPlate() { return _renderPlateContent(); }
+function _renderPlateContent() {
   const records = state.data.plate || [];
   const filterYm = state.data.plateYm || new Date().toISOString().slice(0,7);
   const filtered = records.filter(r => r.year_month === filterYm);
@@ -16415,7 +16431,8 @@ async function loadFoundry() {
   state.data.foundry = data || [];
 }
 
-function renderFoundry() {
+function renderFoundry() { return _renderFoundryContent(); }
+function _renderFoundryContent() {
   const records = state.data.foundry || [];
   const filterYm = state.data.foundryYm || new Date().toISOString().slice(0,7);
   const filtered = records.filter(r => r.year_month === filterYm);
@@ -17357,9 +17374,7 @@ const pageRenderers = {
   settings:   renderSettings,
   calendar:   renderCalendar,
   wages:      renderWages,
-  jinbaosan:  renderJinbaosan,
-  plate:      renderPlate,
-  foundry:    renderFoundry,
+  vendors:    renderVendors,
   goldsmith:  renderGoldsmith,
   peripheral: renderPeripheral,
 };
@@ -17667,6 +17682,9 @@ function bindEvents() {
   });
   document.querySelectorAll('[data-journal-tab]').forEach(el => {
     el.onclick = () => { state.data.journalTab = el.dataset.journalTab; renderApp(); };
+  });
+  document.querySelectorAll('[data-vendor-tab]').forEach(el => {
+    el.onclick = () => { state.data.vendorTab = el.dataset.vendorTab; renderApp(); };
   });
 
   // ── Sales dashboard ──
