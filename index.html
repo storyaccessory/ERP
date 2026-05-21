@@ -16849,7 +16849,7 @@ window.modalViewBooking = async function(bookingId) {
     b = data;
   }
   const isBlock = b.source === '人工封鎖';
-  const sc = b.status==='已確認'?'tag-green':b.status==='已取消'?'tag-grey':'tag-orange';
+  const sc = b.status==='已確認'?'tag-green':b.status==='已完成'?'tag-teal':b.status==='已取消'?'tag-grey':'tag-orange';
   const slotEnd = _slotEnd(b.time_slot||'13:00');
 
   if (isBlock) {
@@ -16908,6 +16908,18 @@ window.modalViewBooking = async function(bookingId) {
     }] : []),
     ...(b.status==='已確認' ? [{
       label:'📋 複製確認訊息', onclick: () => { closeModal(); window.showCannedMessage(bookingId); }
+    }] : []),
+    ...(b.status==='已確認' ? [{
+      label:'✅ 標記完成', onclick: async () => {
+        await db.from('experience_bookings').update({ status:'已完成' }).eq('id', bookingId);
+        showToast('已標記為完成 ✅'); closeModal(); await loadCalendarEvents(); renderApp();
+      }
+    }] : []),
+    ...(b.status==='已完成' ? [{
+      label:'↩ 取消完成', onclick: async () => {
+        await db.from('experience_bookings').update({ status:'已確認' }).eq('id', bookingId);
+        showToast('已恢復為確認狀態'); closeModal(); await loadCalendarEvents(); renderApp();
+      }
     }] : []),
     ...(b.status!=='已取消' ? [{
       label:'❌ 取消預約', onclick: async () => {
@@ -18995,7 +19007,7 @@ async function loadCalendarEvents() {
     .select('id,booking_date,time_slot,customer_name,source,status,attendees')
     .gte('booking_date', firstOfMonth)
     .lte('booking_date', lastOfMonth)
-    .eq('status', '已確認')
+    .in('status', ['已確認','已完成'])
     .neq('source', '人工封鎖')
     .neq('source', '公休日');
   state.data.calBookings = bkData || [];
@@ -19058,7 +19070,7 @@ function renderCalendar() {
   Object.keys(eventMap).forEach(ds => {
     eventMap[ds].sort((a, b) => {
       const isTimed = item => item._type === 'booking' ? !!(item.b.time_slot) : !!(item.ev.start_time);
-      const isDone  = item => item._type === 'booking' ? false : !!item.ev.completed_at;
+      const isDone  = item => item._type === 'booking' ? item.b.status === '已完成' : !!item.ev.completed_at;
       const getTime = item => item._type === 'booking' ? (item.b.time_slot||'') : (item.ev.start_time||'');
       const aDone = isDone(a), bDone = isDone(b);
       if (aDone !== bDone) return aDone ? 1 : -1;          // 未完成優先
