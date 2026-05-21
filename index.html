@@ -707,10 +707,18 @@ async function loadDashboard() {
   const today = new Date().toISOString().split('T')[0];
   const threeDays = new Date(Date.now() + 3*86400000).toISOString().split('T')[0];
 
-  const [orders, restock, todos, cs, repair, dev, bookingPending] = await Promise.all([
+  const myId = state.user?.id;
+  const [orders, restock, calTodos, cs, repair, dev, bookingPending] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
-    db.from('todos').select('*').eq('status','未完成').or(`assignee_id.eq.${state.user?.id},is_team.eq.true`).order('deadline'),
+    db.from('calendar_events')
+      .select('id,title,start_date,end_date,priority,event_type,completed_at,assigned_to,assignee_ids')
+      .is('completed_at', null)
+      .neq('is_template', true)
+      .or(`assigned_to.eq.${myId},assignee_ids.cs.["${myId}"]`)
+      .gte('end_date', today)
+      .order('priority')
+      .order('start_date'),
     db.from('cs_records').select('*').eq('reply_status','未回覆'),
     db.from('repair_orders').select('*').not('status','in','("已完成","已寄回","取消")'),
     db.from('dev_projects').select('*').eq('status','進行中'),
@@ -720,7 +728,7 @@ async function loadDashboard() {
   state.data.dashboard = {
     orders: orders.data || [],
     restock: restock.data || [],
-    todos: todos.data || [],
+    todos: calTodos.data || [],
     cs: cs.data || [],
     repair: repair.data || [],
     dev: dev.data || [],
@@ -1089,7 +1097,7 @@ function renderDashboard() {
 
   const overdueOrders = orders.filter(o => o.due_date && o.due_date < today);
   const soonOrders = orders.filter(o => o.due_date && o.due_date >= today && o.due_date <= threeDays);
-  const overdueTodos = todos.filter(t => t.deadline && t.deadline < today);
+  const overdueTodos = todos.filter(t => t.start_date && t.start_date < today);
 
   // ── 年度業績達成狀況 ──
   const thisYear = new Date().getFullYear();
@@ -1194,21 +1202,35 @@ function renderDashboard() {
     </div>
 
     <div class="dashboard-grid">
-      <!-- 待辦事項 -->
+      <!-- 待辦事項（來自行事曆） -->
       <div class="card">
-        <div class="section-title">✅ 我的待辦 <button class="btn btn-sm btn-outline" style="margin-left:auto" id="add-todo-btn">+ 新增</button></div>
-        ${todos.length === 0 ? '<div class="empty"><div class="empty-icon">✅</div><p>沒有待辦事項</p></div>' :
-          todos.slice(0,5).map(t => `
-            <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0">
-              <span class="dot ${t.priority==='緊急'?'dot-red':t.priority==='高'?'dot-orange':'dot-teal'}"></span>
-              <div style="flex:1">
-                <div style="font-size:13px;font-weight:500">${t.title}</div>
-                ${t.deadline ? `<div style="font-size:11px;color:${t.deadline < today ? 'var(--danger)' : 'var(--muted)'}">📅 ${t.deadline}</div>` : ''}
+        <div class="section-title">✅ 我的待辦
+          <button class="btn btn-sm btn-outline" style="margin-left:auto" onclick="modalCalEvent()">+ 新增</button>
+        </div>
+        ${todos.length === 0 ? '<div class="empty"><div class="empty-icon">✅</div><p>沒有待辦事項</p></div>' : (() => {
+          const PRIORITY_ORDER = { '高':0, '中':1, '低':2 };
+          const sorted = [...todos].sort((a,b) =>
+            (PRIORITY_ORDER[a.priority]??1) - (PRIORITY_ORDER[b.priority]??1) ||
+            (a.start_date||'').localeCompare(b.start_date||'')
+          );
+          const calTypes = getCalEventTypes ? getCalEventTypes() : {};
+          const shown = sorted.slice(0, 5);
+          const rows = shown.map(t => {
+            const isOverdue = t.start_date < today;
+            const pColor = t.priority==='高'?'#e53935':t.priority==='低'?'#43a047':'#f57c00';
+            const ct = calTypes[t.event_type] || { label: t.event_type||'一般', color:'#90a4ae', bg:'#eceff1' };
+            return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
+              <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</div>
+                <div style="font-size:11px;color:${isOverdue?'var(--danger)':'var(--muted)'}">📅 ${t.start_date}${t.end_date&&t.end_date!==t.start_date?' ～ '+t.end_date:''}</div>
               </div>
-              <span class="tag ${t.is_team ? 'tag-blue' : 'tag-grey'}">${t.is_team ? '團隊' : '個人'}</span>
-            </div>
-          `).join('') + (todos.length > 5 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" data-page="todos">查看全部 ${todos.length} 件</div>` : '')
-        }
+              <span style="font-size:10px;background:${ct.bg};color:${ct.color};border-radius:4px;padding:1px 6px;white-space:nowrap;flex-shrink:0">${ct.label}</span>
+            </div>`;
+          }).join('');
+          const more = sorted.length > 5 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" onclick="state.page='calendar';state.data.calView='list';renderApp()">查看全部 ${sorted.length} 件 →</div>` : '';
+          return rows + more;
+        })()}
       </div>
 
       <!-- 近期訂單 -->
@@ -19439,10 +19461,23 @@ async function modalCalEvent(existing=null) {
       };
 
       if (id) {
-        const recurScope = existing?._recurScope; // 'one' | 'future' | 'all' | undefined
+        const recurScope = existing?._recurScope; // 'one' | 'future' | 'all' | 'rebuild' | undefined
         // 批次更新時，日期欄位各自保留（不蓋掉），只更新共用欄位
         const { start_date, end_date, event_date, ...batchPayload } = basePayload;
-        if (recurScope === 'all' && existing?.template_id) {
+        if (recurScope === 'rebuild' && existing?.template_id) {
+          // 重新設定週期：刪除所有舊實例 + 母事項，以新規則重建
+          const isRecur = document.getElementById('cal-recur-on')?.checked;
+          if (!isRecur) { showToast('請勾選「週期性重複」並設定新規則','error'); return; }
+          const recurType = document.getElementById('cal-recur-type').value;
+          const recurEnd  = document.getElementById('cal-recur-end').value;
+          if (!recurEnd) { showToast('請填重複結束日期','error'); return; }
+          // 刪除所有舊實例與母事項
+          await db.from('calendar_events').delete().eq('template_id', existing.template_id);
+          await db.from('calendar_events').delete().eq('id', existing.template_id);
+          // 以新規則重建
+          await _createRecurringEvents(basePayload, recurType, recurEnd);
+          showToast('週期規則已重新設定！');
+        } else if (recurScope === 'all' && existing?.template_id) {
           const { error: upErr } = await db.from('calendar_events')
             .update(batchPayload).eq('template_id', existing.template_id);
           if (upErr) { showToast('更新失敗：' + upErr.message, 'error'); return; }
@@ -19481,6 +19516,15 @@ async function modalCalEvent(existing=null) {
     }},
     { label:'取消', onclick: closeModal },
   ]);
+
+  // 重新設定週期模式：自動展開週期設定區
+  if (existing?._rebuildRecur) {
+    setTimeout(() => {
+      const cb = document.getElementById('cal-recur-on');
+      const body = document.getElementById('cal-recur-body');
+      if (cb && body) { cb.checked = true; body.style.display = 'block'; }
+    }, 80);
+  }
 }
 
 // 產生並批次寫入週期性事項
@@ -19626,6 +19670,11 @@ window.calViewEvent = function(id) {
                 <div style="font-weight:600">全部都改</div>
                 <div style="font-size:12px;color:var(--muted);margin-top:2px">更新整個週期所有筆（時間、標題等）</div>
               </button>
+              <button onclick="window._editRecurChoice('rebuild','${ev.id}')"
+                style="padding:12px 16px;border-radius:8px;border:1px solid var(--accent);background:var(--accent-light,#e8f5e9);text-align:left;cursor:pointer;font-size:13px">
+                <div style="font-weight:600;color:var(--accent-dark)">🔄 重新設定週期規則</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">刪除全部舊的，用新的週期規則重新建立</div>
+              </button>
             </div>
           `, [{ label:'取消', onclick: closeModal }]);
 
@@ -19634,10 +19683,12 @@ window.calViewEvent = function(id) {
             const target = (state.data.calEvents||[]).find(e=>e.id===evId);
             if (!target) return;
             if (scope === 'one') {
-              // 只改這次：直接開編輯 modal
+              modalCalEvent(target);
+            } else if (scope === 'rebuild') {
+              target._recurScope = 'rebuild';
+              target._rebuildRecur = true;
               modalCalEvent(target);
             } else {
-              // 先開編輯 modal，儲存時攔截
               target._recurScope = scope; // 'future' | 'all'
               modalCalEvent(target);
             }
