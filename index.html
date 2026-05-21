@@ -19332,6 +19332,7 @@ async function modalCalEvent(existing=null) {
         title,
         event_type: document.getElementById('cal-type').value,
         priority: document.getElementById('cal-priority').value,
+        event_date: startDate,
         start_date: startDate,
         end_date: endDate >= startDate ? endDate : startDate,
         start_time: startTime,
