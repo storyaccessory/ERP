@@ -19050,8 +19050,8 @@ function renderCalendar() {
           const evBg    = isDone ? '#eeeeee' : t.bg;
           const evColor = isDone ? '#aaa'    : t.color;
           const evDeco  = isDone ? 'text-decoration:line-through;opacity:.7;' : '';
-          const timeStr = ev.start_time ? ` ${ev.start_time.slice(0,5)}` : '';
-          return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${evBg};color:${evColor};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${evDeco}" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')">${timeStr}${ev.title}${assigneeName}</div>`;
+          const timeStr = ev.start_time ? `${ev.start_time.slice(0,5)} ` : '';
+          return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${evBg};color:${evColor};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${evDeco}" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')">${timeStr}${ev.title}</div>`;
         }
       }).join('')}
       ${more>0?`<div style="font-size:11px;color:var(--muted)">+${more}</div>`:''}
