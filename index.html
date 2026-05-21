@@ -19048,7 +19048,8 @@ function renderCalendar() {
           const evBg    = isDone ? '#eeeeee' : t.bg;
           const evColor = isDone ? '#aaa'    : t.color;
           const evDeco  = isDone ? 'text-decoration:line-through;opacity:.7;' : '';
-          return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${evBg};color:${evColor};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${evDeco}" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')">${ev.title}${assigneeName}</div>`;
+          const timeStr = ev.start_time ? ` ${ev.start_time.slice(0,5)}` : '';
+          return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${evBg};color:${evColor};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${evDeco}" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')">${timeStr}${ev.title}${assigneeName}</div>`;
         }
       }).join('')}
       ${more>0?`<div style="font-size:11px;color:var(--muted)">+${more}</div>`:''}
@@ -19115,7 +19116,7 @@ function renderCalendar() {
               </label>
             </div>
             ${listEvents.map(ev => {
-              const t = CAL_EVENT_TYPES[ev.event_type]||CAL_EVENT_TYPES.general;
+              const t = getCalEventTypes()[ev.event_type]||getCalEventTypes().general||{label:'一般',color:'#90a4ae',bg:'#eceff1'};
               const ps = PRIORITY_STYLE[ev.priority||'中'] || PRIORITY_STYLE['中'];
               const isDone = !!ev.completed_at;
               const listAssigneeIds = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
@@ -19143,7 +19144,7 @@ function renderCalendar() {
       </div>
       ${upcoming.length===0?`<div class="card"><div class="empty" style="padding:20px"><p style="font-size:13px">本月無事項</p></div></div>`:''}
       ${upcoming.map(ev=>{
-        const t = CAL_EVENT_TYPES[ev.event_type]||CAL_EVENT_TYPES.general;
+        const t = getCalEventTypes()[ev.event_type]||getCalEventTypes().general||{label:'一般',color:'#90a4ae',bg:'#eceff1'};
         const isMulti = ev.end_date && ev.end_date !== ev.start_date;
         const listAssigneeIds = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
         const listNames = listAssigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name || ev.profiles?.name).filter(Boolean);
@@ -19154,7 +19155,7 @@ function renderCalendar() {
             <span style="font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.title}</span>
             ${listAssigneeName?`<span style="font-size:11px;color:var(--muted);white-space:nowrap">👤 ${listAssigneeName}</span>`:''}
           </div>
-          <div style="font-size:11px;color:var(--muted)">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}</div>
+          <div style="font-size:11px;color:var(--muted)">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}${ev.start_time?` ${ev.start_time.slice(0,5)}${ev.end_time?' ～ '+ev.end_time.slice(0,5):''}`:''}</div>
           ${ev.description?`<div style="font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.description}</div>`:''}
         </div>`;
       }).join('')}
@@ -19196,11 +19197,36 @@ async function modalCalEvent(existing=null) {
           <option value="低" ${(existing?.priority||'中')==='低'?'selected':''}>🟢 低</option>
         </select>
       </div>
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group">
         <label>開始日期 <span style="color:var(--danger)">*</span></label>
         <input class="form-control" id="cal-start" type="date" value="${existing?.start_date||today}">
       </div>
+      <div class="form-group">
+        <label>結束日期</label>
+        <input class="form-control" id="cal-end" type="date" value="${existing?.end_date||existing?.start_date||today}">
+      </div>
+      <div class="form-group">
+        <label>開始時間</label>
+        <input class="form-control" id="cal-start-time" type="time" value="${existing?.start_time||''}">
+      </div>
+      <div class="form-group">
+        <label>結束時間</label>
+        <input class="form-control" id="cal-end-time" type="time" value="${existing?.end_time||''}">
+      </div>
     </div>
+
+    ${id ? `
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:${existing?.completed_at?'#e8f5e9':'#fafafa'}">
+        <input type="checkbox" id="cal-completed" ${existing?.completed_at?'checked':''} style="width:18px;height:18px;cursor:pointer"
+          onchange="this.closest('label').style.background=this.checked?'#e8f5e9':'#fafafa'">
+        <span style="font-size:13px;font-weight:600">✅ 標記為已完成</span>
+        ${existing?.completed_at?`<span style="font-size:11px;color:var(--muted);margin-left:auto">完成於 ${existing.completed_at.slice(0,10)}</span>`:''}
+      </label>
+    </div>` : ''}
 
     <div class="form-group">
       <label>負責人員 <span style="font-size:11px;color:var(--muted);font-weight:400">（可多選）</span></label>
@@ -19292,15 +19318,26 @@ async function modalCalEvent(existing=null) {
       const assigneeIds = users.map(u=>u.id).filter(uid => document.getElementById(`cal-u-${uid}`)?.checked);
       const assignedTo = assigneeIds[0] || null; // 向下相容舊欄位
 
+      const endDate = document.getElementById('cal-end')?.value || startDate;
+      const startTime = document.getElementById('cal-start-time')?.value || null;
+      const endTime   = document.getElementById('cal-end-time')?.value || null;
+      const completedEl = document.getElementById('cal-completed');
+      const completedAt = completedEl
+        ? (completedEl.checked ? (existing?.completed_at || new Date().toISOString()) : null)
+        : undefined;
+
       const basePayload = {
         title,
         event_type: document.getElementById('cal-type').value,
         priority: document.getElementById('cal-priority').value,
         start_date: startDate,
-        end_date: startDate,
+        end_date: endDate >= startDate ? endDate : startDate,
+        start_time: startTime,
+        end_time: endTime,
         description: document.getElementById('cal-desc').value.trim() || null,
         assigned_to: assignedTo,
         assignee_ids: assigneeIds,
+        ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
       };
 
       if (id) {
