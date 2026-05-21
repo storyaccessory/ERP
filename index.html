@@ -19344,10 +19344,27 @@ async function modalCalEvent(existing=null) {
       };
 
       if (id) {
-        // 編輯現有
-        const { error: upErr } = await db.from('calendar_events').update(basePayload).eq('id', id);
-        if (upErr) { showToast('更新失敗：' + upErr.message, 'error'); return; }
-        showToast('已更新！');
+        const recurScope = existing?._recurScope; // 'one' | 'future' | 'all' | undefined
+        if (recurScope === 'all' && existing?.template_id) {
+          // 全部都改：更新所有同 template_id 的事項
+          const { error: upErr } = await db.from('calendar_events')
+            .update(basePayload).eq('template_id', existing.template_id);
+          if (upErr) { showToast('更新失敗：' + upErr.message, 'error'); return; }
+          showToast('已更新全部週期事項！');
+        } else if (recurScope === 'future' && existing?.template_id) {
+          // 這次之後都改：更新 start_date >= 本筆日期 的同 template_id 事項
+          const { error: upErr } = await db.from('calendar_events')
+            .update(basePayload)
+            .eq('template_id', existing.template_id)
+            .gte('start_date', existing.start_date);
+          if (upErr) { showToast('更新失敗：' + upErr.message, 'error'); return; }
+          showToast('已更新此筆及之後的事項！');
+        } else {
+          // 只改這次（預設）
+          const { error: upErr } = await db.from('calendar_events').update(basePayload).eq('id', id);
+          if (upErr) { showToast('更新失敗：' + upErr.message, 'error'); return; }
+          showToast('已更新！');
+        }
       } else {
         // 新增
         const isRecur = document.getElementById('cal-recur-on')?.checked;
@@ -19433,7 +19450,7 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
 window.calViewEvent = function(id) {
   const ev = (state.data.calEvents||[]).find(e=>e.id===id);
   if (!ev) return;
-  const t = CAL_EVENT_TYPES[ev.event_type]||CAL_EVENT_TYPES.general;
+  const t = getCalEventTypes()[ev.event_type]||getCalEventTypes().general||{label:'一般',color:'#90a4ae',bg:'#eceff1'};
   const isMulti = ev.end_date && ev.end_date !== ev.start_date;
   const viewAssigneeIds = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
   const viewNames = viewAssigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean);
@@ -19467,7 +19484,48 @@ window.calViewEvent = function(id) {
         modalCalEvent({ ...ev, _prefill: true, id: null, start_date: _localToday(), end_date: _localToday() });
       }
     },
-    { label:'編輯', onclick: () => { closeModal(); modalCalEvent(ev); } },
+    { label:'編輯', onclick: () => {
+        closeModal();
+        if (ev.template_id) {
+          // 週期事項：先問要改哪些
+          showModal('編輯週期事項', `
+            <div style="font-size:13px;color:var(--muted);margin-bottom:16px">「${ev.title}」是週期性事項，請選擇要修改的範圍：</div>
+            <div style="display:flex;flex-direction:column;gap:10px">
+              <button onclick="window._editRecurChoice('one','${ev.id}')"
+                style="padding:12px 16px;border-radius:8px;border:1px solid var(--border);background:#fff;text-align:left;cursor:pointer;font-size:13px">
+                <div style="font-weight:600">只改這次</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">只修改 ${ev.start_date} 這一筆</div>
+              </button>
+              <button onclick="window._editRecurChoice('future','${ev.id}')"
+                style="padding:12px 16px;border-radius:8px;border:1px solid var(--border);background:#fff;text-align:left;cursor:pointer;font-size:13px">
+                <div style="font-weight:600">這次和之後的都改</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">修改 ${ev.start_date} 以後的所有筆</div>
+              </button>
+              <button onclick="window._editRecurChoice('all','${ev.id}')"
+                style="padding:12px 16px;border-radius:8px;border:1px solid var(--border);background:#fff;text-align:left;cursor:pointer;font-size:13px">
+                <div style="font-weight:600">全部都改</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">修改這個週期的所有筆</div>
+              </button>
+            </div>
+          `, [{ label:'取消', onclick: closeModal }]);
+
+          window._editRecurChoice = async function(scope, evId) {
+            closeModal();
+            const target = (state.data.calEvents||[]).find(e=>e.id===evId);
+            if (!target) return;
+            if (scope === 'one') {
+              // 只改這次：直接開編輯 modal
+              modalCalEvent(target);
+            } else {
+              // 先開編輯 modal，儲存時攔截
+              target._recurScope = scope; // 'future' | 'all'
+              modalCalEvent(target);
+            }
+          };
+        } else {
+          modalCalEvent(ev);
+        }
+    }},
     { label:'關閉', onclick: closeModal },
   ]);
 };
