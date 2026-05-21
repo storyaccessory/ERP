@@ -19398,7 +19398,7 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
     if (!checkedDays.length) { showToast('請選擇至少一天','error'); return; }
     const cur = new Date(startD);
     while (cur <= endD) {
-      if (checkedDays.includes(cur.getDay())) dates.push(cur.toISOString().slice(0,10));
+      if (checkedDays.includes(cur.getDay())) dates.push(_localDateStr(cur));
       cur.setDate(cur.getDate() + 1);
     }
   } else if (recurType === 'monthly') {
