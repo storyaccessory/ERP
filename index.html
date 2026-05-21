@@ -19037,21 +19037,19 @@ function renderCalendar() {
           const b = item.b;
           const isPickup = b.source === '門市取貨';
           const timeStr = (b.time_slot||'').slice(0,5);
-          const label = `門市 ${timeStr} ${isPickup?'取貨':'鑑賞'} ${b.customer_name||''}`;
+          const content = `${timeStr ? timeStr+' ' : ''}${isPickup?'取貨':'鑑賞'} ${b.customer_name||''}`.trim();
+          const label = `門市-${content}`;
           return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${storeT.bg};color:${storeT.color};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" onclick="event.stopPropagation();window.modalViewBooking('${b.id}')">${label}</div>`;
         } else {
           const ev = item.ev;
           const t = getCalEventTypes()[ev.event_type] || getCalEventTypes().general || {label:'一般',color:'#90a4ae',bg:'#eceff1'};
-          const evAssigneeIds = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
-          const allUsers = state.data.users || [];
-          const evNames = evAssigneeIds.map(uid => allUsers.find(u=>u.id===uid)?.name).filter(Boolean);
-          const assigneeName = evNames.length ? ` · ${evNames.join('/')}` : (ev.profiles?.name ? ` · ${ev.profiles.name}` : '');
           const isDone = !!ev.completed_at;
           const evBg    = isDone ? '#eeeeee' : t.bg;
           const evColor = isDone ? '#aaa'    : t.color;
           const evDeco  = isDone ? 'text-decoration:line-through;opacity:.7;' : '';
           const timeStr = ev.start_time ? `${ev.start_time.slice(0,5)} ` : '';
-          return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${evBg};color:${evColor};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${evDeco}" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')">${timeStr}${ev.title}</div>`;
+          const label = `${t.label}-${timeStr}${ev.title}`;
+          return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${evBg};color:${evColor};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${evDeco}" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')">${label}</div>`;
         }
       }).join('')}
       ${more>0?`<div style="font-size:11px;color:var(--muted)">+${more}</div>`:''}
