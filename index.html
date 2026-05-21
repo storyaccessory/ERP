@@ -19485,22 +19485,30 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
       cur.setDate(cur.getDate() + 1);
     }
   } else if (recurType === 'monthly') {
-    const week    = parseInt(document.getElementById('cal-recur-week').value);    // 1-5
+    const week    = parseInt(document.getElementById('cal-recur-week').value);    // 1-4 or 5=最後
     const weekday = parseInt(document.getElementById('cal-recur-weekday').value); // 0-6
     const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
     while (cur <= endD) {
       const y = cur.getFullYear(), m = cur.getMonth();
-      // 找第 week 個 weekday
-      let count = 0, day = 1;
       const daysInMonth = new Date(y, m+1, 0).getDate();
-      for (; day <= daysInMonth; day++) {
-        if (new Date(y, m, day).getDay() === weekday) {
-          count++;
-          if (count === week) break;
+      let targetDay = -1;
+      if (week === 5) {
+        // 最後一個：從月底往前找
+        for (let day = daysInMonth; day >= 1; day--) {
+          if (new Date(y, m, day).getDay() === weekday) { targetDay = day; break; }
+        }
+      } else {
+        // 第 N 個
+        let count = 0;
+        for (let day = 1; day <= daysInMonth; day++) {
+          if (new Date(y, m, day).getDay() === weekday) {
+            count++;
+            if (count === week) { targetDay = day; break; }
+          }
         }
       }
-      if (count === week) {
-        const d = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+      if (targetDay !== -1) {
+        const d = `${y}-${String(m+1).padStart(2,'0')}-${String(targetDay).padStart(2,'0')}`;
         if (d >= base.start_date && d <= recurEndDate) dates.push(d);
       }
       cur.setMonth(cur.getMonth() + 1);
