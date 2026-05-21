@@ -15170,7 +15170,7 @@ function renderSettings() {
   const settingsTab = state.data.settingsTab || '品類管理';
   return `
     <div class="tabs">
-      ${['品類管理','顏色選項','IP授權管理','維修報價表','廠商管理','AP範本','餐費設定','通知設定','AI 設定'].map(t=>`<div class="tab ${settingsTab===t?'active':''}" data-settings-tab="${t}">${t}</div>`).join('')}
+      ${['品類管理','顏色選項','IP授權管理','維修報價表','廠商管理','AP範本','餐費設定','行事曆分類','通知設定','AI 設定'].map(t=>`<div class="tab ${settingsTab===t?'active':''}" data-settings-tab="${t}">${t}</div>`).join('')}
     </div>
     ${settingsTab === 'IP授權管理' ? renderIPManager() :
       settingsTab === '維修報價表' ? renderRepairPriceManager() :
@@ -15179,6 +15179,7 @@ function renderSettings() {
       settingsTab === '廠商管理' ? `<div id="vendor-list-wrapper">${renderSettingsVendors()}</div>` :
       settingsTab === 'AP範本' ? renderAPTemplateSettings() :
       settingsTab === '餐費設定' ? renderSettingsMealBudget() :
+      settingsTab === '行事曆分類' ? renderCalEventTypeSettings() :
       settingsTab === 'AI 設定' ? renderAISettings() :
     `
     <div class="cards cards-2">
@@ -15527,6 +15528,149 @@ window._applyAPTemplate = function() {
     if (saved) state.data.apTemplates = JSON.parse(saved);
   } catch(e) {}
 })();
+
+function renderCalEventTypeSettings() {
+  const types = Object.entries(getCalEventTypes());
+  return `
+    <div class="card">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:16px">
+        <div>
+          <div style="font-weight:600;font-size:14px">📅 行事曆分類管理</div>
+          <div style="font-size:12px;color:var(--muted);margin-top:2px">自訂分類名稱與顏色，新增或刪除分類</div>
+        </div>
+        <button class="btn btn-primary btn-sm" onclick="modalAddCalEventType()">+ 新增分類</button>
+      </div>
+      <div style="display:flex;flex-direction:column;gap:8px">
+        ${types.map(([id, t]) => `
+          <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:#fff">
+            <span style="display:inline-block;width:28px;height:28px;border-radius:6px;background:${t.bg};border:2px solid ${t.color};flex-shrink:0"></span>
+            <span style="flex:1;font-size:13px;font-weight:600;color:${t.color}">${t.label}</span>
+            <span style="font-size:11px;color:var(--muted);font-family:monospace">${id}</span>
+            <button class="btn-table" onclick="modalEditCalEventType('${id}')" style="background:#e3f2fd;color:#1565c0">編輯</button>
+            <button class="btn-table danger" onclick="window.deleteCalEventType('${id}','${t.label}')">刪除</button>
+          </div>`).join('')}
+      </div>
+    </div>`;
+}
+
+window.modalAddCalEventType = function() {
+  showModal('新增行事曆分類', `
+    <div class="form-group"><label>分類名稱</label><input class="form-control" id="cet-label" placeholder="例：客戶拜訪"></div>
+    <div class="form-group"><label>ID（英文，不可重複）</label><input class="form-control" id="cet-id" placeholder="例：visit"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label>主色（文字/點）</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="color" id="cet-color" value="#4db6ac" style="width:44px;height:36px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:2px">
+          <input class="form-control" id="cet-color-hex" value="#4db6ac" style="font-family:monospace" oninput="document.getElementById('cet-color').value=this.value">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>背景色</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="color" id="cet-bg" value="#e0f2f1" style="width:44px;height:36px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:2px">
+          <input class="form-control" id="cet-bg-hex" value="#e0f2f1" style="font-family:monospace" oninput="document.getElementById('cet-bg').value=this.value">
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:4px">
+      <span style="font-size:12px;color:var(--muted)">預覽：</span>
+      <span id="cet-preview" style="font-size:12px;padding:2px 8px;border-radius:4px;font-weight:600;background:#e0f2f1;color:#4db6ac">● 分類名稱</span>
+    </div>
+  `, [
+    { label:'新增', primary:true, onclick: async () => {
+      const label = document.getElementById('cet-label').value.trim();
+      const id    = document.getElementById('cet-id').value.trim().toLowerCase().replace(/\s+/g,'_');
+      const color = document.getElementById('cet-color-hex').value.trim() || document.getElementById('cet-color').value;
+      const bg    = document.getElementById('cet-bg-hex').value.trim() || document.getElementById('cet-bg').value;
+      if (!label || !id) { showToast('請填寫名稱和ID','error'); return; }
+      if (getCalEventTypes()[id]) { showToast('ID 已存在，請換一個','error'); return; }
+      const sort_order = Object.keys(getCalEventTypes()).length * 10;
+      const { error } = await db.from('cal_event_types').insert({ id, label, color, bg, sort_order });
+      if (error) { showToast('新增失敗：'+error.message,'error'); return; }
+      showToast(`已新增「${label}」`); closeModal();
+      await loadCalEventTypes(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+  // 色盤同步預覽
+  setTimeout(() => {
+    const sync = () => {
+      const c = document.getElementById('cet-color').value;
+      const b = document.getElementById('cet-bg').value;
+      const l = document.getElementById('cet-label').value || '分類名稱';
+      document.getElementById('cet-color-hex').value = c;
+      document.getElementById('cet-bg-hex').value = b;
+      const prev = document.getElementById('cet-preview');
+      if (prev) { prev.style.background=b; prev.style.color=c; prev.textContent='● '+l; }
+    };
+    document.getElementById('cet-color')?.addEventListener('input', sync);
+    document.getElementById('cet-bg')?.addEventListener('input', sync);
+    document.getElementById('cet-label')?.addEventListener('input', sync);
+  }, 50);
+};
+
+window.modalEditCalEventType = function(id) {
+  const t = getCalEventTypes()[id];
+  if (!t) return;
+  showModal(`編輯分類 — ${t.label}`, `
+    <div class="form-group"><label>分類名稱</label><input class="form-control" id="cet-label" value="${t.label}"></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label>主色（文字/點）</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="color" id="cet-color" value="${t.color}" style="width:44px;height:36px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:2px">
+          <input class="form-control" id="cet-color-hex" value="${t.color}" style="font-family:monospace" oninput="document.getElementById('cet-color').value=this.value">
+        </div>
+      </div>
+      <div class="form-group">
+        <label>背景色</label>
+        <div style="display:flex;align-items:center;gap:8px">
+          <input type="color" id="cet-bg" value="${t.bg}" style="width:44px;height:36px;border:1px solid var(--border);border-radius:6px;cursor:pointer;padding:2px">
+          <input class="form-control" id="cet-bg-hex" value="${t.bg}" style="font-family:monospace" oninput="document.getElementById('cet-bg').value=this.value">
+        </div>
+      </div>
+    </div>
+    <div style="margin-top:4px">
+      <span style="font-size:12px;color:var(--muted)">預覽：</span>
+      <span id="cet-preview" style="font-size:12px;padding:2px 8px;border-radius:4px;font-weight:600;background:${t.bg};color:${t.color}">● ${t.label}</span>
+    </div>
+  `, [
+    { label:'儲存', primary:true, onclick: async () => {
+      const label = document.getElementById('cet-label').value.trim();
+      const color = document.getElementById('cet-color-hex').value.trim() || document.getElementById('cet-color').value;
+      const bg    = document.getElementById('cet-bg-hex').value.trim() || document.getElementById('cet-bg').value;
+      if (!label) { showToast('請填寫名稱','error'); return; }
+      const { error } = await db.from('cal_event_types').update({ label, color, bg }).eq('id', id);
+      if (error) { showToast('更新失敗：'+error.message,'error'); return; }
+      showToast('已更新！'); closeModal();
+      await loadCalEventTypes(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+  setTimeout(() => {
+    const sync = () => {
+      const c = document.getElementById('cet-color').value;
+      const b = document.getElementById('cet-bg').value;
+      const l = document.getElementById('cet-label').value || t.label;
+      document.getElementById('cet-color-hex').value = c;
+      document.getElementById('cet-bg-hex').value = b;
+      const prev = document.getElementById('cet-preview');
+      if (prev) { prev.style.background=b; prev.style.color=c; prev.textContent='● '+l; }
+    };
+    document.getElementById('cet-color')?.addEventListener('input', sync);
+    document.getElementById('cet-bg')?.addEventListener('input', sync);
+    document.getElementById('cet-label')?.addEventListener('input', sync);
+  }, 50);
+};
+
+window.deleteCalEventType = async function(id, label) {
+  if (!confirm(`確定刪除「${label}」分類？\n（使用此分類的行事曆事項不會被刪除，會改顯示為預設樣式）`)) return;
+  const { error } = await db.from('cal_event_types').delete().eq('id', id);
+  if (error) { showToast('刪除失敗：'+error.message,'error'); return; }
+  showToast(`已刪除「${label}」`);
+  await loadCalEventTypes(); renderApp();
+};
 
 function renderAISettings() {
   const hasKey = !!getClaudeApiKey();
@@ -18755,7 +18899,22 @@ window.deleteColorOption = async function(index) {
 
 // ── Calendar ──
 // ── Calendar ──
+async function loadCalEventTypes() {
+  const { data } = await db.from('cal_event_types').select('*').order('sort_order');
+  if (data?.length) {
+    const map = {};
+    data.forEach(t => { map[t.id] = { label: t.label, color: t.color, bg: t.bg }; });
+    state.data.calEventTypesMap = map;
+  }
+}
+
+function getCalEventTypes() {
+  return state.data.calEventTypesMap || CAL_EVENT_TYPES;
+}
+
 async function loadCalendarEvents() {
+  // 確保分類資料存在
+  if (!state.data.calEventTypesMap) await loadCalEventTypes();
   // 確保人員資料存在（行事曆指派人員需要）
   if (!state.data.users?.length) {
     const { data: uData } = await db.from('profiles').select('id, name, role').order('name');
@@ -18854,7 +19013,7 @@ function renderCalendar() {
     });
   });
 
-  const storeT = CAL_EVENT_TYPES.store;
+  const storeT = getCalEventTypes().store || {label:'門市',color:'#00897b',bg:'#e0f2f1'};
 
   // Build calendar grid
   const cells = [];
@@ -18878,7 +19037,7 @@ function renderCalendar() {
           return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${storeT.bg};color:${storeT.color};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" onclick="event.stopPropagation();window.modalViewBooking('${b.id}')">${label}</div>`;
         } else {
           const ev = item.ev;
-          const t = CAL_EVENT_TYPES[ev.event_type] || CAL_EVENT_TYPES.general;
+          const t = getCalEventTypes()[ev.event_type] || getCalEventTypes().general || {label:'一般',color:'#90a4ae',bg:'#eceff1'};
           const evAssigneeIds = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
           const allUsers = state.data.users || [];
           const evNames = evAssigneeIds.map(uid => allUsers.find(u=>u.id===uid)?.name).filter(Boolean);
@@ -18926,7 +19085,7 @@ function renderCalendar() {
           ${cells.join('')}
         </div>
         <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
-          ${Object.entries(CAL_EVENT_TYPES).map(([k,t])=>`<span style="font-size:10px;background:${t.bg};color:${t.color};border-radius:4px;padding:2px 6px;font-weight:600">● ${t.label}</span>`).join('')}
+          ${Object.entries(getCalEventTypes()).map(([k,t])=>`<span style="font-size:10px;background:${t.bg};color:${t.color};border-radius:4px;padding:2px 6px;font-weight:600">● ${t.label}</span>`).join('')}
         </div>` : `
         <!-- 清單視圖 -->
         ${(() => {
@@ -19024,7 +19183,7 @@ async function modalCalEvent(existing=null) {
       <div class="form-group">
         <label>分類</label>
         <select class="form-control" id="cal-type">
-          ${Object.entries(CAL_EVENT_TYPES).map(([k,t])=>`<option value="${k}" ${(existing?.event_type||'general')===k?'selected':''}>${t.label}</option>`).join('')}
+          ${Object.entries(getCalEventTypes()).map(([k,t])=>`<option value="${k}" ${(existing?.event_type||'general')===k?'selected':''}>${t.label}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
