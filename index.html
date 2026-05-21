@@ -19000,7 +19000,7 @@ async function loadCalendarEvents() {
   await loadCalEventTypes();
   // 確保人員資料存在（行事曆指派人員需要）
   if (!state.data.users?.length) {
-    const { data: uData } = await db.from('profiles').select('id, name, role').order('name');
+    const { data: uData } = await db.from('profiles').select('id, name, role, department').order('name');
     state.data.users = uData || [];
   }
   const cal = state.data.calNav || (() => { const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; })();
@@ -19271,6 +19271,11 @@ function renderCalendar() {
 async function modalCalEvent(existing=null) {
   const today = _localToday();
   const id = existing?._prefill ? null : existing?.id;
+  // 確保人員資料已載入（從儀表板等非行事曆頁呼叫時可能尚未載入）
+  if (!state.data.users?.length) {
+    const { data: uData } = await db.from('profiles').select('id, name, role, department').order('name');
+    state.data.users = uData || [];
+  }
   const users = state.data.users || [];
 
   // 現有指派人員（新欄位 assignee_ids 優先，舊欄位 assigned_to 備用）
@@ -19335,7 +19340,23 @@ async function modalCalEvent(existing=null) {
 
     <div class="form-group">
       <label>負責人員 <span style="font-size:11px;color:var(--muted);font-weight:400">（可多選）</span></label>
-      <div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fafafa">
+      ${(() => {
+        if (!users.length) return '';
+        // 群組快速選取
+        const depts = [...new Set(users.map(u => u.department).filter(Boolean))];
+        if (!depts.length) return '';
+        const btnStyle = `font-size:11px;padding:3px 10px;border-radius:12px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:600;color:var(--text);white-space:nowrap`;
+        const deptBtns = depts.map(dept => {
+          const ids = JSON.stringify(users.filter(u=>u.department===dept).map(u=>u.id));
+          return `<button type="button" style="${btnStyle}" onclick="window._calToggleGroup(${ids})">${dept}</button>`;
+        }).join('');
+        return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
+          <button type="button" style="${btnStyle};color:var(--accent);border-color:var(--accent)" onclick="window._calSelectAll()">全選</button>
+          ${deptBtns}
+          <button type="button" style="${btnStyle};color:#e53935;border-color:#e53935" onclick="window._calClearAll()">清除</button>
+        </div>`;
+      })()}
+      <div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fafafa" id="cal-assignee-wrap">
         ${users.length === 0
           ? `<span style="color:var(--muted);font-size:13px">無人員資料</span>`
           : users.map(u => `
@@ -19611,6 +19632,28 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
 }
 
 window.modalCalEvent = modalCalEvent;
+
+// 行事曆群組 toggle：全部已勾 → 取消；否則 → 全勾（不動其他人）
+window._calToggleGroup = function(ids) {
+  const allChecked = ids.every(id => document.getElementById('cal-u-'+id)?.checked);
+  ids.forEach(id => {
+    const cb = document.getElementById('cal-u-'+id);
+    if (!cb) return;
+    const shouldCheck = !allChecked;
+    if (cb.checked !== shouldCheck) { cb.checked = shouldCheck; cb.dispatchEvent(new Event('change')); }
+  });
+};
+// 全選 / 清除
+window._calSelectAll = function() {
+  document.getElementById('cal-assignee-wrap')?.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    if (!cb.checked) { cb.checked = true; cb.dispatchEvent(new Event('change')); }
+  });
+};
+window._calClearAll = function() {
+  document.getElementById('cal-assignee-wrap')?.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+    if (cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
+  });
+};
 window.calViewEvent = function(id) {
   const ev = (state.data.calEvents||[]).find(e=>e.id===id);
   if (!ev) return;
