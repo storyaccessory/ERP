@@ -18930,13 +18930,15 @@ async function loadCalendarEvents() {
     .select(sel)
     .lte('start_date', lastOfMonth)
     .gte('end_date', firstOfMonth)
+    .neq('is_template', true)
     .order('start_date');
   if (e1) console.error('calEvents query1 error:', e1.message);
   const { data: singleDay, error: e2 } = await db.from('calendar_events')
     .select(sel)
     .gte('start_date', firstOfMonth)
     .lte('start_date', lastOfMonth)
-    .is('end_date', null);
+    .is('end_date', null)
+    .neq('is_template', true);
   if (e2) console.error('calEvents query2 error:', e2.message);
   const all = [...(data||[]), ...(singleDay||[])];
   // dedupe by id
@@ -19037,19 +19039,17 @@ function renderCalendar() {
           const b = item.b;
           const isPickup = b.source === '門市取貨';
           const timeStr = (b.time_slot||'').slice(0,5);
-          const content = `${timeStr ? timeStr+' ' : ''}${isPickup?'取貨':'鑑賞'} ${b.customer_name||''}`.trim();
-          const label = `門市-${content}`;
-          return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${storeT.bg};color:${storeT.color};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer" onclick="event.stopPropagation();window.modalViewBooking('${b.id}')">${label}</div>`;
+          const content = `${timeStr ? timeStr+' ' : ''}門市-${isPickup?'取貨':'鑑賞'} ${b.customer_name||''}`.trim();
+          return `<div style="font-size:11px;line-height:1.4;padding:1px 2px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--text)" onclick="event.stopPropagation();window.modalViewBooking('${b.id}')"><span style="color:${storeT.color};font-size:9px">●</span> ${content}</div>`;
         } else {
           const ev = item.ev;
           const t = getCalEventTypes()[ev.event_type] || getCalEventTypes().general || {label:'一般',color:'#90a4ae',bg:'#eceff1'};
           const isDone = !!ev.completed_at;
-          const evBg    = isDone ? '#eeeeee' : t.bg;
-          const evColor = isDone ? '#aaa'    : t.color;
-          const evDeco  = isDone ? 'text-decoration:line-through;opacity:.7;' : '';
+          const evColor = isDone ? '#bbb' : t.color;
+          const evDeco  = isDone ? 'text-decoration:line-through;opacity:.6;' : '';
           const timeStr = ev.start_time ? `${ev.start_time.slice(0,5)} ` : '';
-          const label = `${t.label}-${timeStr}${ev.title}`;
-          return `<div style="font-size:11px;line-height:1.3;padding:1px 3px;border-radius:2px;margin-bottom:1px;background:${evBg};color:${evColor};font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${evDeco}" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')">${label}</div>`;
+          const label = `${timeStr}${t.label}-${ev.title}`;
+          return `<div style="font-size:11px;line-height:1.4;padding:1px 2px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--text);${evDeco}" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')"><span style="color:${evColor};font-size:9px">●</span> ${label}</div>`;
         }
       }).join('')}
       ${more>0?`<div style="font-size:11px;color:var(--muted)">+${more}</div>`:''}
