@@ -19150,12 +19150,12 @@ function renderCalendar() {
         const listNames = listAssigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name || ev.profiles?.name).filter(Boolean);
         const listAssigneeName = listNames.join('、') || ev.profiles?.name || '';
         return `<div class="card" style="margin-bottom:8px;padding:10px 12px;border-left:3px solid ${t.color};cursor:pointer" onclick="calViewEvent('${ev.id}')">
-          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
-            <span style="font-size:10px;background:${t.bg};color:${t.color};border-radius:3px;padding:1px 5px;font-weight:700">${t.label}</span>
-            <span style="font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.title}</span>
-            ${listAssigneeName?`<span style="font-size:11px;color:var(--muted);white-space:nowrap">👤 ${listAssigneeName}</span>`:''}
+          <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;min-width:0">
+            <span style="font-size:10px;background:${t.bg};color:${t.color};border-radius:3px;padding:1px 5px;font-weight:700;flex-shrink:0">${t.label}</span>
+            <span style="font-size:13px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.title}</span>
           </div>
-          <div style="font-size:11px;color:var(--muted)">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}${ev.start_time?` ${ev.start_time.slice(0,5)}${ev.end_time?' ～ '+ev.end_time.slice(0,5):''}`:''}</div>
+          <div style="font-size:11px;color:var(--muted);margin-bottom:${listAssigneeName?'3px':'0'}">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}${ev.start_time?` ${ev.start_time.slice(0,5)}${ev.end_time?' ～ '+ev.end_time.slice(0,5):''}`:''}</div>
+          ${listAssigneeName?`<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${listAssigneeName}</div>`:''}
           ${ev.description?`<div style="font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.description}</div>`:''}
         </div>`;
       }).join('')}
@@ -19343,22 +19343,22 @@ async function modalCalEvent(existing=null) {
 
       if (id) {
         const recurScope = existing?._recurScope; // 'one' | 'future' | 'all' | undefined
+        // 批次更新時，日期欄位各自保留（不蓋掉），只更新共用欄位
+        const { start_date, end_date, event_date, ...batchPayload } = basePayload;
         if (recurScope === 'all' && existing?.template_id) {
-          // 全部都改：更新所有同 template_id 的事項
           const { error: upErr } = await db.from('calendar_events')
-            .update(basePayload).eq('template_id', existing.template_id);
+            .update(batchPayload).eq('template_id', existing.template_id);
           if (upErr) { showToast('更新失敗：' + upErr.message, 'error'); return; }
           showToast('已更新全部週期事項！');
         } else if (recurScope === 'future' && existing?.template_id) {
-          // 這次之後都改：更新 start_date >= 本筆日期 的同 template_id 事項
           const { error: upErr } = await db.from('calendar_events')
-            .update(basePayload)
+            .update(batchPayload)
             .eq('template_id', existing.template_id)
             .gte('start_date', existing.start_date);
           if (upErr) { showToast('更新失敗：' + upErr.message, 'error'); return; }
           showToast('已更新此筆及之後的事項！');
         } else {
-          // 只改這次（預設）
+          // 只改這次：完整 payload（包含日期）
           const { error: upErr } = await db.from('calendar_events').update(basePayload).eq('id', id);
           if (upErr) { showToast('更新失敗：' + upErr.message, 'error'); return; }
           showToast('已更新！');
@@ -19487,22 +19487,23 @@ window.calViewEvent = function(id) {
         if (ev.template_id) {
           // 週期事項：先問要改哪些
           showModal('編輯週期事項', `
-            <div style="font-size:13px;color:var(--muted);margin-bottom:16px">「${ev.title}」是週期性事項，請選擇要修改的範圍：</div>
+            <div style="font-size:13px;color:var(--muted);margin-bottom:4px">「${ev.title}」是週期性事項，請選擇要修改的範圍：</div>
+            <div style="font-size:11px;color:#f57c00;background:#fff8e1;border-radius:6px;padding:6px 10px;margin-bottom:14px">⚠ 批次修改時，各筆的日期不受影響，只更新標題、時間、分類等共用設定</div>
             <div style="display:flex;flex-direction:column;gap:10px">
               <button onclick="window._editRecurChoice('one','${ev.id}')"
                 style="padding:12px 16px;border-radius:8px;border:1px solid var(--border);background:#fff;text-align:left;cursor:pointer;font-size:13px">
                 <div style="font-weight:600">只改這次</div>
-                <div style="font-size:12px;color:var(--muted);margin-top:2px">只修改 ${ev.start_date} 這一筆</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">只修改 ${ev.start_date} 這一筆（含日期）</div>
               </button>
               <button onclick="window._editRecurChoice('future','${ev.id}')"
                 style="padding:12px 16px;border-radius:8px;border:1px solid var(--border);background:#fff;text-align:left;cursor:pointer;font-size:13px">
                 <div style="font-weight:600">這次和之後的都改</div>
-                <div style="font-size:12px;color:var(--muted);margin-top:2px">修改 ${ev.start_date} 以後的所有筆</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">更新 ${ev.start_date} 以後的所有筆（時間、標題等）</div>
               </button>
               <button onclick="window._editRecurChoice('all','${ev.id}')"
                 style="padding:12px 16px;border-radius:8px;border:1px solid var(--border);background:#fff;text-align:left;cursor:pointer;font-size:13px">
                 <div style="font-weight:600">全部都改</div>
-                <div style="font-size:12px;color:var(--muted);margin-top:2px">修改這個週期的所有筆</div>
+                <div style="font-size:12px;color:var(--muted);margin-top:2px">更新整個週期所有筆（時間、標題等）</div>
               </button>
             </div>
           `, [{ label:'取消', onclick: closeModal }]);
