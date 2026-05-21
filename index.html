@@ -921,7 +921,7 @@ function renderLogin() {
 function canEditSales() {
   const role = state.profile?.role;
   const email = state.profile?.email || state.user?.email || '';
-  if (role === 'admin' || role === 'management' || email === 'cailing0516@gmail.com') return true;
+  if (['admin','manager','management'].includes(role) || email === 'cailing0516@gmail.com') return true;
   const perms = Array.isArray(state.profile?.permissions) ? state.profile.permissions : [];
   return perms.includes('sales_edit');
 }
@@ -951,10 +951,15 @@ function canAccessPage(pageKey) {
   const role = state.profile?.role;
   const email = state.profile?.email || state.user?.email || '';
   const adminEmails = ['cailing0516@gmail.com'];
-  // admin 帳號全開（role 或 email 任一符合）
+  // 老闆（admin）全開
   const isAdmin = role === 'admin' || adminEmails.includes(email);
   if (isAdmin) return true;
-  // 管理部：幾乎等同 admin，僅排除帳號管理
+  // 主管（manager）：可存取人員管理以外全部
+  if (role === 'manager') {
+    if (pageKey === 'users') return false;
+    return true;
+  }
+  // 舊角色相容：management 等同主管
   if (role === 'management') {
     if (pageKey === 'users') return false;
     return true;
@@ -7837,7 +7842,7 @@ function renderAccounting() {
     empAdvSummary[n] = (empAdvSummary[n]||0) + (r.amount||0);
   });
 
-  const isAdmin = ['admin','accounting','management'].includes(state.profile?.role) || state.profile?.email === 'cailing0516@gmail.com';
+  const isAdmin = ['admin','manager','management','accounting'].includes(state.profile?.role) || state.profile?.email === 'cailing0516@gmail.com';
   // 儀表板：admin + accounting + management 可見（一般員工不顯示）
   const canSeeDashboard = isAdmin;
   // 應付／應收：僅 admin/accounting/management 可見
@@ -14446,24 +14451,31 @@ const PERMISSION_GROUPS = {
 };
 
 const ROLE_LABEL = {
-  admin: '系統管理員',
-  management: '管理部',
-  accounting: '會計',
-  production_lead: '製作部主管',
-  production: '製作部',
-  designer: '設計師',
-  cs: '客服',
-  general: '員工',
+  // 新三層制
+  admin:   '老闆',
+  manager: '主管',
+  staff:   '一般員工',
+  // 舊角色保留顯示（不再新增，但既有資料可正常顯示）
+  management:      '管理部（舊）',
+  accounting:      '會計（舊）',
+  production_lead: '製作部主管（舊）',
+  production:      '製作部（舊）',
+  designer:        '設計師（舊）',
+  cs:              '客服（舊）',
+  general:         '員工（舊）',
 };
 const ROLE_COLOR = {
-  admin: 'tag-red',
-  management: 'tag-purple',
-  accounting: 'tag-purple',
+  admin:   'tag-red',
+  manager: 'tag-orange',
+  staff:   'tag-grey',
+  // 舊角色顏色保留
+  management:      'tag-purple',
+  accounting:      'tag-purple',
   production_lead: 'tag-orange',
-  production: 'tag-orange',
-  designer: 'tag-blue',
-  cs: 'tag-green',
-  general: 'tag-grey',
+  production:      'tag-orange',
+  designer:        'tag-blue',
+  cs:              'tag-green',
+  general:         'tag-grey',
 };
 
 function renderUsers() {
@@ -14639,17 +14651,12 @@ window.modalEditUser = function(userId) {
     </div>
     <div class="form-group"><label>角色</label>
       <select class="form-control" id="eu-role">
-        <option value="admin" ${u.role==='admin'?'selected':''}>系統管理員</option>
-        <option value="management" ${u.role==='management'?'selected':''}>管理部</option>
-        <option value="accounting" ${u.role==='accounting'?'selected':''}>會計</option>
-        <option value="production_lead" ${u.role==='production_lead'?'selected':''}>製作部主管</option>
-        <option value="production" ${u.role==='production'?'selected':''}>製作部</option>
-        <option value="designer" ${u.role==='designer'?'selected':''}>設計師</option>
-        <option value="cs" ${u.role==='cs'?'selected':''}>客服</option>
-        <option value="general" ${u.role==='general'||!u.role?'selected':''}>一般員工</option>
+        <option value="admin"   ${u.role==='admin'?'selected':''}>老闆（全部權限）</option>
+        <option value="manager" ${u.role==='manager'?'selected':''}>主管</option>
+        <option value="staff"   ${(!u.role||!['admin','manager'].includes(u.role))?'selected':''}>一般員工</option>
       </select>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-top:4px;margin-bottom:16px">角色決定預設行為，細部頁面權限可在人員管理頁面個別設定</div>
+    <div style="font-size:12px;color:var(--muted);margin-top:4px;margin-bottom:16px">角色決定權限等級，功能細項在「⚙ 設定權限」個別開關</div>
     <div class="form-group"><label>📝 工作日誌模板</label>
       <select class="form-control" id="eu-journal-tpl">
         <option value="" ${!u.journal_template?'selected':''}>依角色自動（預設）</option>
@@ -16897,7 +16904,7 @@ function renderJournal() {
   const profiles = jd.profiles || [];
   const myId = state.user?.id;
   const myProfile = profiles.find(p => p.id === myId);
-  const isAdmin = myProfile?.role === 'admin' || myProfile?.role === 'management';
+  const isAdmin = ['admin','manager','management'].includes(myProfile?.role) || myProfile?.email === 'cailing0516@gmail.com';
   const myLog = todayLogs.find(l => l.user_id === myId);
   const hasSubmitted = !!myLog;
   const myTpl = _getMyTemplate(jd);
