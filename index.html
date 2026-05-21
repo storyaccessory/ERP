@@ -15594,6 +15594,7 @@ function bindCetDrag() {
       ));
       await loadCalEventTypes();
       renderApp();
+      setTimeout(bindCetDrag, 80);
     });
   });
 }
@@ -19616,6 +19617,34 @@ window.calViewEvent = function(id) {
 // ═══════════════════════════════════════════
 function closeModal() {
   document.getElementById('modal-overlay')?.remove();
+  document.getElementById('_confirm-leave-box')?.remove();
+}
+
+// 顯示「離開確認」小框（疊在 modal 上方）
+function _confirmLeave(onLeave) {
+  document.getElementById('_confirm-leave-box')?.remove();
+  const box = document.createElement('div');
+  box.id = '_confirm-leave-box';
+  box.style.cssText = 'position:fixed;inset:0;z-index:10010;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.35)';
+  box.innerHTML = `
+    <div style="background:var(--surface,#fff);border-radius:14px;padding:28px 32px;max-width:300px;width:88%;box-shadow:0 8px 40px rgba(0,0,0,.22);text-align:center;border:1px solid var(--border,#e5e7eb)">
+      <div style="font-size:28px;margin-bottom:10px">⚠️</div>
+      <div style="font-size:15px;font-weight:700;color:var(--text,#111);margin-bottom:6px">尚未儲存</div>
+      <div style="font-size:13px;color:var(--muted,#888);margin-bottom:22px;line-height:1.5">變更尚未儲存，<br>確定要離開嗎？</div>
+      <div style="display:flex;gap:10px">
+        <button id="_clb-stay" style="flex:1;padding:10px 0;border-radius:8px;border:1px solid var(--border,#ddd);background:var(--surface2,#f5f5f5);font-size:13px;font-weight:600;cursor:pointer;color:var(--text,#333)">繼續編輯</button>
+        <button id="_clb-go"   style="flex:1;padding:10px 0;border-radius:8px;border:none;background:#e53935;color:#fff;font-size:13px;font-weight:600;cursor:pointer">放棄變更</button>
+      </div>
+    </div>`;
+  document.body.appendChild(box);
+  document.getElementById('_clb-stay').onclick = () => box.remove();
+  document.getElementById('_clb-go').onclick   = () => { box.remove(); onLeave(); };
+}
+
+// 判斷 modal 是否含有可編輯的表單欄位
+function _modalHasForm() {
+  const slot = document.getElementById('modal-body-slot');
+  return !!(slot && slot.querySelector('input:not([type="hidden"]), select, textarea'));
 }
 
 // ── 將核心函式掛到 window，讓 HTML inline onclick 可以呼叫 ──
@@ -19654,21 +19683,15 @@ function showModal(title, body, footer = '', opts = {}) {
   if (body instanceof Element) {
     overlay.querySelector('#modal-body-slot').appendChild(body);
   }
-  document.getElementById('modal-close-btn').onclick = () => {
-    if (opts.confirmClose) {
-      if (confirm('尚未儲存，確定要離開嗎？')) overlay.remove();
+  const _tryClose = () => {
+    if (_modalHasForm()) {
+      _confirmLeave(() => overlay.remove());
     } else {
       overlay.remove();
     }
   };
-  overlay.onclick = (e) => {
-    if (e.target !== overlay) return;
-    if (opts.confirmClose) {
-      if (confirm('尚未儲存，確定要離開嗎？')) overlay.remove();
-    } else {
-      overlay.remove();
-    }
-  };
+  document.getElementById('modal-close-btn').onclick = _tryClose;
+  overlay.onclick = (e) => { if (e.target === overlay) _tryClose(); };
   // 綁定 array buttons 的 onclick
   if (Array.isArray(footer)) {
     footer.forEach((b,i) => {
