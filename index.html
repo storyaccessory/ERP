@@ -18678,6 +18678,11 @@ window.deleteColorOption = async function(index) {
 // ── Calendar ──
 // ── Calendar ──
 async function loadCalendarEvents() {
+  // 確保人員資料存在（行事曆指派人員需要）
+  if (!state.data.users?.length) {
+    const { data: uData } = await db.from('profiles').select('id, name, role').order('name');
+    state.data.users = uData || [];
+  }
   const cal = state.data.calNav || (() => { const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; })();
   const firstOfMonth = `${cal.y}-${String(cal.m+1).padStart(2,'0')}-01`;
   const lastOfMonth  = `${cal.y}-${String(cal.m+1).padStart(2,'0')}-${new Date(cal.y,cal.m+1,0).getDate()}`;
