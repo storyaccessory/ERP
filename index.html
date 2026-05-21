@@ -19342,9 +19342,10 @@ async function modalCalEvent(existing=null) {
         <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
           <label style="font-size:13px;font-weight:600;white-space:nowrap">重複方式</label>
           <select class="form-control" id="cal-recur-type" style="width:auto"
-            onchange="document.getElementById('cal-recur-weekly').style.display=this.value==='weekly'?'flex':'none';document.getElementById('cal-recur-monthly').style.display=this.value==='monthly'?'flex':'none'">
+            onchange="(function(v){['cal-recur-weekly','cal-recur-monthly','cal-recur-monthdays'].forEach(id=>{var el=document.getElementById(id);if(el)el.style.display='none'});var show=v==='weekly'?'cal-recur-weekly':v==='monthly'?'cal-recur-monthly':'cal-recur-monthdays';var el=document.getElementById(show);if(el)el.style.display=v==='weekly'?'flex':'block'})(this.value)">
             <option value="weekly">每週</option>
             <option value="monthly">每月第N個週X</option>
+            <option value="monthly-days">每月指定日期</option>
           </select>
         </div>
 
@@ -19366,6 +19367,19 @@ async function modalCalEvent(existing=null) {
           <select class="form-control" id="cal-recur-weekday" style="width:auto">
             ${DAYS_ZH.map((d,i)=>`<option value="${i}">週${d}</option>`).join('')}
           </select>
+        </div>
+
+        <!-- 每月指定日期 -->
+        <div id="cal-recur-monthdays" style="display:none;margin-bottom:10px">
+          <div style="font-size:12px;color:var(--muted);margin-bottom:6px">點選要重複的日期（可多選）</div>
+          <div style="display:flex;flex-wrap:wrap;gap:4px">
+            ${Array.from({length:31},(_,i)=>i+1).map(d=>`
+              <label id="cal-md-lbl-${d}" style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:6px;border:1px solid var(--border);cursor:pointer;font-size:12px;font-weight:600;background:#fff;user-select:none">
+                <input type="checkbox" id="cal-md-${d}" value="${d}" style="display:none"
+                  onchange="(function(el){var l=document.getElementById('cal-md-lbl-${d}');l.style.background=el.checked?'var(--accent)':'#fff';l.style.color=el.checked?'#fff':'var(--text)';l.style.borderColor=el.checked?'var(--accent)':'var(--border)'})(this)">
+                ${d}
+              </label>`).join('')}
+          </div>
         </div>
 
         <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -19513,6 +19527,24 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
       }
       cur.setMonth(cur.getMonth() + 1);
     }
+  }
+
+  } else if (recurType === 'monthly-days') {
+    // 勾選的日期數字
+    const checkedDays = Array.from({length:31},(_,i)=>i+1).filter(d => document.getElementById(`cal-md-${d}`)?.checked);
+    if (!checkedDays.length) { showToast('請至少選一個日期','error'); return; }
+    const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
+    while (cur <= endD) {
+      const y = cur.getFullYear(), m = cur.getMonth();
+      const daysInMonth = new Date(y, m+1, 0).getDate();
+      checkedDays.forEach(day => {
+        if (day > daysInMonth) return; // 該月沒有此日（例如2月沒有30號）
+        const d = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        if (d >= base.start_date && d <= recurEndDate) dates.push(d);
+      });
+      cur.setMonth(cur.getMonth() + 1);
+    }
+    dates.sort();
   }
 
   if (!dates.length) { showToast('找不到符合的日期，請確認設定','error'); return; }
