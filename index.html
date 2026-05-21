@@ -14527,6 +14527,82 @@ window.applyPermGroup = async function(userId, groupName) {
   renderApp();
 };
 
+window.modalUserPermissions = function(userId) {
+  const u = (state.data.users||[]).find(u=>u.id===userId);
+  if (!u) return;
+  const perms = Array.isArray(u.permissions) ? [...u.permissions] : [];
+  // 用 local 暫存，存檔才一次寫入
+  let tmpPerms = [...perms];
+
+  const renderToggles = () => PAGE_PERMISSIONS.map(sec => `
+    <div style="margin-bottom:16px">
+      <div style="font-size:11px;font-weight:700;color:var(--muted);letter-spacing:1px;text-transform:uppercase;margin-bottom:8px">${sec.section}</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${sec.pages.map(p => {
+          const on = tmpPerms.includes(p.key);
+          return `<label style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;border-radius:8px;background:${on?'#e0f2f1':'#f5f5f5'};cursor:pointer;transition:background .15s" onclick="window._toggleTmpPerm('${p.key}','${userId}')">
+            <span style="font-size:13px;font-weight:${on?'600':'400'};color:${on?'var(--accent-dark)':'var(--muted)'}">${p.label}</span>
+            <span style="display:inline-flex;align-items:center;justify-content:center;width:40px;height:22px;border-radius:11px;background:${on?'var(--accent)':'#ccc'};transition:background .15s;position:relative">
+              <span style="width:18px;height:18px;border-radius:50%;background:#fff;position:absolute;${on?'right:2px':'left:2px'};transition:left .15s,right .15s"></span>
+            </span>
+          </label>`;
+        }).join('')}
+      </div>
+    </div>`).join('');
+
+  const DEPT_PRESET = {
+    '製作部門': ['calendar','todos','goldsmith','orders','restock','castings','parts','repair'],
+    '視覺設計':  ['calendar','todos','products','dev','orders'],
+    '商品設計':  ['calendar','todos','products','dev'],
+    '行政客服':  ['calendar','todos','cs','booking','orders','repair'],
+    '會計':      ['calendar','todos','accounting','wages','costs','peripheral'],
+  };
+
+  showModal(`⚙ 功能權限 — ${u.name}`, `
+    <div style="margin-bottom:16px">
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">快速套用部門預設：</div>
+      <div style="display:flex;flex-wrap:wrap;gap:6px">
+        ${Object.keys(DEPT_PRESET).map(d=>`
+          <button onclick="window._applyDeptPreset('${d}','${userId}')"
+            style="padding:4px 14px;border-radius:20px;font-size:12px;cursor:pointer;background:#e0f2f1;color:#00695c;border:1px solid #80cbc4;font-weight:600">${d}</button>`).join('')}
+        <button onclick="window._applyDeptPreset('清除','${userId}')"
+          style="padding:4px 14px;border-radius:20px;font-size:12px;cursor:pointer;background:#f5f5f5;color:#999;border:1px solid #ddd">清除全部</button>
+      </div>
+    </div>
+    <div id="perm-toggles-${userId}">${renderToggles()}</div>
+  `, [
+    { label:'儲存', primary:true, onclick: async () => {
+      const { error } = await db.from('profiles').update({ permissions: tmpPerms }).eq('id', userId);
+      if (error) { showToast('儲存失敗：'+error.message,'error'); return; }
+      u.permissions = tmpPerms;
+      showToast('權限已更新'); closeModal(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+
+  // 暫存 toggle 到 window 讓 onclick 可存取
+  window._permTmp = window._permTmp || {};
+  window._permTmp[userId] = tmpPerms;
+
+  window._toggleTmpPerm = function(key, uid) {
+    const tmp = window._permTmp[uid];
+    if (!tmp) return;
+    const idx = tmp.indexOf(key);
+    if (idx >= 0) tmp.splice(idx,1); else tmp.push(key);
+    const container = document.getElementById(`perm-toggles-${uid}`);
+    if (container) container.innerHTML = renderToggles();
+  };
+
+  window._applyDeptPreset = function(dept, uid) {
+    const tmp = window._permTmp[uid];
+    if (!tmp) return;
+    tmp.length = 0;
+    if (dept !== '清除') { (DEPT_PRESET[dept]||[]).forEach(k=>tmp.push(k)); }
+    const container = document.getElementById(`perm-toggles-${uid}`);
+    if (container) container.innerHTML = renderToggles();
+  };
+};
+
 window.toggleUserPerm = async function(userId, pageKey, currentlyHas) {
   const user = (state.data.users||[]).find(u=>u.id===userId);
   if (!user) return;
