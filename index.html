@@ -15541,9 +15541,13 @@ function renderCalEventTypeSettings() {
         <button class="btn btn-primary btn-sm" onclick="modalAddCalEventType()">+ 新增分類</button>
       </div>
       <div style="display:flex;flex-direction:column;gap:8px">
-        ${types.map(([id, t]) => `
-          <div style="display:flex;align-items:center;gap:12px;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:#fff">
-            <span style="display:inline-block;width:28px;height:28px;border-radius:6px;background:${t.bg};border:2px solid ${t.color};flex-shrink:0"></span>
+        ${types.map(([id, t], idx) => `
+          <div style="display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:8px;border:1px solid var(--border);background:#fff">
+            <div style="display:flex;flex-direction:column;gap:2px;flex-shrink:0">
+              <button onclick="window.moveCalEventType('${id}',-1)" ${idx===0?'disabled':''} style="padding:1px 5px;border-radius:3px;border:1px solid var(--border);background:${idx===0?'#f5f5f5':'#fff'};color:${idx===0?'#ccc':'var(--text)'};cursor:${idx===0?'default':'pointer'};font-size:10px;line-height:1">▲</button>
+              <button onclick="window.moveCalEventType('${id}',1)" ${idx===types.length-1?'disabled':''} style="padding:1px 5px;border-radius:3px;border:1px solid var(--border);background:${idx===types.length-1?'#f5f5f5':'#fff'};color:${idx===types.length-1?'#ccc':'var(--text)'};cursor:${idx===types.length-1?'default':'pointer'};font-size:10px;line-height:1">▼</button>
+            </div>
+            <span style="display:inline-block;width:26px;height:26px;border-radius:6px;background:${t.bg};border:2px solid ${t.color};flex-shrink:0"></span>
             <span style="flex:1;font-size:13px;font-weight:600;color:${t.color}">${t.label}</span>
             <span style="font-size:11px;color:var(--muted);font-family:monospace">${id}</span>
             <button class="btn-table" onclick="modalEditCalEventType('${id}')" style="background:#e3f2fd;color:#1565c0">編輯</button>
@@ -15552,6 +15556,31 @@ function renderCalEventTypeSettings() {
       </div>
     </div>`;
 }
+
+window.moveCalEventType = async function(id, dir) {
+  const types = Object.entries(getCalEventTypes()); // [id, {label,color,bg}]
+  const idx = types.findIndex(([k]) => k === id);
+  const swapIdx = idx + dir;
+  if (swapIdx < 0 || swapIdx >= types.length) return;
+
+  // 取得兩筆的 sort_order（從 DB 原始資料）
+  const { data: rows } = await db.from('cal_event_types')
+    .select('id, sort_order')
+    .in('id', [types[idx][0], types[swapIdx][0]]);
+  if (!rows || rows.length < 2) return;
+
+  const a = rows.find(r => r.id === types[idx][0]);
+  const b = rows.find(r => r.id === types[swapIdx][0]);
+  if (!a || !b) return;
+
+  // 交換 sort_order
+  await Promise.all([
+    db.from('cal_event_types').update({ sort_order: b.sort_order }).eq('id', a.id),
+    db.from('cal_event_types').update({ sort_order: a.sort_order }).eq('id', b.id),
+  ]);
+  await loadCalEventTypes();
+  renderApp();
+};
 
 window.modalAddCalEventType = function() {
   showModal('新增行事曆分類', `
