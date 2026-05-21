@@ -19527,8 +19527,6 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
       }
       cur.setMonth(cur.getMonth() + 1);
     }
-  }
-
   } else if (recurType === 'monthly-days') {
     // 勾選的日期數字
     const checkedDays = Array.from({length:31},(_,i)=>i+1).filter(d => document.getElementById(`cal-md-${d}`)?.checked);
