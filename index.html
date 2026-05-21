@@ -19610,6 +19610,7 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
   }
 }
 
+window.modalCalEvent = modalCalEvent;
 window.calViewEvent = function(id) {
   const ev = (state.data.calEvents||[]).find(e=>e.id===id);
   if (!ev) return;
