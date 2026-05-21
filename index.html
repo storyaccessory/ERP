@@ -14485,6 +14485,7 @@ function renderUsers() {
           <div style="flex:1">
             <div style="font-weight:600;font-size:15px">${u.name}${u.employee_no?` <span style="font-size:11px;color:var(--muted);font-weight:400">#${u.employee_no}</span>`:''}</div>
             <div style="font-size:12px;color:var(--muted)">${u.job_title?`${u.job_title} · `:''} ${u.email}</div>
+            ${u.department?`<div style="margin-top:3px"><span style="font-size:11px;padding:2px 8px;border-radius:10px;background:#e0f2f1;color:#00695c;font-weight:600">${u.department}</span></div>`:''}
           </div>
           <div style="display:flex;align-items:center;gap:8px;flex-shrink:0">
             <span class="tag ${ROLE_COLOR[u.role]||'tag-grey'}">${ROLE_LABEL[u.role]||u.role}</span>
@@ -14567,6 +14568,16 @@ window.modalEditUser = function(userId) {
       <div class="form-group"><label>員工編號</label><input class="form-control" id="eu-emp-no" value="${u.employee_no||''}" placeholder="例：S001"></div>
     </div>
     <div class="form-group"><label>職稱</label><input class="form-control" id="eu-job-title" value="${u.job_title||''}" placeholder="例：視覺設計師、金工師傅"></div>
+    <div class="form-group"><label>部門</label>
+      <select class="form-control" id="eu-dept">
+        <option value="" ${!u.department?'selected':''}>— 未分配 —</option>
+        <option value="製作部門"  ${u.department==='製作部門'?'selected':''}>製作部門</option>
+        <option value="視覺設計"  ${u.department==='視覺設計'?'selected':''}>視覺設計</option>
+        <option value="商品設計"  ${u.department==='商品設計'?'selected':''}>商品設計</option>
+        <option value="行政客服"  ${u.department==='行政客服'?'selected':''}>行政客服</option>
+        <option value="會計"      ${u.department==='會計'?'selected':''}>會計</option>
+      </select>
+    </div>
     <div class="form-group"><label>角色</label>
       <select class="form-control" id="eu-role">
         <option value="admin" ${u.role==='admin'?'selected':''}>系統管理員</option>
@@ -14599,11 +14610,12 @@ window.modalEditUser = function(userId) {
       const name = document.getElementById('eu-name').value.trim();
       const employee_no = document.getElementById('eu-emp-no').value.trim() || null;
       const job_title = document.getElementById('eu-job-title').value.trim() || null;
+      const department = document.getElementById('eu-dept').value || null;
       const role = document.getElementById('eu-role').value;
       const journal_template = document.getElementById('eu-journal-tpl').value || null;
       const journal_required = document.getElementById('eu-journal-required').checked;
       if (!name) { showToast('請填姓名','error'); return; }
-      const { error } = await db.from('profiles').update({ name, employee_no, job_title, role, journal_template, journal_required }).eq('id', userId);
+      const { error } = await db.from('profiles').update({ name, employee_no, job_title, department, role, journal_template, journal_required }).eq('id', userId);
       if (error) { showToast('更新失敗：'+error.message,'error'); return; }
       showToast('已更新'); closeModal(); await loadUsers(); renderApp();
     }},
