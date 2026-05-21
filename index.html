@@ -19054,14 +19054,17 @@ function renderCalendar() {
     if (!eventMap[ds]) eventMap[ds] = [];
     eventMap[ds].push({ _type:'booking', b });
   });
-  // Sort each day: bookings by time first, then events
+  // Sort each day: incomplete before done → all-day before timed → by time
   Object.keys(eventMap).forEach(ds => {
     eventMap[ds].sort((a, b) => {
-      if (a._type === 'booking' && b._type === 'booking')
-        return (a.b.time_slot||'').localeCompare(b.b.time_slot||'');
-      if (a._type === 'booking') return -1;
-      if (b._type === 'booking') return 1;
-      return 0;
+      const isTimed = item => item._type === 'booking' ? !!(item.b.time_slot) : !!(item.ev.start_time);
+      const isDone  = item => item._type === 'booking' ? false : !!item.ev.completed_at;
+      const getTime = item => item._type === 'booking' ? (item.b.time_slot||'') : (item.ev.start_time||'');
+      const aDone = isDone(a), bDone = isDone(b);
+      if (aDone !== bDone) return aDone ? 1 : -1;          // 未完成優先
+      const aAllDay = !isTimed(a), bAllDay = !isTimed(b);
+      if (aAllDay !== bAllDay) return aAllDay ? -1 : 1;    // 整天優先
+      return getTime(a).localeCompare(getTime(b));          // 有時間的依時間排
     });
   });
 
@@ -19081,21 +19084,42 @@ function renderCalendar() {
     cells.push(`<div class="cal-cell" data-date="${ds}" style="border:1px solid ${isToday?'#e53935':isWeekend?'#e8e8e8':'var(--border)'};border-radius:6px;padding:4px 5px;cursor:pointer;background:${isToday?'#fff5f5':isWeekend?'#fafafa':'#fff'};${isToday?'outline:2px solid #e53935;':''}">
       <div style="font-size:12px;font-weight:${isToday?800:400};color:${isToday?'#c62828':isWeekend?'#bbb':'var(--text)'};margin-bottom:3px">${isToday?`<span style="display:inline-flex;align-items:center;justify-content:center;background:#e53935;color:#fff;width:21px;height:21px;border-radius:50%;font-size:11px">${d}</span>`:d}</div>
       ${shown.map(item => {
+        const baseDiv = (content, style, onclick) =>
+          `<div style="font-size:11px;line-height:1.4;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${style}" ${onclick}><span style="font-size:9px">●</span> ${content}</div>`;
+
         if (item._type === 'booking') {
           const b = item.b;
           const isPickup = b.source === '門市取貨';
-          const timeStr = (b.time_slot||'').slice(0,5);
-          const content = `${timeStr ? timeStr+' ' : ''}門市-${isPickup?'取貨':'鑑賞'} ${b.customer_name||''}`.trim();
-          return `<div style="font-size:11px;line-height:1.4;padding:1px 2px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--text)" onclick="event.stopPropagation();window.modalViewBooking('${b.id}')"><span style="color:${storeT.color};font-size:9px">●</span> ${content}</div>`;
+          const hasTimed = !!(b.time_slot);
+          const timeStr  = (b.time_slot||'').slice(0,5);
+          const typeLabel = isPickup ? '取貨' : '鑑賞';
+          const cust = b.customer_name || '';
+          const onclick = `onclick="event.stopPropagation();window.modalViewBooking('${b.id}')"`;
+          if (hasTimed) {
+            // 有時間：圓點＋文字，整行用分類文字色
+            return baseDiv(`${timeStr} 門市-${typeLabel} ${cust}`, `padding:1px 2px;color:${storeT.color}`, onclick);
+          } else {
+            // 整天：色塊
+            return baseDiv(`門市-${typeLabel} ${cust}`, `padding:1px 4px;background:${storeT.bg};color:${storeT.color};border-radius:3px`, onclick);
+          }
         } else {
           const ev = item.ev;
           const t = getCalEventTypes()[ev.event_type] || getCalEventTypes().general || {label:'一般',color:'#90a4ae',bg:'#eceff1'};
-          const isDone = !!ev.completed_at;
-          const evColor = isDone ? '#bbb' : t.color;
-          const evDeco  = isDone ? 'text-decoration:line-through;opacity:.6;' : '';
-          const timeStr = ev.start_time ? `${ev.start_time.slice(0,5)} ` : '';
-          const label = `${timeStr}${t.label}-${ev.title}`;
-          return `<div style="font-size:11px;line-height:1.4;padding:1px 2px;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;color:var(--text);${evDeco}" data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')"><span style="color:${evColor};font-size:9px">●</span> ${label}</div>`;
+          const isDone   = !!ev.completed_at;
+          const hasTimed = !!(ev.start_time);
+          const deco     = isDone ? 'text-decoration:line-through;opacity:.55;' : '';
+          const onclick  = `data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')"`;
+          if (hasTimed) {
+            // 有時間：圓點＋文字，整行用分類文字色
+            const timeStr = ev.start_time.slice(0,5);
+            const txtCol  = isDone ? '#bbb' : t.color;
+            return baseDiv(`${timeStr} ${t.label}-${ev.title}`, `padding:1px 2px;color:${txtCol};${deco}`, onclick);
+          } else {
+            // 整天：色塊
+            const bg  = isDone ? '#ebebeb' : t.bg;
+            const col = isDone ? '#bbb'    : t.color;
+            return baseDiv(`${t.label}-${ev.title}`, `padding:1px 4px;background:${bg};color:${col};border-radius:3px;${deco}`, onclick);
+          }
         }
       }).join('')}
       ${more>0?`<div style="font-size:11px;color:var(--muted)">+${more}</div>`:''}
