@@ -18909,12 +18909,14 @@ async function loadCalEventTypes() {
 }
 
 function getCalEventTypes() {
-  return state.data.calEventTypesMap || CAL_EVENT_TYPES;
+  const m = state.data.calEventTypesMap;
+  // 確保不是空物件才使用（空物件代表尚未成功載入）
+  return (m && Object.keys(m).length > 0) ? m : CAL_EVENT_TYPES;
 }
 
 async function loadCalendarEvents() {
-  // 確保分類資料存在
-  if (!state.data.calEventTypesMap) await loadCalEventTypes();
+  // 確保分類資料存在（每次重新載入，避免快取到空值）
+  await loadCalEventTypes();
   // 確保人員資料存在（行事曆指派人員需要）
   if (!state.data.users?.length) {
     const { data: uData } = await db.from('profiles').select('id, name, role').order('name');
