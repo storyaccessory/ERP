@@ -14497,32 +14497,15 @@ function renderUsers() {
           </div>
         </div>
         ${isAdminUser ? `<div style="font-size:12px;color:var(--accent-dark);padding:4px 0">✦ 系統管理員擁有全部權限</div>` : `
-        <div style="border-top:1px solid var(--border);padding-top:12px">
-          <!-- 群組快速套用 -->
-          ${isAdmin ? `<div style="display:flex;align-items:center;gap:8px;margin-bottom:10px;flex-wrap:wrap">
-            <span style="font-size:12px;color:var(--muted);flex-shrink:0">快速套用群組：</span>
-            ${Object.entries(PERMISSION_GROUPS).map(([gname, g]) => `
-              <button onclick="applyPermGroup('${u.id}','${gname}')"
-                style="padding:3px 12px;border-radius:20px;font-size:12px;cursor:pointer;
-                background:${g.bg};color:${g.color};border:1px solid ${g.color};font-weight:600">
-                ${gname}
-              </button>`).join('')}
-            <button onclick="applyPermGroup('${u.id}','清除')"
-              style="padding:3px 12px;border-radius:20px;font-size:12px;cursor:pointer;
-              background:#f5f5f5;color:#999;border:1px solid #ddd">清除全部</button>
-          </div>` : ''}
-          <!-- 細部權限標籤 -->
-          <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">細部權限調整</div>
-          <div style="display:flex;flex-wrap:wrap;gap:6px">
-            ${PAGE_PERMISSIONS.flatMap(sec => sec.pages).map(p => {
-              const has = perms.includes(p.key);
-              return `<div onclick="${isAdmin?`toggleUserPerm('${u.id}','${p.key}',${has})`:'void(0)'}"
-                style="padding:4px 10px;border-radius:20px;font-size:12px;cursor:${isAdmin?'pointer':'default'};
-                background:${has?'var(--accent)':'#f0f0f0'};color:${has?'#fff':'var(--muted)'};
-                border:1px solid ${has?'var(--accent)':'#e0e0e0'};user-select:none;transition:all .15s">${p.label}</div>`;
-            }).join('')}
+        <div style="border-top:1px solid var(--border);padding-top:12px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px">
+          <div style="display:flex;flex-wrap:wrap;gap:6px;align-items:center">
+            <span style="font-size:12px;color:var(--muted)">已開放：</span>
+            ${perms.length === 0
+              ? `<span style="font-size:12px;color:#bbb">尚未開放任何功能</span>`
+              : PAGE_PERMISSIONS.flatMap(sec=>sec.pages).filter(p=>perms.includes(p.key)).map(p=>`
+                  <span style="font-size:11px;padding:2px 8px;border-radius:10px;background:var(--accent-light);color:var(--accent-dark);font-weight:600">${p.label}</span>`).join('')}
           </div>
-          ${isAdmin ? `<div style="font-size:11px;color:var(--muted);margin-top:8px">點擊標籤可個別開啟／關閉</div>` : ''}
+          ${isAdmin ? `<button class="btn-table" onclick="modalUserPermissions('${u.id}')" style="background:#e3f2fd;color:#1565c0;flex-shrink:0">⚙ 設定權限</button>` : ''}
         </div>`}
       </div>`;
     }).join('')}
