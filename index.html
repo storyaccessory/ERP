@@ -18795,7 +18795,10 @@ function renderCalendar() {
         } else {
           const ev = item.ev;
           const t = CAL_EVENT_TYPES[ev.event_type] || CAL_EVENT_TYPES.general;
-          const assigneeName = ev.profiles?.name ? ` · ${ev.profiles.name}` : '';
+          const evAssigneeIds = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
+          const allUsers = state.data.users || [];
+          const evNames = evAssigneeIds.map(uid => allUsers.find(u=>u.id===uid)?.name).filter(Boolean);
+          const assigneeName = evNames.length ? ` · ${evNames.join('/')}` : (ev.profiles?.name ? ` · ${ev.profiles.name}` : '');
           const isDone = !!ev.completed_at;
           const evBg    = isDone ? '#eeeeee' : t.bg;
           const evColor = isDone ? '#aaa'    : t.color;
@@ -18847,12 +18850,14 @@ function renderCalendar() {
       ${upcoming.map(ev=>{
         const t = CAL_EVENT_TYPES[ev.event_type]||CAL_EVENT_TYPES.general;
         const isMulti = ev.end_date && ev.end_date !== ev.start_date;
-        const assigneeName = ev.profiles?.name || '';
+        const listAssigneeIds = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
+        const listNames = listAssigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name || ev.profiles?.name).filter(Boolean);
+        const listAssigneeName = listNames.join('、') || ev.profiles?.name || '';
         return `<div class="card" style="margin-bottom:8px;padding:10px 12px;border-left:3px solid ${t.color};cursor:pointer" onclick="calViewEvent('${ev.id}')">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px">
             <span style="font-size:10px;background:${t.bg};color:${t.color};border-radius:3px;padding:1px 5px;font-weight:700">${t.label}</span>
             <span style="font-size:13px;font-weight:600;flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.title}</span>
-            ${assigneeName?`<span style="font-size:11px;color:var(--muted);white-space:nowrap">${assigneeName}</span>`:''}
+            ${listAssigneeName?`<span style="font-size:11px;color:var(--muted);white-space:nowrap">👤 ${listAssigneeName}</span>`:''}
           </div>
           <div style="font-size:11px;color:var(--muted)">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}</div>
           ${ev.description?`<div style="font-size:11px;color:var(--muted);margin-top:2px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.description}</div>`:''}
@@ -18866,12 +18871,21 @@ async function modalCalEvent(existing=null) {
   const today = _localToday();
   const id = existing?._prefill ? null : existing?.id;
   const users = state.data.users || [];
-  const existingAssignee = existing?.assigned_to || existing?.profiles?.id || '';
-  showModal(id?'編輯行事曆事項':'新增行事曆事項', `
+
+  // 現有指派人員（新欄位 assignee_ids 優先，舊欄位 assigned_to 備用）
+  const existingIds = Array.isArray(existing?.assignee_ids)
+    ? existing.assignee_ids
+    : (existing?.assigned_to ? [existing.assigned_to] : []);
+
+  const DAYS_ZH = ['日','一','二','三','四','五','六'];
+  const WEEK_OPTS = ['第1個','第2個','第3個','第4個','最後一個'];
+
+  showModal(id ? '編輯行事曆事項' : '新增行事曆事項', `
     <div class="form-group">
       <label>標題 <span style="color:var(--danger)">*</span></label>
       <input class="form-control" id="cal-title" value="${(existing?.title||'').replace(/"/g,'&quot;')}" placeholder="事項名稱">
     </div>
+
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group">
         <label>分類</label>
@@ -18880,56 +18894,130 @@ async function modalCalEvent(existing=null) {
         </select>
       </div>
       <div class="form-group">
-        <label>負責人員</label>
-        <select class="form-control" id="cal-assignee">
-          <option value="">（未指定）</option>
-          ${users.map(u=>`<option value="${u.id}" ${existingAssignee===u.id?'selected':''}>${u.name}</option>`).join('')}
-        </select>
-      </div>
-    </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
-      <div class="form-group">
         <label>開始日期 <span style="color:var(--danger)">*</span></label>
         <input class="form-control" id="cal-start" type="date" value="${existing?.start_date||today}">
       </div>
-      <div class="form-group">
-        <label>結束日期 <span style="font-size:11px;color:var(--muted);font-weight:400">（留空表示單日）</span></label>
-        <input class="form-control" id="cal-end" type="date" value="${existing?.end_date&&existing.end_date!==existing.start_date?existing.end_date:''}">
+    </div>
+
+    <div class="form-group">
+      <label>負責人員 <span style="font-size:11px;color:var(--muted);font-weight:400">（可多選）</span></label>
+      <div style="display:flex;flex-wrap:wrap;gap:8px;padding:10px;border:1px solid var(--border);border-radius:8px;background:#fafafa">
+        ${users.length === 0
+          ? `<span style="color:var(--muted);font-size:13px">無人員資料</span>`
+          : users.map(u => `
+            <label style="display:flex;align-items:center;gap:5px;cursor:pointer;font-size:13px;padding:3px 8px;border-radius:20px;background:${existingIds.includes(u.id)?'var(--accent)':'#fff'};color:${existingIds.includes(u.id)?'#fff':'var(--text)'};border:1px solid ${existingIds.includes(u.id)?'var(--accent)':'var(--border)'};transition:.15s" id="cal-assignee-label-${u.id}">
+              <input type="checkbox" id="cal-u-${u.id}" value="${u.id}" ${existingIds.includes(u.id)?'checked':''}
+                style="display:none"
+                onchange="(function(el){var lbl=document.getElementById('cal-assignee-label-${u.id}');lbl.style.background=el.checked?'var(--accent)':'#fff';lbl.style.color=el.checked?'#fff':'var(--text)';lbl.style.borderColor=el.checked?'var(--accent)':'var(--border)'})(this)">
+              ${u.name}
+            </label>`).join('')}
       </div>
     </div>
+
     <div class="form-group">
       <label>說明</label>
-      <textarea class="form-control" id="cal-desc" rows="3" placeholder="備註、相關資訊…">${existing?.description||''}</textarea>
+      <textarea class="form-control" id="cal-desc" rows="2" placeholder="備註、相關資訊…">${existing?.description||''}</textarea>
     </div>
+
+    ${!id ? `
+    <!-- 週期設定 -->
+    <div style="border:1px solid var(--border);border-radius:10px;padding:12px;margin-top:4px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-size:14px;font-weight:600;margin-bottom:0">
+        <input type="checkbox" id="cal-recur-on" onchange="document.getElementById('cal-recur-body').style.display=this.checked?'block':'none'" style="width:16px;height:16px">
+        🔁 週期性重複
+      </label>
+      <div id="cal-recur-body" style="display:none;margin-top:12px">
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;flex-wrap:wrap">
+          <label style="font-size:13px;font-weight:600;white-space:nowrap">重複方式</label>
+          <select class="form-control" id="cal-recur-type" style="width:auto"
+            onchange="document.getElementById('cal-recur-weekly').style.display=this.value==='weekly'?'flex':'none';document.getElementById('cal-recur-monthly').style.display=this.value==='monthly'?'flex':'none'">
+            <option value="weekly">每週</option>
+            <option value="monthly">每月第N個週X</option>
+          </select>
+        </div>
+
+        <!-- 每週：勾選星期 -->
+        <div id="cal-recur-weekly" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:10px">
+          ${DAYS_ZH.map((d,i)=>`
+            <label style="display:flex;align-items:center;justify-content:center;width:36px;height:36px;border-radius:50%;border:1px solid var(--border);cursor:pointer;font-size:13px;font-weight:600;background:#fff" id="cal-dow-lbl-${i}">
+              <input type="checkbox" id="cal-dow-${i}" value="${i}" style="display:none"
+                onchange="(function(el){var l=document.getElementById('cal-dow-lbl-${i}');l.style.background=el.checked?'var(--accent)':'#fff';l.style.color=el.checked?'#fff':'var(--text)';l.style.borderColor=el.checked?'var(--accent)':'var(--border)'})(this)">
+              ${d}
+            </label>`).join('')}
+        </div>
+
+        <!-- 每月第N個週X -->
+        <div id="cal-recur-monthly" style="display:none;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:10px">
+          <select class="form-control" id="cal-recur-week" style="width:auto">
+            ${WEEK_OPTS.map((w,i)=>`<option value="${i+1}">${w}</option>`).join('')}
+          </select>
+          <select class="form-control" id="cal-recur-weekday" style="width:auto">
+            ${DAYS_ZH.map((d,i)=>`<option value="${i}">週${d}</option>`).join('')}
+          </select>
+        </div>
+
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <label style="font-size:13px;font-weight:600;white-space:nowrap">重複到</label>
+          <input class="form-control" id="cal-recur-end" type="date" style="width:auto"
+            value="${(() => { const d = new Date(today+'T00:00:00'); d.setFullYear(d.getFullYear()+1); return d.toISOString().slice(0,10); })()}">
+          <span style="font-size:12px;color:var(--muted)">（預設一年後）</span>
+        </div>
+      </div>
+    </div>` : ''}
   `, [
     ...(id ? [{ label:'刪除', onclick: async () => {
-      if (!confirm('確定刪除此事項？')) return;
-      await db.from('calendar_events').delete().eq('id', id);
+      const delAll = existing?.template_id
+        ? confirm('此為週期事項。\n確定刪除？')
+        : confirm('確定刪除此事項？');
+      if (!delAll) return;
+      if (existing?.template_id) {
+        await db.from('calendar_events').delete().eq('template_id', existing.template_id);
+        await db.from('calendar_events').delete().eq('id', existing.template_id);
+      } else {
+        await db.from('calendar_events').delete().eq('id', id);
+      }
       showToast('已刪除'); closeModal();
       await loadCalendarEvents(); renderApp();
     }}] : []),
-    { label: id?'儲存':'新增', primary: true, onclick: async () => {
+    { label: id ? '儲存' : '新增', primary: true, onclick: async () => {
       const title = document.getElementById('cal-title').value.trim();
       if (!title) { showToast('請填標題','error'); return; }
       const startDate = document.getElementById('cal-start').value;
       if (!startDate) { showToast('請選開始日期','error'); return; }
-      const endDate = document.getElementById('cal-end').value || null;
-      const assignedTo = document.getElementById('cal-assignee').value || null;
-      const payload = {
+
+      // 收集指派人員
+      const assigneeIds = users.map(u=>u.id).filter(uid => document.getElementById(`cal-u-${uid}`)?.checked);
+      const assignedTo = assigneeIds[0] || null; // 向下相容舊欄位
+
+      const basePayload = {
         title,
         event_type: document.getElementById('cal-type').value,
         start_date: startDate,
-        end_date: endDate || startDate,
+        end_date: startDate,
         description: document.getElementById('cal-desc').value.trim() || null,
         assigned_to: assignedTo,
+        assignee_ids: assigneeIds,
       };
+
       if (id) {
-        await db.from('calendar_events').update(payload).eq('id', id);
+        // 編輯現有
+        await db.from('calendar_events').update(basePayload).eq('id', id);
+        showToast('已更新！');
       } else {
-        payload.created_by = state.user?.id;
-        await db.from('calendar_events').insert(payload);
+        // 新增
+        const isRecur = document.getElementById('cal-recur-on')?.checked;
+        if (isRecur) {
+          const recurType = document.getElementById('cal-recur-type').value;
+          const recurEnd  = document.getElementById('cal-recur-end').value;
+          if (!recurEnd) { showToast('請填重複結束日期','error'); return; }
+          await _createRecurringEvents(basePayload, recurType, recurEnd);
+          showToast('週期事項已建立！');
+        } else {
+          basePayload.created_by = state.user?.id;
+          await db.from('calendar_events').insert(basePayload);
+          showToast('已新增！');
+        }
       }
-      showToast(id?'已更新！':'已新增！');
       closeModal();
       await loadCalendarEvents(); renderApp();
     }},
@@ -18937,12 +19025,73 @@ async function modalCalEvent(existing=null) {
   ]);
 }
 
+// 產生並批次寫入週期性事項
+async function _createRecurringEvents(base, recurType, recurEndDate) {
+  const dates = [];
+  const endD = new Date(recurEndDate + 'T00:00:00');
+  const startD = new Date(base.start_date + 'T00:00:00');
+
+  if (recurType === 'weekly') {
+    // 勾選的星期幾
+    const checkedDays = [0,1,2,3,4,5,6].filter(i => document.getElementById(`cal-dow-${i}`)?.checked);
+    if (!checkedDays.length) { showToast('請選擇至少一天','error'); return; }
+    const cur = new Date(startD);
+    while (cur <= endD) {
+      if (checkedDays.includes(cur.getDay())) dates.push(cur.toISOString().slice(0,10));
+      cur.setDate(cur.getDate() + 1);
+    }
+  } else if (recurType === 'monthly') {
+    const week    = parseInt(document.getElementById('cal-recur-week').value);    // 1-5
+    const weekday = parseInt(document.getElementById('cal-recur-weekday').value); // 0-6
+    const cur = new Date(startD.getFullYear(), startD.getMonth(), 1);
+    while (cur <= endD) {
+      const y = cur.getFullYear(), m = cur.getMonth();
+      // 找第 week 個 weekday
+      let count = 0, day = 1;
+      const daysInMonth = new Date(y, m+1, 0).getDate();
+      for (; day <= daysInMonth; day++) {
+        if (new Date(y, m, day).getDay() === weekday) {
+          count++;
+          if (count === week) break;
+        }
+      }
+      if (count === week) {
+        const d = `${y}-${String(m+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+        if (d >= base.start_date && d <= recurEndDate) dates.push(d);
+      }
+      cur.setMonth(cur.getMonth() + 1);
+    }
+  }
+
+  if (!dates.length) { showToast('找不到符合的日期，請確認設定','error'); return; }
+
+  // 建立母事項（不顯示在行事曆，只作為識別）
+  const { data: tmpl } = await db.from('calendar_events')
+    .insert({ ...base, created_by: state.user?.id, is_template: true })
+    .select().single();
+  const templateId = tmpl?.id;
+
+  // 批次寫入所有實例
+  const rows = dates.map(d => ({
+    ...base,
+    start_date: d, end_date: d,
+    created_by: state.user?.id,
+    template_id: templateId,
+  }));
+  // 分批 insert（避免超大量）
+  for (let i = 0; i < rows.length; i += 50) {
+    await db.from('calendar_events').insert(rows.slice(i, i+50));
+  }
+}
+
 window.calViewEvent = function(id) {
   const ev = (state.data.calEvents||[]).find(e=>e.id===id);
   if (!ev) return;
   const t = CAL_EVENT_TYPES[ev.event_type]||CAL_EVENT_TYPES.general;
   const isMulti = ev.end_date && ev.end_date !== ev.start_date;
-  const assigneeName = ev.profiles?.name || '';
+  const viewAssigneeIds = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
+  const viewNames = viewAssigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean);
+  const assigneeName = viewNames.join('、') || ev.profiles?.name || '';
   const isDone = !!ev.completed_at;
   const completedDateStr = isDone
     ? new Date(ev.completed_at).toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'})
@@ -18964,6 +19113,12 @@ window.calViewEvent = function(id) {
         closeModal();
         await loadCalendarEvents();
         renderApp();
+      }
+    },
+    { label:'複製', onclick: () => {
+        closeModal();
+        // 帶入所有欄位，但清除 id（視為新增），日期預設今天
+        modalCalEvent({ ...ev, _prefill: true, id: null, start_date: _localToday(), end_date: _localToday() });
       }
     },
     { label:'編輯', onclick: () => { closeModal(); modalCalEvent(ev); } },
