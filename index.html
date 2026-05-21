@@ -18925,17 +18925,19 @@ async function loadCalendarEvents() {
   const cal = state.data.calNav || (() => { const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; })();
   const firstOfMonth = `${cal.y}-${String(cal.m+1).padStart(2,'0')}-01`;
   const lastOfMonth  = `${cal.y}-${String(cal.m+1).padStart(2,'0')}-${new Date(cal.y,cal.m+1,0).getDate()}`;
-  const sel = '*, profiles!calendar_events_assigned_to_fkey(id,name)';
-  const { data } = await db.from('calendar_events')
+  const sel = '*';
+  const { data, error: e1 } = await db.from('calendar_events')
     .select(sel)
     .lte('start_date', lastOfMonth)
     .gte('end_date', firstOfMonth)
     .order('start_date');
-  const { data: singleDay } = await db.from('calendar_events')
+  if (e1) console.error('calEvents query1 error:', e1.message);
+  const { data: singleDay, error: e2 } = await db.from('calendar_events')
     .select(sel)
     .gte('start_date', firstOfMonth)
     .lte('start_date', lastOfMonth)
     .is('end_date', null);
+  if (e2) console.error('calEvents query2 error:', e2.message);
   const all = [...(data||[]), ...(singleDay||[])];
   // dedupe by id
   const seen = new Set();
@@ -19342,7 +19344,8 @@ async function modalCalEvent(existing=null) {
 
       if (id) {
         // 編輯現有
-        await db.from('calendar_events').update(basePayload).eq('id', id);
+        const { error: upErr } = await db.from('calendar_events').update(basePayload).eq('id', id);
+        if (upErr) { showToast('更新失敗：' + upErr.message, 'error'); return; }
         showToast('已更新！');
       } else {
         // 新增
@@ -19355,7 +19358,8 @@ async function modalCalEvent(existing=null) {
           showToast('週期事項已建立！');
         } else {
           basePayload.created_by = state.user?.id;
-          await db.from('calendar_events').insert(basePayload);
+          const { error: insErr } = await db.from('calendar_events').insert(basePayload);
+          if (insErr) { showToast('新增失敗：' + insErr.message, 'error'); return; }
           showToast('已新增！');
         }
       }
