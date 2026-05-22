@@ -16724,7 +16724,7 @@ window.modalAddBooking = async function(defaultDate = '', defaultSlot = '') {
     { label:'確認新增', primary:true, onclick: async () => {
       const visitType = document.getElementById('bk-type-visit').dataset.active === '1' ? 'visit' : 'pickup';
       const booking_date = document.getElementById('bk-date').value;
-      const time_slot = visitType === 'visit' ? document.getElementById('bk-slot').value : null;
+      const time_slot = document.getElementById('bk-slot').value || null;
       const customer_name = document.getElementById('bk-name').value.trim();
       const phone = document.getElementById('bk-phone').value.trim();
       const attendees = visitType === 'visit' ? parseInt(document.getElementById('bk-attendees').value) : 1;
@@ -16761,7 +16761,7 @@ window.modalAddBooking = async function(defaultDate = '', defaultSlot = '') {
     const srcWrap  = document.getElementById('bk-source')?.closest('.form-group');
     const reqLabel = document.getElementById('bk-request-label');
     const reqInput = document.getElementById('bk-request');
-    if (slotWrap) slotWrap.style.display = isVisit ? '' : 'none';
+    if (slotWrap) slotWrap.style.display = ''; // 取貨也可選時段
     if (attWrap)  attWrap.style.display  = isVisit ? '' : 'none';
     if (srcWrap)  srcWrap.style.display  = isVisit ? '' : 'none';
     if (reqLabel) reqLabel.textContent = isVisit ? '🛍 想要鑑賞的商品 *' : '🛍 訂單 / 商品說明（選填）';
@@ -19211,18 +19211,20 @@ function renderCalendar() {
 
         if (item._type === 'booking') {
           const b = item.b;
-          const isPickup = b.source === '門市取貨';
-          const hasTimed = !!(b.time_slot);
-          const timeStr  = (b.time_slot||'').slice(0,5);
+          const isPickup  = b.source === '門市取貨';
+          const bDone     = b.status === '已完成';
+          const hasTimed  = !!(b.time_slot);
+          const timeStr   = (b.time_slot||'').slice(0,5);
           const typeLabel = isPickup ? '取貨' : '鑑賞';
           const cust = b.customer_name || '';
           const onclick = `onclick="event.stopPropagation();window.modalViewBooking('${b.id}')"`;
+          const bDeco = bDone ? 'text-decoration:line-through;opacity:.45;' : '';
+          const bColor = bDone ? '#aaa' : storeT.color;
+          const bBg    = bDone ? '#ebebeb' : storeT.bg;
           if (hasTimed) {
-            // 有時間：圓點＋文字，整行用分類文字色
-            return baseDiv(`${timeStr} 門市-${typeLabel} ${cust}`, `padding:1px 2px;color:${storeT.color}`, onclick);
+            return baseDiv(`${timeStr} 門市-${typeLabel} ${cust}`, `padding:1px 2px;color:${bColor};${bDeco}`, onclick);
           } else {
-            // 整天：色塊
-            return baseDiv(`門市-${typeLabel} ${cust}`, `padding:1px 4px;background:${storeT.bg};color:${storeT.color};border-radius:3px`, onclick);
+            return baseDiv(`門市-${typeLabel} ${cust}`, `padding:1px 4px;background:${bBg};color:${bColor};border-radius:3px;${bDeco}`, onclick);
           }
         } else {
           const ev = item.ev;
