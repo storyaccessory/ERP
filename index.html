@@ -16207,7 +16207,7 @@ const JOURNAL_TEMPLATES = {
         issues:      '例：Reels 素材不足、修改次數偏高、某設計師進度落後',
         help_needed: '例：聯名合作方向需業主確認、預算追加需主管批准',
       }),
-      { key:'team_status', label:'👥 團隊狀況', color:'#06b6d4', rows:2,
+      { key:'team_status', label:'👥 團隊狀況', color:'#06b6d4', rows:2, private:true,
         placeholder:'例：整體進度正常；B 因素材延誤、預計後天補交' },
     ]
   },
@@ -16235,8 +16235,8 @@ const JOURNAL_TEMPLATES = {
         issues:      '例：模具耗損、某工序耗時增加、2 件返工、人力偏緊',
         help_needed: '例：材料採購需授權、急件插單需業主確認',
       }),
-      { key:'line_summary', label:'🏭 產線摘要', color:'#06b6d4', rows:2,
-        placeholder:'例：今日總產量 45 件，品質正常，人力充足' },
+      { key:'team_status', label:'👥 團隊狀況', color:'#06b6d4', rows:2, private:true,
+        placeholder:'例：整體進度正常、急件排程正常、人力充足，A 明日請假需調配' },
     ]
   },
   admin_ops: {
@@ -17362,10 +17362,11 @@ function renderJournal() {
         <div style="font-size:11px;color:var(--muted)">${log.updated_at ? new Date(log.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
       </div>
       ${tpl.fields.map(f => {
+        if (f.private && !isMe && !isAdmin) return '';
         const val = fields[f.key] || log[f.key];
         const isEmpty = !val || (Array.isArray(val) && val.filter(i=>i?.desc?.trim()).length===0);
         return `<div style="margin-bottom:10px">
-          <div style="font-size:11px;font-weight:600;color:${f.color};margin-bottom:4px">${f.label}</div>
+          <div style="font-size:11px;font-weight:600;color:${f.color};margin-bottom:4px">${f.label}${f.private?` <span style="font-size:9px;opacity:.45;font-weight:400">🔒</span>`:''}</div>
           ${isEmpty ? `<div style="font-size:13px;color:var(--muted)">無</div>` : _fmtJnlField(val)}
         </div>`;
       }).join('')}
