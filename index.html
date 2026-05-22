@@ -17684,40 +17684,38 @@ window.modalEditJournal = async function(existingId = null) {
     ${(() => {
       const myItems = (jd.upcoming||[]);
       if (myItems.length === 0) return '';
-      const todayStr = _localToday();
-      const soon3d = new Date(Date.now()+3*86400000).toISOString().slice(0,10);
-      const pColor = p => p==='高'?'🔴':p==='低'?'🟢':'🟡';
+      const _ts = _localToday();
+      const _tm = (() => { const d = new Date(_ts+'T00:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
+      const _t3 = (() => { const d = new Date(_ts+'T00:00:00'); d.setDate(d.getDate()+3); return d.toISOString().slice(0,10); })();
+      const _t7 = (() => { const d = new Date(_ts+'T00:00:00'); d.setDate(d.getDate()+7); return d.toISOString().slice(0,10); })();
+      const _urg = d => {
+        if (d === _ts)  return { bg:'#ffebee', color:'#c62828', label:'今天 🔴' };
+        if (d === _tm)  return { bg:'#fff3e0', color:'#e65100', label:'明天 🟠' };
+        if (d <= _t3)   return { bg:'#fffde7', color:'#f57f17', label:d.slice(5)+' 🟡' };
+        if (d <= _t7)   return { bg:'#f5f5f5', color:'#555',    label:d.slice(5) };
+        return                 { bg:'#fafafa', color:'#888',    label:d.slice(5) };
+      };
       return `<div style="margin-top:16px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
-        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📌 你的近期行事曆事項（共 ${myItems.length} 件）</div>
-        ${myItems.slice(0,6).map(t => {
-          const over = t.start_date < todayStr;
-          const warn = t.start_date <= soon3d;
-          const dot  = over ? '🔴' : warn ? '🟡' : pColor(t.priority);
-          return `<div style="display:flex;gap:8px;align-items:start;padding:4px 0;border-bottom:1px solid var(--border)">
-            <span style="font-size:13px;flex-shrink:0">${dot}</span>
-            <div style="font-size:12px">
-              <div style="font-weight:500">${t.title}</div>
-              <div style="color:var(--muted);font-size:11px">📅 ${t.start_date}${t.end_date&&t.end_date!==t.start_date?' ～ '+t.end_date:''}</div>
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📋 你的近期任務（共 ${myItems.length} 件）</div>
+        <div style="display:flex;flex-direction:column;gap:4px">
+        ${myItems.map(ev => {
+          const { bg, color, label } = _urg(ev.start_date);
+          const mySubs = (Array.isArray(ev.subtasks)?ev.subtasks:[]).filter(s=>!s.done&&s.text&&(s.assignee_id===myId||!s.assignee_id));
+          const subsHtml = mySubs.map(s => {
+            const isOv = s.due_date && s.due_date < _ts;
+            const isTd = s.due_date && s.due_date === _ts;
+            const dueTxt = s.due_date ? (isOv?`⚠ 逾期 ${s.due_date.slice(5)}`:isTd?`⏰ 今日`:`📅 ${s.due_date.slice(5)}`) : '';
+            return `<span style="color:${isOv?'#e53935':isTd?'#e65100':'#999'}">${s.text}${dueTxt?`（${dueTxt}）`:''}</span>`;
+          }).join('　');
+          return `<div style="display:flex;align-items:center;gap:10px;padding:6px 8px;border-radius:7px;background:${bg}">
+            <span style="font-size:11px;font-weight:700;color:${color};min-width:60px;white-space:nowrap;flex-shrink:0">${label}</span>
+            <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+              <span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap">${ev.title}</span>
+              ${mySubs.length ? `<span style="font-size:11px">${subsHtml}</span>` : ''}
             </div>
           </div>`;
         }).join('')}
-        ${myItems.length > 6 ? `<div style="font-size:11px;color:var(--muted);margin-top:6px;text-align:center">⋯ 還有 ${myItems.length-6} 件</div>` : ''}
-      </div>`;
-    })()}
-    ${(() => {
-      const teamEvs = (jd.teamEvents||[]);
-      if (!teamEvs.length) return '';
-      const todayStr = _localToday();
-      return `<div style="margin-top:10px;padding:12px 14px;background:#f3f4ff;border:1px solid #c7d2fe;border-radius:8px">
-        <div style="font-size:12px;font-weight:600;color:#4338ca;margin-bottom:8px">🤝 部門團隊協作事項</div>
-        ${teamEvs.slice(0,5).map(ev => {
-          const over = ev.start_date < todayStr;
-          return `<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:1px solid #e0e7ff;font-size:12px">
-            <span style="color:${over?'#e53935':'#6366f1'};flex-shrink:0">${over?'🔴':'🤝'}</span>
-            <span style="flex:1">${ev.title}</span>
-            <span style="color:#999;white-space:nowrap">${ev.start_date.slice(5)}</span>
-          </div>`;
-        }).join('')}
+        </div>
       </div>`;
     })()}
   `, [
