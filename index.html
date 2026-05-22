@@ -932,9 +932,9 @@ function renderLogin() {
 
 // 可以編輯業績數值的人：admin、management，或有 sales_edit 權限
 function canEditSales() {
-  const profile = state.data.viewAs || state.profile;
+  const profile = state.profile;
   const role = profile?.role;
-  const email = profile?.email || (state.data.viewAs ? '' : (state.user?.email || ''));
+  const email = profile?.email || state.user?.email || '';
   if (['admin','manager','management'].includes(role) || email === 'cailing0516@gmail.com') return true;
   const perms = Array.isArray(profile?.permissions) ? profile.permissions : [];
   return perms.includes('sales_edit');
@@ -943,9 +943,9 @@ function canEditSales() {
 // 可以調整庫存數量的人：admin、主管、製作部
 // 可以修改/刪除補貨單的人：admin、主管、有 restock_manage 權限
 function canManageRestock() {
-  const profile = state.data.viewAs || state.profile;
+  const profile = state.profile;
   const role = profile?.role;
-  const email = profile?.email || (state.data.viewAs ? '' : (state.user?.email || ''));
+  const email = profile?.email || state.user?.email || '';
   const adminEmails = ['cailing0516@gmail.com'];
   if (role === 'admin' || adminEmails.includes(email)) return true;
   const perms = Array.isArray(profile?.permissions) ? profile.permissions : [];
@@ -953,9 +953,9 @@ function canManageRestock() {
 }
 
 function canAdjustStock() {
-  const profile = state.data.viewAs || state.profile;
+  const profile = state.profile;
   const role = profile?.role;
-  const email = profile?.email || (state.data.viewAs ? '' : (state.user?.email || ''));
+  const email = profile?.email || state.user?.email || '';
   const adminEmails = ['cailing0516@gmail.com'];
   if (role === 'admin' || adminEmails.includes(email)) return true;
   const perms = Array.isArray(profile?.permissions) ? profile.permissions : [];
@@ -964,10 +964,9 @@ function canAdjustStock() {
 }
 
 function canAccessPage(pageKey) {
-  // 視角切換模式：以被模擬使用者的視角判斷權限
-  const profile = state.data.viewAs || state.profile;
+  const profile = state.profile;
   const role = profile?.role;
-  const email = profile?.email || (state.data.viewAs ? '' : (state.user?.email || ''));
+  const email = profile?.email || state.user?.email || '';
   const adminEmails = ['cailing0516@gmail.com'];
   // 老闆（admin）全開
   const isAdmin = role === 'admin' || adminEmails.includes(email);
@@ -996,32 +995,14 @@ function canAccessPage(pageKey) {
   return perms.includes(pageKey);
 }
 
-// ── 視角切換：effectiveProfile() / effectiveUserId() ──
-// 所有頁面的「顯示/篩選」判斷改用這兩個函式
-// 注意：「寫入資料」(created_by / reviewer_id) 仍用 state.user?.id，永遠記錄真實操作者
 function effectiveProfile() {
-  return state.data.viewAs || state.profile || {};
+  return state.profile || {};
 }
 function effectiveUserId() {
-  return state.data.viewAs?.id || state.user?.id || null;
+  return state.user?.id || null;
 }
 window.effectiveProfile = effectiveProfile;
 window.effectiveUserId  = effectiveUserId;
-
-// ── 視角切換（僅 cailing0516@gmail.com 可用）──
-window.setViewAs = function(userId) {
-  if (!userId) { window.exitViewAs(); return; }
-  const users = state.data.users || [];
-  const user = users.find(u => u.id === userId);
-  if (!user) return;
-  state.data.viewAs = user;
-  state.page = 'dashboard';
-  renderApp();
-};
-window.exitViewAs = function() {
-  state.data.viewAs = null;
-  renderApp();
-};
 
 function renderSidebar() {
   const role = state.profile?.role;
@@ -1100,28 +1081,12 @@ function renderSidebar() {
 
   html += `</nav>`;
 
-  // 視角切換選單（僅 cailing0516@gmail.com 可用）
-  const realEmail = state.user?.email || state.profile?.email || '';
-  if (realEmail === 'cailing0516@gmail.com') {
-    const allUsers = (state.data.users || []).filter(u => u.is_active !== false);
-    const viewAsId = state.data.viewAs?.id || '';
-    html += `<div class="sidebar-viewas" style="padding:8px 10px;border-top:1px solid rgba(255,255,255,.08)">
-      <div style="font-size:10px;color:rgba(255,255,255,.4);letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">👁 視角切換</div>
-      <select id="viewas-select" onchange="window.setViewAs(this.value)"
-        style="width:100%;font-size:12px;background:#2a3d3d;color:#e0f2f1;border:1px solid rgba(77,182,172,.3);border-radius:6px;padding:4px 6px;cursor:pointer;outline:none">
-        <option value="">— 我自己（管理員）—</option>
-        ${allUsers.map(u => `<option value="${u.id}" ${u.id === viewAsId ? 'selected' : ''}>${u.name}（${ROLE_LABEL[u.role]||u.role||'員工'}）</option>`).join('')}
-      </select>
-    </div>`;
-  }
-
-  const displayProfile = state.data.viewAs || state.profile;
   html += `
     <div class="sidebar-user">
-      <div class="avatar" style="${state.data.viewAs ? 'background:#ff9800;color:#fff' : ''}">${(displayProfile?.name||'U')[0]}</div>
+      <div class="avatar">${(state.profile?.name||'U')[0]}</div>
       <div>
-        <div style="font-size:12px;font-weight:600">${displayProfile?.name||'使用者'}${state.data.viewAs ? ' <span style="font-size:10px;color:#ffa726">（模擬）</span>' : ''}</div>
-        <div style="font-size:10px;opacity:.5">${displayProfile?.role||''}</div>
+        <div style="font-size:12px;font-weight:600">${state.profile?.name||'使用者'}</div>
+        <div style="font-size:10px;opacity:.5">${state.profile?.role||''}</div>
       </div>
       <button id="logout-btn" style="margin-left:auto;background:none;color:rgba(255,255,255,.4);font-size:16px;" title="登出">⏻</button>
     </div>
@@ -16353,8 +16318,7 @@ function _fmtJnlField(val) {
 }
 
 function _getMyTemplate(jd) {
-  // viewAs 模式下，用被模擬員工的 profile 決定日誌範本
-  const myProfile = state.data.viewAs || (jd.profiles||[]).find(p=>p.id===effectiveUserId());
+  const myProfile = (jd.profiles||[]).find(p=>p.id===effectiveUserId());
   const tpl = myProfile?.journal_template || ROLE_TO_JOURNAL_TEMPLATE[myProfile?.role] || 'general';
   return JOURNAL_TEMPLATES[tpl] || JOURNAL_TEMPLATES.general;
 }
@@ -17388,7 +17352,7 @@ function renderJournal() {
   const history = jd.history || [];
   const profiles = jd.profiles || [];
   const myId = effectiveUserId();
-  const myProfile = state.data.viewAs || profiles.find(p => p.id === myId);
+  const myProfile = profiles.find(p => p.id === myId);
   const isAdmin = ['admin','manager','management'].includes(myProfile?.role) || myProfile?.email === 'cailing0516@gmail.com';
   const myLog = todayLogs.find(l => l.user_id === myId);
   const hasSubmitted = !!myLog;
@@ -17705,7 +17669,7 @@ window.modalEditJournal = async function(existingId = null) {
     existing = (jd.today||[]).find(l=>l.user_id===myId);
   }
   const logDate = existing?.date || today;
-  const myProfile = state.data.viewAs || (jd.profiles||[]).find(p=>p.id===myId);
+  const myProfile = (jd.profiles||[]).find(p=>p.id===myId);
   const myName = myProfile?.name || state.user?.email || '—';
   const tplKey = existing?.template_type || myProfile?.journal_template || ROLE_TO_JOURNAL_TEMPLATE[myProfile?.role] || 'general';
   const tpl = JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
@@ -19400,8 +19364,7 @@ function renderCalendar() {
   const calFilter     = state.data.calFilter     || 'all';  // 'all' | 'mine'
   const calView       = state.data.calView       || 'month'; // 'month' | 'list'
   const calTypeFilter = state.data.calTypeFilter || null;    // null | event_type key
-  // viewAs 模式下，「我的」篩選要用被模擬員工的 ID
-  const myId = state.data.viewAs?.id || state.user?.id;
+  const myId = state.user?.id;
   let allEvents = state.data.calEvents || [];
   // Apply 我的/全公司 filter
   let events = calFilter === 'mine'
@@ -20719,18 +20682,9 @@ function renderApp() {
     state.page = 'dashboard';
   }
   const pageContent = pageRenderers[state.page] ? pageRenderers[state.page]() : '<div class="empty"><p>頁面建構中…</p></div>';
-  const viewAsBanner = state.data.viewAs ? `
-    <div id="viewas-banner" style="position:fixed;top:0;left:0;right:0;z-index:200;background:#e65100;color:#fff;
-      display:flex;align-items:center;justify-content:center;gap:12px;padding:7px 16px;font-size:13px;font-weight:600;
-      box-shadow:0 2px 8px rgba(0,0,0,.2)">
-      <span>👁 正在以「${state.data.viewAs.name}」的視角查看（角色：${ROLE_LABEL[state.data.viewAs.role]||state.data.viewAs.role||'員工'}）</span>
-      <button onclick="window.exitViewAs()" style="background:rgba(255,255,255,.25);border:none;color:#fff;
-        border-radius:6px;padding:3px 12px;font-size:12px;cursor:pointer;font-weight:700">✕ 退出視角</button>
-    </div>` : '';
   root.innerHTML = `
-    ${viewAsBanner}
     ${renderSidebar()}
-    <div class="main" style="${state.data.viewAs ? 'margin-top:36px' : ''}">
+    <div class="main">
       ${renderTopbar(pageTitle[state.page] || state.page, `
         <span style="font-size:12px;color:var(--muted)">${new Date().toLocaleDateString('zh-TW',{weekday:'short',month:'long',day:'numeric'})}</span>
       `)}
