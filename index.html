@@ -13501,6 +13501,8 @@ async function loadSales() {
   }
   // 一次性歷史資料遷移（若尚未做過）
   await _migrateHistSalesData();
+  // 把本機 localStorage 手動輸入的資料上傳到 Supabase（每個人各跑一次）
+  await _migrateLocalStorageSales();
 }
 
 // ── Tab bar ──
@@ -22221,6 +22223,72 @@ async function init() {
     if (state.page !== 'dashboard') loadPageData(state.page);
   }
   else bindLoginEvents();
+}
+
+// ── 把個人 localStorage 手動輸入的業績資料上傳到 Supabase（每人跑一次）──
+async function _migrateLocalStorageSales() {
+  const LS_FLAG = '_ls_sales_migrated_v1';
+  if (localStorage.getItem(LS_FLAG)) return;
+  const uid = state.data.profile?.id;
+  const ts  = new Date().toISOString();
+  const sdUpsert  = [];
+  const expUpsert = [];
+  // 掃描所有 sd_ 開頭的 key → sales_daily
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith('sd_')) continue;
+    const parts = k.split('_'); // sd_year_platform_month1_day  (platform 可能含底線，需特別處理)
+    if (parts.length < 5) continue;
+    const year   = parseInt(parts[1]);
+    const day    = parseInt(parts[parts.length-1]);
+    const month1 = parseInt(parts[parts.length-2]);
+    const platform = parts.slice(2, parts.length-2).join('_');
+    if (!year || !month1 || !day || !platform) continue;
+    const val = parseFloat(localStorage.getItem(k));
+    if (!val && val !== 0) continue;
+    // 只在 Supabase 沒有此筆時才上傳（不覆蓋雲端已有的資料）
+    const ck = `${year}_${platform}_${month1}_${day}`;
+    if ((state.data.salesCache||{})[ck] !== undefined) continue;
+    state.data.salesCache[ck] = val;
+    sdUpsert.push({year, platform, month1, day, value: val, updated_by: uid, updated_at: ts});
+  }
+  // 掃描所有 sexp_ 開頭的 key → sales_exp_detail
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (!k || !k.startsWith('sexp_')) continue;
+    const parts = k.split('_'); // sexp_year_month1_day
+    if (parts.length < 4) continue;
+    const year   = parseInt(parts[1]);
+    const month1 = parseInt(parts[2]);
+    const day    = parseInt(parts[3]);
+    if (!year || !month1 || !day) continue;
+    let e;
+    try { e = JSON.parse(localStorage.getItem(k)||'{}'); } catch(_) { continue; }
+    const ek = `${year}_${month1}_${day}`;
+    if ((state.data.expCache||{})[ek]) continue; // 雲端已有，跳過
+    if (!state.data.expCache) state.data.expCache = {};
+    state.data.expCache[ek] = {
+      cash: parseFloat(e.cash)||0,
+      card: parseFloat(e.card)||0,
+      linepay: parseFloat(e.linepay)||0,
+      stall: !!e.stall
+    };
+    const {cash, card, linepay, stall} = state.data.expCache[ek];
+    if (cash)    expUpsert.push({year,month1,day,field:'cash',   value:cash,   updated_by:uid,updated_at:ts});
+    if (card)    expUpsert.push({year,month1,day,field:'card',   value:card,   updated_by:uid,updated_at:ts});
+    if (linepay) expUpsert.push({year,month1,day,field:'linepay',value:linepay,updated_by:uid,updated_at:ts});
+    if (stall)   expUpsert.push({year,month1,day,field:'stall',  value:1,      updated_by:uid,updated_at:ts});
+    // 同步更新 salesCache 的體驗店加總
+    const total = cash + card + linepay;
+    const sk = `${year}_體驗店_${month1}_${day}`;
+    if ((state.data.salesCache||{})[sk] === undefined && total) {
+      state.data.salesCache[sk] = total;
+      sdUpsert.push({year,platform:'體驗店',month1,day,value:total,updated_by:uid,updated_at:ts});
+    }
+  }
+  if (sdUpsert.length)  await db.from('sales_daily').upsert(sdUpsert, {onConflict:'year,month1,day,platform'});
+  if (expUpsert.length) await db.from('sales_exp_detail').upsert(expUpsert, {onConflict:'year,month1,day,field'});
+  localStorage.setItem(LS_FLAG, '1');
 }
 
 // ── 體驗店歷史資料遷移到 Supabase（只執行一次） ──
