@@ -20274,7 +20274,7 @@ window.calViewEvent = function(id) {
     </div>
     <!-- 說明 -->
     ${ev.description
-      ? `<div style="font-size:14px;line-height:1.75;color:var(--text);margin-bottom:12px;padding:0 2px">${ev.description}</div>`
+      ? `<div style="background:#f8f9fa;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.75;color:var(--text)">${ev.description}</div>`
       : ''}
     ${(()=>{
       const subs = Array.isArray(ev.subtasks) ? ev.subtasks.filter(s=>s.text) : [];
