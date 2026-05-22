@@ -17115,6 +17115,33 @@ window.modalEditBooking = async function(bookingId) {
     }},
     { label:'取消', onclick: () => { closeModal(); setTimeout(()=>window.modalViewBooking(bookingId), 80); } },
   ]);
+  // 類型切換 helper（編輯版）
+  window._ebSetType = function(type) {
+    const isV = type === 'visit';
+    const vBtn = document.getElementById('eb-type-visit');
+    const pBtn = document.getElementById('eb-type-pickup');
+    if (!vBtn || !pBtn) return;
+    vBtn.style.background = isV ? 'var(--accent)' : '#f5f5f5';
+    vBtn.style.color = isV ? '#fff' : '#999';
+    pBtn.style.background = isV ? '#f5f5f5' : 'var(--accent)';
+    pBtn.style.color = isV ? '#999' : '#fff';
+    pBtn.dataset.active = isV ? '0' : '1';
+    const attW  = document.getElementById('eb-attendees-wrap');
+    const srcW  = document.getElementById('eb-source-wrap');
+    const lnkW  = document.getElementById('eb-link-wrap');
+    const rqLbl = document.getElementById('eb-request-label');
+    const rqInp = document.getElementById('eb-request');
+    if (attW)  attW.style.display  = isV ? '' : 'none';
+    if (srcW)  srcW.style.display  = isV ? '' : 'none';
+    if (lnkW)  lnkW.style.display  = isV ? '' : 'none';
+    if (rqLbl) rqLbl.textContent   = isV ? '🛍 想要鑑賞的商品' : '🛍 訂單 / 商品說明（選填）';
+    if (rqInp) rqInp.placeholder   = isV ? '角色／系列／商品名稱' : 'TG 訂單編號或商品說明';
+  };
+  // 初始化 active 狀態
+  setTimeout(() => {
+    const pBtn = document.getElementById('eb-type-pickup');
+    if (pBtn) pBtn.dataset.active = isPickup ? '1' : '0';
+  }, 50);
 };
 
 // 罐頭語產生器
