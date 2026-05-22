@@ -57,6 +57,7 @@ a { text-decoration: none; color: inherit; }
 .sidebar.collapsed .nav-item { padding: 10px; justify-content: center; }
 .sidebar.collapsed .nav-item .drag-handle { display: none; }
 .sidebar.collapsed .sidebar-user { justify-content: center; padding: 12px 8px; }
+.sidebar.collapsed .sidebar-viewas { display: none; }
 .sidebar-toggle {
   background: none; border: none; color: rgba(255,255,255,.75); cursor: pointer;
   font-size: 20px; line-height: 1; padding: 4px 6px; border-radius: 6px;
@@ -927,37 +928,42 @@ function renderLogin() {
 
 // 可以編輯業績數值的人：admin、management，或有 sales_edit 權限
 function canEditSales() {
-  const role = state.profile?.role;
-  const email = state.profile?.email || state.user?.email || '';
+  const profile = state.data.viewAs || state.profile;
+  const role = profile?.role;
+  const email = profile?.email || (state.data.viewAs ? '' : (state.user?.email || ''));
   if (['admin','manager','management'].includes(role) || email === 'cailing0516@gmail.com') return true;
-  const perms = Array.isArray(state.profile?.permissions) ? state.profile.permissions : [];
+  const perms = Array.isArray(profile?.permissions) ? profile.permissions : [];
   return perms.includes('sales_edit');
 }
 
 // 可以調整庫存數量的人：admin、主管、製作部
 // 可以修改/刪除補貨單的人：admin、主管、有 restock_manage 權限
 function canManageRestock() {
-  const role = state.profile?.role;
-  const email = state.profile?.email || state.user?.email || '';
+  const profile = state.data.viewAs || state.profile;
+  const role = profile?.role;
+  const email = profile?.email || (state.data.viewAs ? '' : (state.user?.email || ''));
   const adminEmails = ['cailing0516@gmail.com'];
   if (role === 'admin' || adminEmails.includes(email)) return true;
-  const perms = Array.isArray(state.profile?.permissions) ? state.profile.permissions : [];
+  const perms = Array.isArray(profile?.permissions) ? profile.permissions : [];
   return perms.includes('restock_manage');
 }
 
 function canAdjustStock() {
-  const role = state.profile?.role;
-  const email = state.profile?.email || state.user?.email || '';
+  const profile = state.data.viewAs || state.profile;
+  const role = profile?.role;
+  const email = profile?.email || (state.data.viewAs ? '' : (state.user?.email || ''));
   const adminEmails = ['cailing0516@gmail.com'];
   if (role === 'admin' || adminEmails.includes(email)) return true;
-  const perms = Array.isArray(state.profile?.permissions) ? state.profile.permissions : [];
+  const perms = Array.isArray(profile?.permissions) ? profile.permissions : [];
   // 有製作部頁面權限（castings / parts / restock）視為有調庫存權限
   return perms.includes('castings') || perms.includes('parts') || perms.includes('restock') || perms.length === 0;
 }
 
 function canAccessPage(pageKey) {
-  const role = state.profile?.role;
-  const email = state.profile?.email || state.user?.email || '';
+  // 視角切換模式：以被模擬使用者的視角判斷權限
+  const profile = state.data.viewAs || state.profile;
+  const role = profile?.role;
+  const email = profile?.email || (state.data.viewAs ? '' : (state.user?.email || ''));
   const adminEmails = ['cailing0516@gmail.com'];
   // 老闆（admin）全開
   const isAdmin = role === 'admin' || adminEmails.includes(email);
@@ -973,9 +979,9 @@ function canAccessPage(pageKey) {
     return true;
   }
   // pickup 頁面：有 restock 權限的人可以看
-  if (pageKey === 'pickup') return (state.profile?.permissions||[]).includes('restock') || !state.profile?.permissions?.length;
+  if (pageKey === 'pickup') return (profile?.permissions||[]).includes('restock') || !profile?.permissions?.length;
   // 未設定 permissions 的帳號：顯示基本頁面
-  const perms = Array.isArray(state.profile?.permissions) ? state.profile.permissions : null;
+  const perms = Array.isArray(profile?.permissions) ? profile.permissions : null;
   if (pageKey === 'dashboard') return true;
   if (pageKey === 'settings') return true;
   if (pageKey === 'journal')  return true;  // 工作日誌全員可見
@@ -985,6 +991,21 @@ function canAccessPage(pageKey) {
   if (!perms || perms.length === 0) return true;
   return perms.includes(pageKey);
 }
+
+// ── 視角切換（僅 cailing0516@gmail.com 可用）──
+window.setViewAs = function(userId) {
+  if (!userId) { window.exitViewAs(); return; }
+  const users = state.data.users || [];
+  const user = users.find(u => u.id === userId);
+  if (!user) return;
+  state.data.viewAs = user;
+  state.page = 'dashboard';
+  render();
+};
+window.exitViewAs = function() {
+  state.data.viewAs = null;
+  render();
+};
 
 function renderSidebar() {
   const role = state.profile?.role;
@@ -1061,12 +1082,30 @@ function renderSidebar() {
     html += `</div></div>`;
   });
 
-  html += `</nav>
+  html += `</nav>`;
+
+  // 視角切換選單（僅 cailing0516@gmail.com 可用）
+  const realEmail = state.user?.email || state.profile?.email || '';
+  if (realEmail === 'cailing0516@gmail.com') {
+    const allUsers = (state.data.users || []).filter(u => u.is_active !== false);
+    const viewAsId = state.data.viewAs?.id || '';
+    html += `<div class="sidebar-viewas" style="padding:8px 10px;border-top:1px solid rgba(255,255,255,.08)">
+      <div style="font-size:10px;color:rgba(255,255,255,.4);letter-spacing:1px;text-transform:uppercase;margin-bottom:4px">👁 視角切換</div>
+      <select id="viewas-select" onchange="window.setViewAs(this.value)"
+        style="width:100%;font-size:12px;background:#2a3d3d;color:#e0f2f1;border:1px solid rgba(77,182,172,.3);border-radius:6px;padding:4px 6px;cursor:pointer;outline:none">
+        <option value="">— 我自己（管理員）—</option>
+        ${allUsers.map(u => `<option value="${u.id}" ${u.id === viewAsId ? 'selected' : ''}>${u.name}（${ROLE_LABEL[u.role]||u.role||'員工'}）</option>`).join('')}
+      </select>
+    </div>`;
+  }
+
+  const displayProfile = state.data.viewAs || state.profile;
+  html += `
     <div class="sidebar-user">
-      <div class="avatar">${(state.profile?.name||'U')[0]}</div>
+      <div class="avatar" style="${state.data.viewAs ? 'background:#ff9800;color:#fff' : ''}">${(displayProfile?.name||'U')[0]}</div>
       <div>
-        <div style="font-size:12px;font-weight:600">${state.profile?.name||'使用者'}</div>
-        <div style="font-size:10px;opacity:.5">${state.profile?.role||''}</div>
+        <div style="font-size:12px;font-weight:600">${displayProfile?.name||'使用者'}${state.data.viewAs ? ' <span style="font-size:10px;color:#ffa726">（模擬）</span>' : ''}</div>
+        <div style="font-size:10px;opacity:.5">${displayProfile?.role||''}</div>
       </div>
       <button id="logout-btn" style="margin-left:auto;background:none;color:rgba(255,255,255,.4);font-size:16px;" title="登出">⏻</button>
     </div>
@@ -20398,9 +20437,18 @@ function renderApp() {
     state.page = 'dashboard';
   }
   const pageContent = pageRenderers[state.page] ? pageRenderers[state.page]() : '<div class="empty"><p>頁面建構中…</p></div>';
+  const viewAsBanner = state.data.viewAs ? `
+    <div id="viewas-banner" style="position:fixed;top:0;left:0;right:0;z-index:200;background:#e65100;color:#fff;
+      display:flex;align-items:center;justify-content:center;gap:12px;padding:7px 16px;font-size:13px;font-weight:600;
+      box-shadow:0 2px 8px rgba(0,0,0,.2)">
+      <span>👁 正在以「${state.data.viewAs.name}」的視角查看（角色：${ROLE_LABEL[state.data.viewAs.role]||state.data.viewAs.role||'員工'}）</span>
+      <button onclick="window.exitViewAs()" style="background:rgba(255,255,255,.25);border:none;color:#fff;
+        border-radius:6px;padding:3px 12px;font-size:12px;cursor:pointer;font-weight:700">✕ 退出視角</button>
+    </div>` : '';
   root.innerHTML = `
+    ${viewAsBanner}
     ${renderSidebar()}
-    <div class="main">
+    <div class="main" style="${state.data.viewAs ? 'margin-top:36px' : ''}">
       ${renderTopbar(pageTitle[state.page] || state.page, `
         <span style="font-size:12px;color:var(--muted)">${new Date().toLocaleDateString('zh-TW',{weekday:'short',month:'long',day:'numeric'})}</span>
       `)}
