@@ -19753,25 +19753,31 @@ async function modalCalEvent(existing=null) {
     <div class="form-group">
       <label>說明</label>
       <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
-        <div style="display:flex;gap:2px;padding:5px 8px;background:var(--surface2);border-bottom:1px solid var(--border);flex-wrap:wrap">
-          ${[['bold','<b>B</b>','粗體'],['italic','<i>I</i>','斜體'],['underline','<u>U</u>','底線']].map(([cmd,html,title])=>
-            `<button type="button" title="${title}" onmousedown="event.preventDefault();document.execCommand('${cmd}')"
-              style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">${html}</button>`
-          ).join('')}
-          <span style="width:1px;background:var(--border);margin:2px 4px"></span>
-          ${[['insertUnorderedList','• 清單','無序清單'],['insertOrderedList','1. 清單','有序清單']].map(([cmd,html,title])=>
-            `<button type="button" title="${title}" onmousedown="event.preventDefault();document.execCommand('${cmd}')"
-              style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">${html}</button>`
-          ).join('')}
-          <span style="width:1px;background:var(--border);margin:2px 4px"></span>
-          <button type="button" title="插入連結" onmousedown="event.preventDefault();var u=prompt('輸入網址：','https://');if(u)document.execCommand('createLink',false,u)"
-            style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">🔗 連結</button>
-          <button type="button" title="清除格式" onmousedown="event.preventDefault();document.execCommand('removeFormat')"
-            style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">✕ 清除</button>
+        <div style="display:flex;gap:4px;padding:5px 8px;background:#f8f9fa;border-bottom:1px solid var(--border);align-items:center">
+          <button type="button" title="粗體" onmousedown="event.preventDefault();document.execCommand('bold')"
+            style="padding:3px 10px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:13px;font-weight:700">B</button>
+          <button type="button" title="斜體" onmousedown="event.preventDefault();document.execCommand('italic')"
+            style="padding:3px 10px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:13px;font-style:italic">I</button>
+          <span style="width:1px;background:var(--border);height:18px;margin:0 2px"></span>
+          <button type="button" title="數字清單" onmousedown="event.preventDefault();document.execCommand('insertOrderedList')"
+            style="padding:3px 10px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">1.</button>
+          <button type="button" title="點點清單" onmousedown="event.preventDefault();document.execCommand('insertUnorderedList')"
+            style="padding:3px 10px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:13px">•</button>
+          <span style="width:1px;background:var(--border);height:18px;margin:0 2px"></span>
+          <button type="button" title="標記色（#FF7575）" onmousedown="event.preventDefault();document.execCommand('foreColor',false,'#FF7575')"
+            style="padding:3px 10px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:13px;color:#FF7575;font-weight:700">A</button>
+          <button type="button" title="自動色（預設）" onmousedown="event.preventDefault();document.execCommand('foreColor',false,'#263238')"
+            style="padding:3px 10px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:13px;color:#263238;font-weight:700">A</button>
         </div>
-        <style>#cal-desc ol,#cal-desc ul{padding-left:24px;margin:4px 0}#cal-desc li{margin:2px 0}#cal-desc a{color:var(--accent)}</style>
+        <style>
+          #cal-desc{font-size:13px!important}
+          #cal-desc *{font-size:13px!important}
+          #cal-desc h1,#cal-desc h2,#cal-desc h3,#cal-desc h4{font-size:13px!important;font-weight:700;margin:0}
+          #cal-desc ol,#cal-desc ul{padding-left:22px;margin:4px 0}
+          #cal-desc li{margin:2px 0}
+        </style>
         <div id="cal-desc" contenteditable="true"
-          style="min-height:80px;padding:10px 16px;font-size:13px;line-height:1.7;outline:none;color:var(--text)"
+          style="min-height:80px;padding:10px 16px;line-height:1.7;outline:none;color:var(--text)"
           placeholder="備註、相關資訊…">${existing?.description||''}</div>
       </div>
     </div>
@@ -20274,7 +20280,10 @@ window.calViewEvent = function(id) {
     </div>
     <!-- 說明 -->
     ${ev.description
-      ? `<div style="background:#f8f9fa;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.75;color:var(--text)">${ev.description}</div>`
+      ? `<style>.cal-desc-view h1,.cal-desc-view h2,.cal-desc-view h3,.cal-desc-view h4{font-size:13px;font-weight:700;margin:0}
+         .cal-desc-view ol,.cal-desc-view ul{padding-left:20px;margin:4px 0}.cal-desc-view li{margin:2px 0}
+         .cal-desc-view a{color:var(--accent)}</style>
+         <div class="cal-desc-view" style="background:#f8f9fa;border-radius:10px;padding:12px 14px;margin-bottom:14px;font-size:13px;line-height:1.75;color:var(--text)">${ev.description}</div>`
       : ''}
     ${(()=>{
       const subs = Array.isArray(ev.subtasks) ? ev.subtasks.filter(s=>s.text) : [];
