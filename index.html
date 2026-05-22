@@ -16650,7 +16650,11 @@ window.modalBlockSlot = function(date, slot) {
   ]);
 };
 
-window.modalAddBooking = function(defaultDate = '', defaultSlot = '') {
+window.modalAddBooking = async function(defaultDate = '', defaultSlot = '') {
+  if (!state.data.users?.length) {
+    const { data } = await db.from('profiles').select('id, name, role, department').order('name');
+    state.data.users = data || [];
+  }
   showModal('新增體驗預約', `
     <!-- 類型選擇 -->
     <div style="margin-bottom:14px">
@@ -16705,6 +16709,14 @@ window.modalAddBooking = function(defaultDate = '', defaultSlot = '') {
     <div class="form-group"><label>🔗 商品參考連結（選填）</label>
       <input class="form-control" id="bk-product-link" placeholder="官網商品連結或截圖網址">
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>接待人員</label>
+        <select class="form-control" id="bk-staff">
+          <option value="">— 未指定 —</option>
+          ${(state.data.users||[]).map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}
+        </select>
+      </div>
+    </div>
     <div class="form-group"><label>內部備注</label>
       <input class="form-control" id="bk-notes" placeholder="客人不會看到">
     </div>
@@ -16720,12 +16732,13 @@ window.modalAddBooking = function(defaultDate = '', defaultSlot = '') {
       const product_link = document.getElementById('bk-product-link').value.trim();
       const source = visitType === 'pickup' ? '門市取貨' : document.getElementById('bk-source').value;
       const notes = document.getElementById('bk-notes').value.trim();
+      const staff_id = document.getElementById('bk-staff').value || null;
       if (!booking_date) { showToast('請選擇日期','error'); return; }
       if (!customer_name) { showToast('請填入姓名','error'); return; }
       const { error } = await db.from('experience_bookings').insert({
         booking_date, time_slot, customer_name, phone, attendees,
         request: request||null, product_link: product_link||null, source, notes: notes||null,
-        status: '待確認', created_by: state.user?.id,
+        staff_id, status: '待確認', created_by: state.user?.id,
       });
       if (error) { showToast('新增失敗：'+error.message,'error'); return; }
       showToast('預約已登記 ✅'); closeModal(); await loadBooking(); renderApp();
@@ -16920,6 +16933,7 @@ window.modalViewBooking = async function(bookingId) {
       <div><span style="color:var(--muted)">時段：</span><strong>${b.time_slot} ～ ${slotEnd}</strong></div>
       <div><span style="color:var(--muted)">人數：</span>${b.attendees||1} 人</div>
       <div><span style="color:var(--muted)">來源：</span>${b.source||'客服登記'}</div>
+      <div><span style="color:var(--muted)">接待人員：</span>${(state.data.users||[]).find(u=>u.id===b.staff_id)?.name||'—'}</div>
     </div>
     ${b.request ? `
       <div style="background:#e8f5f4;border-radius:6px;padding:10px 12px;margin-bottom:8px;font-size:13px">
@@ -17024,6 +17038,14 @@ window.modalEditBooking = async function(bookingId) {
     <div class="form-group"><label>🔗 商品參考連結（選填）</label>
       <input class="form-control" id="eb-product-link" value="${(b.product_link||'').replace(/"/g,'&quot;')}" placeholder="官網商品連結或截圖網址">
     </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+      <div class="form-group"><label>接待人員</label>
+        <select class="form-control" id="eb-staff">
+          <option value="">— 未指定 —</option>
+          ${(state.data.users||[]).map(u=>`<option value="${u.id}" ${u.id===b.staff_id?'selected':''}>${u.name}</option>`).join('')}
+        </select>
+      </div>
+    </div>
     <div class="form-group"><label>內部備注</label>
       <input class="form-control" id="eb-notes" value="${(b.notes||'').replace(/"/g,'&quot;')}" placeholder="客人不會看到">
     </div>
@@ -17039,12 +17061,13 @@ window.modalEditBooking = async function(bookingId) {
       const request        = document.getElementById('eb-request').value.trim();
       const product_link   = document.getElementById('eb-product-link').value.trim();
       const notes          = document.getElementById('eb-notes').value.trim();
+      const staff_id       = document.getElementById('eb-staff').value || null;
       if (!booking_date)   { showToast('請選擇日期','error'); return; }
       if (!customer_name)  { showToast('請填入姓名','error'); return; }
       const { error } = await db.from('experience_bookings').update({
         booking_date, time_slot, customer_name, phone, attendees,
         source, status, request: request||null,
-        product_link: product_link||null, notes: notes||null,
+        product_link: product_link||null, notes: notes||null, staff_id,
       }).eq('id', bookingId);
       if (error) { showToast('儲存失敗：'+error.message,'error'); return; }
       showToast('預約已更新 ✅'); closeModal(); await loadBooking(); renderApp();
@@ -19421,7 +19444,51 @@ async function modalCalEvent(existing=null) {
 
     <div class="form-group">
       <label>說明</label>
-      <textarea class="form-control" id="cal-desc" rows="2" placeholder="備註、相關資訊…">${existing?.description||''}</textarea>
+      <div style="border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <div style="display:flex;gap:2px;padding:5px 8px;background:var(--surface2);border-bottom:1px solid var(--border);flex-wrap:wrap">
+          ${[['bold','<b>B</b>','粗體'],['italic','<i>I</i>','斜體'],['underline','<u>U</u>','底線']].map(([cmd,html,title])=>
+            `<button type="button" title="${title}" onmousedown="event.preventDefault();document.execCommand('${cmd}')"
+              style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">${html}</button>`
+          ).join('')}
+          <span style="width:1px;background:var(--border);margin:2px 4px"></span>
+          ${[['insertUnorderedList','• 清單','無序清單'],['insertOrderedList','1. 清單','有序清單']].map(([cmd,html,title])=>
+            `<button type="button" title="${title}" onmousedown="event.preventDefault();document.execCommand('${cmd}')"
+              style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">${html}</button>`
+          ).join('')}
+          <span style="width:1px;background:var(--border);margin:2px 4px"></span>
+          <button type="button" title="插入連結" onmousedown="event.preventDefault();var u=prompt('輸入網址：','https://');if(u)document.execCommand('createLink',false,u)"
+            style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">🔗 連結</button>
+          <button type="button" title="清除格式" onmousedown="event.preventDefault();document.execCommand('removeFormat')"
+            style="padding:3px 8px;border:1px solid var(--border);border-radius:4px;background:#fff;cursor:pointer;font-size:12px">✕ 清除</button>
+        </div>
+        <div id="cal-desc" contenteditable="true"
+          style="min-height:80px;padding:10px 12px;font-size:13px;line-height:1.7;outline:none;color:var(--text)"
+          placeholder="備註、相關資訊…">${existing?.description||''}</div>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>附件 / 連結</label>
+      <div id="cal-attach-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px">
+        ${(()=>{
+          const atts = Array.isArray(existing?.attachments) ? existing.attachments : [];
+          return atts.map((a,i)=>`
+            <div style="display:flex;gap:6px;align-items:center" id="cal-att-row-${i}">
+              <select style="width:90px;font-size:12px;padding:5px 4px;border:1px solid var(--border);border-radius:6px" id="cal-att-type-${i}">
+                <option value="cloud" ${a.type==='cloud'?'selected':''}>☁️ 雲端</option>
+                <option value="nas"   ${a.type==='nas'?'selected':''}>🗄 NAS</option>
+              </select>
+              <input class="form-control" id="cal-att-label-${i}" value="${(a.label||'').replace(/"/g,'&quot;')}" placeholder="名稱" style="width:100px;font-size:12px">
+              <input class="form-control" id="cal-att-url-${i}" value="${(a.url||'').replace(/"/g,'&quot;')}" placeholder="連結或 NAS 路徑" style="flex:1;font-size:12px">
+              <button type="button" onclick="document.getElementById('cal-att-row-${i}').remove()"
+                style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px" title="移除">×</button>
+            </div>`).join('');
+        })()}
+      </div>
+      <button type="button" onclick="window._calAddAttachRow()"
+        style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">
+        + 新增附件 / 連結
+      </button>
     </div>
 
     ${!id ? `
@@ -19525,7 +19592,19 @@ async function modalCalEvent(existing=null) {
         end_date: endDate >= startDate ? endDate : startDate,
         start_time: startTime,
         end_time: endTime,
-        description: document.getElementById('cal-desc').value.trim() || null,
+        description: document.getElementById('cal-desc').innerHTML.trim() || null,
+        attachments: (() => {
+          const rows = document.querySelectorAll('[id^="cal-att-row-"]');
+          const atts = [];
+          rows.forEach(row => {
+            const i = row.id.replace('cal-att-row-','');
+            const type  = document.getElementById(`cal-att-type-${i}`)?.value || 'cloud';
+            const label = document.getElementById(`cal-att-label-${i}`)?.value.trim() || '';
+            const url   = document.getElementById(`cal-att-url-${i}`)?.value.trim() || '';
+            if (url) atts.push({ type, label, url });
+          });
+          return atts;
+        })(),
         assigned_to: assignedTo,
         assignee_ids: assigneeIds,
         ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
@@ -19704,6 +19783,28 @@ window._calClearAll = function() {
     if (cb.checked) { cb.checked = false; cb.dispatchEvent(new Event('change')); }
   });
 };
+
+window._calAddAttachRow = function() {
+  const list = document.getElementById('cal-attach-list');
+  if (!list) return;
+  const i = '_' + Date.now(); // unique key
+  const row = document.createElement('div');
+  row.id = `cal-att-row-${i}`;
+  row.style.cssText = 'display:flex;gap:6px;align-items:center';
+  row.innerHTML = `
+    <select style="width:90px;font-size:12px;padding:5px 4px;border:1px solid var(--border);border-radius:6px" id="cal-att-type-${i}">
+      <option value="cloud">☁️ 雲端</option>
+      <option value="nas">🗄 NAS</option>
+    </select>
+    <input class="form-control" id="cal-att-label-${i}" placeholder="名稱" style="width:100px;font-size:12px">
+    <input class="form-control" id="cal-att-url-${i}" placeholder="連結或 NAS 路徑" style="flex:1;font-size:12px">
+    <button type="button" onclick="document.getElementById('cal-att-row-${i}').remove()"
+      style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px" title="移除">×</button>
+  `;
+  list.appendChild(row);
+  row.querySelector(`#cal-att-url-${i}`)?.focus();
+};
+
 window.calViewEvent = function(id) {
   const ev = (state.data.calEvents||[]).find(e=>e.id===id);
   if (!ev) return;
@@ -19724,7 +19825,36 @@ window.calViewEvent = function(id) {
       ${assigneeName?`<span style="font-size:13px;color:var(--text);background:#f5f5f5;border-radius:4px;padding:2px 10px">👤 ${assigneeName}</span>`:''}
       ${isDone?`<span style="font-size:12px;background:#e8f5e9;color:#2e7d32;border-radius:4px;padding:2px 10px;font-weight:600">✅ 已完成 ${completedDateStr}</span>`:''}
     </div>
-    ${ev.description?`<div style="font-size:14px;line-height:1.7;color:var(--text);margin-bottom:4px">${ev.description}</div>`:'<div style="color:var(--muted);font-size:13px;margin-bottom:4px">無備註</div>'}
+    ${ev.description
+      ? `<div style="font-size:14px;line-height:1.7;color:var(--text);margin-bottom:12px">${ev.description}</div>`
+      : '<div style="color:var(--muted);font-size:13px;margin-bottom:12px">無備註</div>'}
+    ${(()=>{
+      const atts = Array.isArray(ev.attachments) ? ev.attachments.filter(a=>a.url) : [];
+      if (!atts.length) return '';
+      return `<div style="border-top:1px solid var(--border);padding-top:10px;margin-top:4px">
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📎 附件 / 連結</div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${atts.map(a => {
+            const name = a.label || a.url;
+            if (a.type === 'nas') {
+              return `<div style="display:flex;align-items:center;gap:8px;background:#f5f5f5;border-radius:6px;padding:7px 10px;font-size:13px">
+                <span style="font-size:15px">🗄</span>
+                <span style="flex:1;color:var(--text);word-break:break-all">${name}</span>
+                <button type="button" onclick="navigator.clipboard.writeText('${a.url.replace(/'/g,"\\'")}');this.textContent='✓ 已複製';setTimeout(()=>this.textContent='複製路徑',1500)"
+                  style="flex-shrink:0;padding:3px 10px;font-size:12px;border:1px solid var(--border);border-radius:5px;background:#fff;cursor:pointer;color:var(--text)">複製路徑</button>
+              </div>`;
+            } else {
+              return `<a href="${a.url}" target="_blank" rel="noopener"
+                style="display:flex;align-items:center;gap:8px;background:#f0f7ff;border-radius:6px;padding:7px 10px;font-size:13px;text-decoration:none;color:var(--accent)">
+                <span style="font-size:15px">☁️</span>
+                <span style="flex:1;word-break:break-all">${name}</span>
+                <span style="flex-shrink:0;font-size:12px;opacity:.7">↗ 開啟</span>
+              </a>`;
+            }
+          }).join('')}
+        </div>
+      </div>`;
+    })()}
   `, [
     { label: isDone ? '↩ 取消完成' : '✅ 標記完成', primary: !isDone, onclick: async () => {
         const newVal = isDone ? null : new Date().toISOString();
