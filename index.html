@@ -17462,11 +17462,11 @@ function renderJournal() {
               const dueTxt = s.due_date ? (isOv ? `⚠ 逾期 ${s.due_date.slice(5)}` : isTd ? `⏰ 今日` : `📅 ${s.due_date.slice(5)}`) : '';
               return `<span style="color:${isOv?'#e53935':isTd?'#e65100':'#999'}">${s.text}${dueTxt ? `（${dueTxt}）` : ''}</span>`;
             }).join('　');
-            return `<div style="display:flex;align-items:${subs.length?'flex-start':'center'};gap:12px;padding:7px 10px;border-radius:8px;background:${bg}">
-              <span style="font-size:12px;font-weight:700;color:${color};min-width:68px;white-space:nowrap;flex-shrink:0;padding-top:${subs.length?'2px':'0'}">${label}</span>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:14px;font-weight:700;color:#1a1a1a">${ev.title}</div>
-                ${subs.length ? `<div style="font-size:11px;margin-top:2px;line-height:1.6">${subsHtml}</div>` : ''}
+            return `<div style="display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:8px;background:${bg}">
+              <span style="font-size:12px;font-weight:700;color:${color};min-width:68px;white-space:nowrap;flex-shrink:0">${label}</span>
+              <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+                <span style="font-size:14px;font-weight:700;color:#1a1a1a;white-space:nowrap">${ev.title}</span>
+                ${subs.length ? `<span style="font-size:11px;color:#999">${subsHtml}</span>` : ''}
               </div>
             </div>`;
           }).join('')}
