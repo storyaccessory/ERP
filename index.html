@@ -665,8 +665,13 @@ async function signOut() {
 
 async function loadProfile() {
   if (!state.user) return;
-  const { data } = await db.from('profiles').select('*').eq('id', state.user.id).single();
+  const [{ data }, { data: allProfiles }] = await Promise.all([
+    db.from('profiles').select('*').eq('id', state.user.id).single(),
+    db.from('profiles').select('*').order('name'),
+  ]);
   state.profile = data;
+  // 所有員工名單（供視角切換選單 & 行事曆指派人員等使用）
+  if (allProfiles) state.data.users = allProfiles;
 }
 
 // ═══════════════════════════════════════════
