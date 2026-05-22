@@ -16331,8 +16331,8 @@ function _getTemplateForLog(log, jd) {
 
 async function loadJournal() {
   const today = _localToday();
-  // 未來 14 天的行事曆任務（指派給自己）
-  const in14 = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()+14); return d.toISOString().slice(0,10); })();
+  // 未來 1 個月的行事曆任務（指派給自己）
+  const in14 = (() => { const d = new Date(today+'T00:00:00'); d.setMonth(d.getMonth()+1); return d.toISOString().slice(0,10); })();
   const myUid = (await db.auth.getUser()).data.user?.id || '';
   const [todayRes, histRes, profilesRes, upcomingRes, teamEvRes, subtaskEvRes] = await Promise.all([
     db.from('work_journals').select('*').eq('date', today).order('created_at'),
