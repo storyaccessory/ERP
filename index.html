@@ -14044,6 +14044,17 @@ function renderSalesInput() {
       <span style="color:#ccc;">|</span>
       ${cnySection}
     </div>
+    <!-- 體驗店即時加總卡 -->
+    <div style="display:flex;gap:10px;flex-wrap:wrap;margin-bottom:10px;background:#e0f2f1;border:1px solid #b2dfdb;border-radius:10px;padding:10px 14px;align-items:center">
+      <span style="font-size:12px;font-weight:700;color:#00695c;white-space:nowrap">🏪 體驗店本月合計</span>
+      <span style="font-size:18px;font-weight:800;color:#00897b" id="exp-summary-total">${salesFmtFull(salesGetMonthSum(salesInputYear,'體驗店',month1))}</span>
+      <span style="font-size:11px;color:#607d8b;margin-left:4px">
+        現金 <b id="exp-summary-cash">${salesFmtFull(expCashTotal)}</b> ／
+        刷卡 <b id="exp-summary-card">${salesFmtFull(expCardTotal)}</b> ／
+        LinePay <b id="exp-summary-linepay">${salesFmtFull(expLinePayTotal)}</b> ／
+        擺攤 <b id="exp-summary-stall">${expStallCount}</b> 天
+      </span>
+    </div>
     <div style="background:#fff;border-radius:10px;border:1px solid #b2dfdb;overflow-x:auto;width:fit-content;max-width:100%;">
       <table style="border-collapse:collapse;table-layout:fixed;width:max-content;">
         <colgroup>
@@ -14182,6 +14193,17 @@ function salesExpInput(key, field, val) {
   var grandT = SALES_PLATFORMS.reduce(function(s,p){ return s+salesGetMonthSum(year,p,month1); }, 0);
   var gtEl2 = document.querySelector('[data-splatform-total="__grand"]');
   if (gtEl2) gtEl2.textContent = salesFmtFull(grandT);
+  // Update 即時加總卡
+  var stEl = document.getElementById('exp-summary-total');
+  if (stEl) stEl.textContent = salesFmtFull(expPlatTotal);
+  var scEl = document.getElementById('exp-summary-cash');
+  if (scEl) scEl.textContent = salesFmtFull(cashT);
+  var sdEl = document.getElementById('exp-summary-card');
+  if (sdEl) sdEl.textContent = salesFmtFull(cardT);
+  var slEl = document.getElementById('exp-summary-linepay');
+  if (slEl) slEl.textContent = salesFmtFull(linePayT);
+  var ssEl = document.getElementById('exp-summary-stall');
+  if (ssEl) ssEl.textContent = stallC;
 }
 
 // ── Charts ──
@@ -16993,7 +17015,22 @@ window.modalEditBooking = async function(bookingId) {
     b = data;
   }
   const STATUS_OPTS = ['待確認','已確認','已取消'];
+  const initPickup = isPickup;
   showModal('✏️ 編輯預約', `
+    <!-- 類型切換 -->
+    <div style="margin-bottom:14px">
+      <label style="font-size:12px;font-weight:600;color:var(--muted);display:block;margin-bottom:6px">預約類型 *</label>
+      <div style="display:flex;gap:0;border:1px solid var(--border);border-radius:8px;overflow:hidden">
+        <button id="eb-type-visit" onclick="window._ebSetType('visit')"
+          style="flex:1;padding:10px;font-size:13px;font-weight:700;border:none;cursor:pointer;background:${!initPickup?'var(--accent)':'#f5f5f5'};color:${!initPickup?'#fff':'#999'};transition:.15s">
+          鑑賞體驗
+        </button>
+        <button id="eb-type-pickup" onclick="window._ebSetType('pickup')"
+          style="flex:1;padding:10px;font-size:13px;font-weight:700;border:none;cursor:pointer;background:${initPickup?'var(--accent)':'#f5f5f5'};color:${initPickup?'#fff':'#999'};transition:.15s">
+          門市取貨
+        </button>
+      </div>
+    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group"><label>預約日期</label>
         <input type="date" class="form-control" id="eb-date" value="${b.booking_date||''}">
@@ -17013,7 +17050,7 @@ window.modalEditBooking = async function(bookingId) {
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
-      <div class="form-group"><label>鑑賞人數</label>
+      <div class="form-group" id="eb-attendees-wrap" style="${initPickup?'display:none':''}"><label>鑑賞人數</label>
         <select class="form-control" id="eb-attendees">
           <option value="1" ${(b.attendees||1)==1?'selected':''}>1 人</option>
           <option value="2" ${(b.attendees||1)==2?'selected':''}>2 人</option>
@@ -17021,7 +17058,7 @@ window.modalEditBooking = async function(bookingId) {
           <option value="4" ${(b.attendees||1)==4?'selected':''}>4 人</option>
         </select>
       </div>
-      <div class="form-group"><label>來源</label>
+      <div class="form-group" id="eb-source-wrap" style="${initPickup?'display:none':''}"><label>來源</label>
         <select class="form-control" id="eb-source">
           <option value="客服登記" ${b.source==='客服登記'?'selected':''}>客服登記（FB/IG）</option>
           <option value="電話預約" ${b.source==='電話預約'?'selected':''}>電話預約</option>
@@ -17034,10 +17071,11 @@ window.modalEditBooking = async function(bookingId) {
         </select>
       </div>
     </div>
-    <div class="form-group"><label>🛍 想要鑑賞的商品</label>
-      <input class="form-control" id="eb-request" value="${(b.request||'').replace(/"/g,'&quot;')}" placeholder="角色／系列／商品名稱">
+    <div class="form-group"><label id="eb-request-label">${initPickup?'🛍 訂單 / 商品說明（選填）':'🛍 想要鑑賞的商品'}</label>
+      <input class="form-control" id="eb-request" value="${(b.request||'').replace(/"/g,'&quot;')}"
+        placeholder="${initPickup?'TG 訂單編號或商品說明':'角色／系列／商品名稱'}">
     </div>
-    <div class="form-group"><label>🔗 商品參考連結（選填）</label>
+    <div class="form-group" id="eb-link-wrap" style="${initPickup?'display:none':''}"><label>🔗 商品參考連結（選填）</label>
       <input class="form-control" id="eb-product-link" value="${(b.product_link||'').replace(/"/g,'&quot;')}" placeholder="官網商品連結或截圖網址">
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -17053,15 +17091,16 @@ window.modalEditBooking = async function(bookingId) {
     </div>
   `, [
     { label:'💾 儲存修改', primary:true, onclick: async () => {
+      const ebIsPickup     = document.getElementById('eb-type-pickup').dataset.active === '1';
       const booking_date   = document.getElementById('eb-date').value;
-      const time_slot      = document.getElementById('eb-slot').value;
+      const time_slot      = document.getElementById('eb-slot').value || null;
       const customer_name  = document.getElementById('eb-name').value.trim();
       const phone          = document.getElementById('eb-phone').value.trim();
-      const attendees      = parseInt(document.getElementById('eb-attendees').value);
-      const source         = document.getElementById('eb-source').value;
+      const attendees      = ebIsPickup ? 1 : parseInt(document.getElementById('eb-attendees').value);
+      const source         = ebIsPickup ? '門市取貨' : document.getElementById('eb-source').value;
       const status         = document.getElementById('eb-status').value;
       const request        = document.getElementById('eb-request').value.trim();
-      const product_link   = document.getElementById('eb-product-link').value.trim();
+      const product_link   = ebIsPickup ? null : document.getElementById('eb-product-link').value.trim();
       const notes          = document.getElementById('eb-notes').value.trim();
       const staff_id       = document.getElementById('eb-staff').value || null;
       if (!booking_date)   { showToast('請選擇日期','error'); return; }
