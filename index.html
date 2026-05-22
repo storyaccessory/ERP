@@ -1229,9 +1229,10 @@ function renderDashboard() {
         </div>
         ${(()=>{
           const dashMyId = effectiveUserId();
-          const tomorrow = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
-          const in3 = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()+3); return d.toISOString().slice(0,10); })();
-          const in7 = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()+7); return d.toISOString().slice(0,10); })();
+          const _todayStr = _localToday();
+          const tomorrow = (() => { const _d = new Date(_todayStr+'T00:00:00'); _d.setDate(_d.getDate()+1); return _d.toISOString().slice(0,10); })();
+          const in3 = (() => { const _d = new Date(_todayStr+'T00:00:00'); _d.setDate(_d.getDate()+3); return _d.toISOString().slice(0,10); })();
+          const in7 = (() => { const _d = new Date(_todayStr+'T00:00:00'); _d.setDate(_d.getDate()+7); return _d.toISOString().slice(0,10); })();
           const _urg = d => {
             if (!d) return { color:'#bbb', label:'—' };
             if (d < today)  return { color:'#c62828', label:'逾期 ⚠' };
@@ -16325,7 +16326,7 @@ async function loadJournal() {
   const [todayRes, histRes, profilesRes, upcomingRes, teamEvRes, subtaskEvRes] = await Promise.all([
     db.from('work_journals').select('*').eq('date', today).order('created_at'),
     db.from('work_journals').select('*').order('date', { ascending: false }).limit(300),
-    db.from('profiles').select('id, name, role, journal_template, journal_required').order('name'),
+    db.from('profiles').select('id, name, role, job_title, journal_template, journal_required').order('name'),
     // 個人近期事項（指派給自己）
     db.from('calendar_events')
       .select('id, title, start_date, end_date, event_type, priority, assigned_to, assignee_ids, completed_at, subtasks')
