@@ -19797,18 +19797,56 @@ async function modalCalEvent(existing=null) {
     </div>` : ''}
   `, [
     ...(id ? [{ label:'刪除', onclick: async () => {
-      const delAll = existing?.template_id
-        ? confirm('此為週期事項。\n確定刪除？')
-        : confirm('確定刪除此事項？');
-      if (!delAll) return;
-      if (existing?.template_id) {
-        await db.from('calendar_events').delete().eq('template_id', existing.template_id);
-        await db.from('calendar_events').delete().eq('id', existing.template_id);
-      } else {
+      if (!existing?.template_id) {
+        // 非週期事項：直接確認刪除
+        if (!confirm('確定刪除此事項？')) return;
         await db.from('calendar_events').delete().eq('id', id);
+        showToast('已刪除'); closeModal();
+        await loadCalendarEvents(); renderApp();
+        return;
       }
-      showToast('已刪除'); closeModal();
-      await loadCalendarEvents(); renderApp();
+      // 週期事項：先問刪除範圍
+      closeModal();
+      showModal('刪除週期事項', `
+        <div style="font-size:13px;color:var(--muted);margin-bottom:14px">「${existing.title}」是週期性事項，請選擇刪除範圍：</div>
+        <div style="display:flex;flex-direction:column;gap:10px">
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:#fafafa">
+            <input type="radio" name="del-scope" value="one" checked style="margin-top:2px;accent-color:var(--danger)">
+            <div><div style="font-weight:600;font-size:13px">只刪除這一筆</div>
+            <div style="font-size:12px;color:var(--muted)">其餘週期事項不受影響</div></div>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:#fafafa">
+            <input type="radio" name="del-scope" value="future" style="margin-top:2px;accent-color:var(--danger)">
+            <div><div style="font-weight:600;font-size:13px">刪除此筆及之後所有</div>
+            <div style="font-size:12px;color:var(--muted)">此日期（含）之後的週期事項全部刪除</div></div>
+          </label>
+          <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:#fff5f5">
+            <input type="radio" name="del-scope" value="all" style="margin-top:2px;accent-color:var(--danger)">
+            <div><div style="font-weight:600;font-size:13px;color:var(--danger)">刪除全部週期事項</div>
+            <div style="font-size:12px;color:var(--muted)">包含所有過去與未來的重複事項</div></div>
+          </label>
+        </div>
+      `, [
+        { label:'確認刪除', danger: true, onclick: async () => {
+          const scope = document.querySelector('input[name="del-scope"]:checked')?.value || 'one';
+          if (scope === 'one') {
+            await db.from('calendar_events').delete().eq('id', id);
+            showToast('已刪除此筆');
+          } else if (scope === 'future') {
+            await db.from('calendar_events').delete()
+              .eq('template_id', existing.template_id)
+              .gte('start_date', existing.start_date);
+            showToast('已刪除此筆及之後所有');
+          } else {
+            await db.from('calendar_events').delete().eq('template_id', existing.template_id);
+            await db.from('calendar_events').delete().eq('id', existing.template_id);
+            showToast('已刪除全部週期事項');
+          }
+          closeModal();
+          await loadCalendarEvents(); renderApp();
+        }},
+        { label:'取消', onclick: closeModal },
+      ]);
     }}] : []),
     { label: id ? '儲存' : '新增', primary: true, onclick: async () => {
       const title = document.getElementById('cal-title').value.trim();
