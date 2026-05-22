@@ -19390,8 +19390,7 @@ function renderCalendar() {
     const ds = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const isToday = ds === todayStr;
     const dayItems = eventMap[ds] || [];
-    const shown = dayItems.slice(0,3);
-    const more = dayItems.length - shown.length;
+    const shown = dayItems;
     const isWeekend = new Date(y,m,d).getDay() === 0 || new Date(y,m,d).getDay() === 6;
 
     cells.push(`<div class="cal-cell" data-date="${ds}" style="border:1px solid ${isToday?'#e53935':isWeekend?'#e8e8e8':'var(--border)'};border-radius:6px;padding:4px 5px;cursor:pointer;background:${isToday?'#fff5f5':isWeekend?'#fafafa':'#fff'};${isToday?'outline:2px solid #e53935;':''}">
@@ -19441,7 +19440,6 @@ function renderCalendar() {
           }
         }
       }).join('')}
-      ${more>0?`<div style="font-size:11px;color:var(--muted)">+${more}</div>`:''}
     </div>`);
   }
 
