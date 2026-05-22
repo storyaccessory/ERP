@@ -1112,7 +1112,7 @@ function renderDashboard() {
   const cs = d.cs || [];
   const repair = d.repair || [];
   const dev = d.dev || [];
-  const today = d.today || '';
+  const today = d.today || _localToday();
   const threeDays = d.threeDays || '';
 
   const overdueOrders = orders.filter(o => o.due_date && o.due_date < today);
