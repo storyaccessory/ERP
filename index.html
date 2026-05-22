@@ -19610,7 +19610,8 @@ async function modalCalEvent(existing=null) {
         const btnStyle = `font-size:11px;padding:3px 10px;border-radius:12px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:600;color:var(--text);white-space:nowrap`;
         const deptBtns = depts.map(dept => {
           const ids = JSON.stringify(users.filter(u=>u.department===dept).map(u=>u.id));
-          return `<button type="button" style="${btnStyle}" onclick="window._calToggleGroup('${ids.replace(/'/g,"\\'")}')">${dept}</button>`;
+          // 雙引號需轉成 &quot; 避免與 onclick 屬性的雙引號衝突
+          return `<button type="button" style="${btnStyle}" onclick="window._calToggleGroup('${ids.replace(/"/g,'&quot;')}')">${dept}</button>`;
         }).join('');
         return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
           <button type="button" style="${btnStyle};color:var(--accent);border-color:var(--accent)" onclick="window._calSelectAll()">全選</button>
