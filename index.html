@@ -17458,15 +17458,13 @@ function renderJournal() {
     const upcomingHtml = combinedItems.length === 0 ? '' : `
       <div class="card" style="margin-bottom:16px;border-left:4px solid #f57c00">
         <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#e65100">📋 你的近期任務</div>
-        <div style="display:flex;flex-direction:column;gap:6px">
+        <div style="display:flex;flex-direction:column;gap:4px">
           ${combinedItems.map(item => {
             if (item._type === 'event') {
               const { bg, color, label } = _urgencyStyle(item.ev.start_date);
-              const t = calTypes[item.ev.event_type] || { label: item.ev.event_type||'一般' };
-              return `<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;background:${bg}">
-                <span style="font-size:12px;font-weight:700;color:${color};min-width:72px;white-space:nowrap">${label}</span>
-                <span style="font-size:13px;flex:1;color:#333">${item.ev.title}</span>
-                <span style="font-size:11px;color:#999;white-space:nowrap">${t.label}</span>
+              return `<div style="display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:8px;background:${bg}">
+                <span style="font-size:12px;font-weight:700;color:${color};min-width:68px;white-space:nowrap;flex-shrink:0">${label}</span>
+                <span style="font-size:14px;font-weight:700;color:#1a1a1a;flex:1">${item.ev.title}</span>
               </div>`;
             } else {
               const s = item.s;
@@ -17475,10 +17473,12 @@ function renderJournal() {
               const dateBg  = isOv ? '#ffebee' : isTd ? '#fff3e0' : '#fafafa';
               const dateClr = isOv ? '#c62828' : isTd ? '#e65100' : '#888';
               const dateLabel = s.due_date ? (isOv?'⚠ 逾期 ':isTd?'⏰ 今日 ':'📅 ')+s.due_date.slice(5) : '無期限';
-              return `<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;background:${dateBg}">
-                <span style="font-size:12px;font-weight:700;color:${dateClr};min-width:72px;white-space:nowrap">${dateLabel}</span>
-                <span style="font-size:13px;flex:1;color:#333">✅ ${s.text}</span>
-                <span style="font-size:11px;color:#999;white-space:nowrap">${s.evTitle}</span>
+              return `<div style="display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:8px;background:${dateBg}">
+                <span style="font-size:12px;font-weight:700;color:${dateClr};min-width:68px;white-space:nowrap;flex-shrink:0">${dateLabel}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:14px;font-weight:700;color:#1a1a1a">✅ ${s.text}</div>
+                  <div style="font-size:11px;color:#999;margin-top:1px">${s.evTitle}</div>
+                </div>
               </div>`;
             }
           }).join('')}
