@@ -13308,17 +13308,27 @@ function salesGetCNYRate(year, month) {
   return parseFloat(rates[`${year}-${month}`] || '4.6');
 }
 
-// Get daily value: from localStorage override first, then SALES_DAILY
+// Get daily value: Supabase cache first, then SALES_DAILY constant
 function salesGetDay(year, platform, month1, day) {
-  const k = `sd_${year}_${platform}_${month1}_${day}`;
-  const v = localStorage.getItem(k);
-  if (v !== null) return parseFloat(v)||0;
+  const k = `${year}_${platform}_${month1}_${day}`;
+  const cached = (state.data.salesCache||{})[k];
+  if (cached !== undefined) return parseFloat(cached)||0;
   return SALES_DAILY[platform]?.[year]?.[month1]?.[day-1] ?? 0;
 }
 function salesSetDay(year, platform, month1, day, val) {
-  const k = `sd_${year}_${platform}_${month1}_${day}`;
-  if (val === null || val === undefined) { localStorage.removeItem(k); }
-  else { localStorage.setItem(k, val); }
+  if (!state.data.salesCache) state.data.salesCache = {};
+  const k = `${year}_${platform}_${month1}_${day}`;
+  const uid = state.data.profile?.id;
+  if (val === null || val === undefined) {
+    delete state.data.salesCache[k];
+    db.from('sales_daily').delete().match({year, platform, month1, day});
+  } else {
+    state.data.salesCache[k] = val;
+    db.from('sales_daily').upsert(
+      {year, platform, month1, day, value: val, updated_by: uid, updated_at: new Date().toISOString()},
+      {onConflict: 'year,month1,day,platform'}
+    );
+  }
 }
 
 function salesGetMonthSum(year, platform, month1) {
@@ -13469,8 +13479,25 @@ function salesSetGoalForYear(year, g) {
 }
 
 async function loadSales() {
-  if (!state.data.sales) {
-    state.data.sales = {};
+  if (!state.data.sales) state.data.sales = {};
+  if (!state.data.salesCache) state.data.salesCache = {};
+  if (!state.data.expCache)   state.data.expCache   = {};
+  // 從 Supabase 載入業績日報
+  const { data: sdRows } = await db.from('sales_daily').select('*');
+  if (sdRows) {
+    for (const r of sdRows) {
+      state.data.salesCache[`${r.year}_${r.platform}_${r.month1}_${r.day}`] = parseFloat(r.value)||0;
+    }
+  }
+  // 從 Supabase 載入體驗店付款明細
+  const { data: expRows } = await db.from('sales_exp_detail').select('*');
+  if (expRows) {
+    for (const r of expRows) {
+      const ek = `${r.year}_${r.month1}_${r.day}`;
+      if (!state.data.expCache[ek]) state.data.expCache[ek] = {cash:0,card:0,linepay:0,stall:false};
+      if (r.field === 'stall') state.data.expCache[ek].stall = r.value >= 1;
+      else state.data.expCache[ek][r.field] = parseFloat(r.value)||0;
+    }
   }
 }
 
@@ -13971,7 +13998,7 @@ function renderSalesInput() {
 
     // 體驗店：付款方式 + 擺攤
     const expKey = `sexp_${salesInputYear}_${month1}_${d}`;
-    const expData = JSON.parse(localStorage.getItem(expKey)||'{"cash":0,"card":0,"linepay":0,"stall":false}');
+    const expData = (state.data.expCache||{})[`${salesInputYear}_${month1}_${d}`] || {cash:0,card:0,linepay:0,stall:false};
     const expReadonly = salesEditable ? '' : 'readonly';
     const expDisabledStyle = salesEditable ? '' : 'background:#f5f5f5;color:#aaa;cursor:not-allowed;';
     const expCells = `
@@ -14021,8 +14048,7 @@ function renderSalesInput() {
   // 體驗店月加總：現金/刷卡/LinePay/擺攤次數
   let expCashTotal=0, expCardTotal=0, expLinePayTotal=0, expStallCount=0;
   for (let d=1;d<=daysInMonth;d++) {
-    const k = `sexp_${salesInputYear}_${month1}_${d}`;
-    const e = JSON.parse(localStorage.getItem(k)||'{"cash":0,"card":0,"linepay":0,"stall":false}');
+    const e = (state.data.expCache||{})[`${salesInputYear}_${month1}_${d}`] || {cash:0,card:0,linepay:0,stall:false};
     expCashTotal   += parseFloat(e.cash)||0;
     expCardTotal   += parseFloat(e.card)||0;
     expLinePayTotal+= parseFloat(e.linepay)||0;
@@ -14137,15 +14163,26 @@ function salesDayInput(input) {
 
 // ── 體驗店付款明細輸入 ──
 function salesExpInput(key, field, val) {
-  const data = JSON.parse(localStorage.getItem(key)||'{"cash":0,"card":0,"linepay":0,"stall":false}');
-  if (field === 'stall') data.stall = !!val;
-  else data[field] = parseFloat(val)||0;
-  localStorage.setItem(key, JSON.stringify(data));
-  // Auto-sum cash+card+linepay -> 體驗店 cell for that day
-  const parts = key.split('_'); // sexp_year_month1_day
+  // sexp_year_month1_day
+  const parts = key.split('_');
   const year = parseInt(parts[1]);
   const month1 = parseInt(parts[2]);
   const day = parseInt(parts[3]);
+  // Update in-memory cache
+  if (!state.data.expCache) state.data.expCache = {};
+  const ek = `${year}_${month1}_${day}`;
+  if (!state.data.expCache[ek]) state.data.expCache[ek] = {cash:0,card:0,linepay:0,stall:false};
+  const data = state.data.expCache[ek];
+  if (field === 'stall') data.stall = !!val;
+  else data[field] = parseFloat(val)||0;
+  // Upsert to Supabase (fire-and-forget)
+  const uid = state.data.profile?.id;
+  const dbVal = field === 'stall' ? (!!val ? 1 : 0) : (parseFloat(val)||0);
+  db.from('sales_exp_detail').upsert(
+    {year, month1, day, field, value: dbVal, updated_by: uid, updated_at: new Date().toISOString()},
+    {onConflict: 'year,month1,day,field'}
+  );
+  // Auto-sum cash+card+linepay -> 體驗店 cell for that day
   const dayTotal = (parseFloat(data.cash)||0) + (parseFloat(data.card)||0) + (parseFloat(data.linepay)||0);
   salesSetDay(year, '體驗店', month1, day, dayTotal);
   const srow = document.getElementById('srow_' + day);
@@ -14168,7 +14205,7 @@ function salesExpInput(key, field, val) {
   var dim = new Date(year, month1, 0).getDate();
   var cashT=0, cardT=0, linePayT=0, stallC=0;
   for (var d=1;d<=dim;d++) {
-    var e = JSON.parse(localStorage.getItem('sexp_'+year+'_'+month1+'_'+d)||'{"cash":0,"card":0,"linepay":0,"stall":false}');
+    var e = (state.data.expCache||{})[year+'_'+month1+'_'+d] || {cash:0,card:0,linepay:0,stall:false};
     cashT    += parseFloat(e.cash)||0;
     cardT    += parseFloat(e.card)||0;
     linePayT += parseFloat(e.linepay)||0;
@@ -19425,8 +19462,19 @@ function renderCalendar() {
           <div style="font-size:11px;color:var(--muted);margin-bottom:${listAssigneeName?'3px':'0'}">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}${ev.start_time?` ${ev.start_time.slice(0,5)}${ev.end_time?' ～ '+ev.end_time.slice(0,5):''}`:''}</div>
           ${listAssigneeName?`<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${listAssigneeName}</div>`:''}
           ${ev.description?(()=>{
-            const plain = ev.description.replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
-            return `<div style="font-size:11px;color:var(--muted);margin-top:3px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden;line-height:1.5">${plain}</div>`;
+            // HTML → 保留清單換行
+            const plain = ev.description
+              .replace(/<li[^>]*>/gi,'\n• ')
+              .replace(/<br\s*\/?>/gi,'\n')
+              .replace(/<\/p>/gi,'\n')
+              .replace(/<[^>]*>/g,'')
+              .replace(/&nbsp;/g,' ')
+              .replace(/\n{3,}/g,'\n\n')
+              .trim();
+            const lines = plain.split('\n').map(l=>l.trim()).filter(Boolean);
+            const show2 = lines.slice(0,2).join('\n');
+            const hasMore = lines.length > 2;
+            return `<div style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.55;white-space:pre-line">${show2}${hasMore?`\n<span style="color:var(--accent);font-weight:600">⋯ 看更多詳細資料</span>`:''}</div>`;
           })():''}
         </div>`;
       }).join('')}
@@ -19913,16 +19961,27 @@ window.calViewEvent = function(id) {
     ? new Date(ev.completed_at).toLocaleDateString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit'})
     : '';
 
+  const PRIORITY_DOT = { '高':'🔴','中':'🟡','低':'🟢' };
+  const priorityDot = PRIORITY_DOT[ev.priority] || '';
   showModal(ev.title, `
-    <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap">
-      <span style="background:${t.bg};color:${t.color};border-radius:4px;padding:3px 10px;font-size:13px;font-weight:700">${t.label}</span>
-      <span style="font-size:13px;color:var(--muted)">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}</span>
-      ${assigneeName?`<span style="font-size:13px;color:var(--text);background:#f5f5f5;border-radius:4px;padding:2px 10px">👤 ${assigneeName}</span>`:''}
-      ${isDone?`<span style="font-size:12px;background:#e8f5e9;color:#2e7d32;border-radius:4px;padding:2px 10px;font-weight:600">✅ 已完成 ${completedDateStr}</span>`:''}
+    <!-- 基本資訊 -->
+    <div style="background:#f8f9fa;border-radius:10px;padding:12px 14px;margin-bottom:14px;display:flex;flex-direction:column;gap:7px">
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <span style="background:${t.bg};color:${t.color};border-radius:5px;padding:3px 10px;font-size:12px;font-weight:700">${t.label}</span>
+        ${isDone?`<span style="font-size:12px;background:#e8f5e9;color:#2e7d32;border-radius:5px;padding:3px 10px;font-weight:600">✅ 已完成 ${completedDateStr}</span>`:''}
+        ${priorityDot?`<span style="font-size:12px;color:var(--muted)">${priorityDot} ${ev.priority}優先</span>`:''}
+      </div>
+      <div style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text)">
+        <span style="color:var(--muted);font-size:12px">📅</span>
+        <span>${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}</span>
+        ${ev.start_time?`<span style="color:var(--muted)">·</span><span style="color:var(--muted);font-size:12px">⏰</span><span>${ev.start_time.slice(0,5)}${ev.end_time?' ～ '+ev.end_time.slice(0,5):''}</span>`:''}
+      </div>
+      ${assigneeName?`<div style="display:flex;align-items:center;gap:6px;font-size:13px;color:var(--text)"><span style="color:var(--muted);font-size:12px">👤</span><span>${assigneeName}</span></div>`:''}
     </div>
+    <!-- 說明 -->
     ${ev.description
-      ? `<div style="font-size:14px;line-height:1.7;color:var(--text);margin-bottom:12px">${ev.description}</div>`
-      : '<div style="color:var(--muted);font-size:13px;margin-bottom:12px">無備註</div>'}
+      ? `<div style="font-size:14px;line-height:1.75;color:var(--text);margin-bottom:12px;padding:0 2px">${ev.description}</div>`
+      : ''}
     ${(()=>{
       const atts = Array.isArray(ev.attachments) ? ev.attachments.filter(a=>a.url) : [];
       if (!atts.length) return '';
