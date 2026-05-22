@@ -997,12 +997,17 @@ function canAccessPage(pageKey) {
   return perms.includes(pageKey);
 }
 
-// ── 視角切換：effectiveProfile() 回傳「目前生效的身份」──
-// 所有頁面的 role/權限判斷應改用此函式，而非直接讀 state.profile
+// ── 視角切換：effectiveProfile() / effectiveUserId() ──
+// 所有頁面的「顯示/篩選」判斷改用這兩個函式
+// 注意：「寫入資料」(created_by / reviewer_id) 仍用 state.user?.id，永遠記錄真實操作者
 function effectiveProfile() {
   return state.data.viewAs || state.profile || {};
 }
+function effectiveUserId() {
+  return state.data.viewAs?.id || state.user?.id || null;
+}
 window.effectiveProfile = effectiveProfile;
+window.effectiveUserId  = effectiveUserId;
 
 // ── 視角切換（僅 cailing0516@gmail.com 可用）──
 window.setViewAs = function(userId) {
@@ -8059,7 +8064,7 @@ function renderAccounting() {
                 const rYm = r.year_month ? r.year_month.slice(0,4)+'-'+r.year_month.slice(4,6) : '';
                 const invYm = r.item_date?.slice?.(0,7) || '';
                 const isNonMonth = rYm && invYm && rYm !== invYm;
-                const canEdit = isAdmin || r.applicant_id === state.user?.id;
+                const canEdit = isAdmin || r.applicant_id === effectiveUserId();
                 return `<tr style="${isNonMonth?'background:#fff8e1':''}" title="${isNonMonth?`非當月申請：發票${invYm}，申請${rYm}`:''}">
                 <td><strong style="font-size:12px">${r.applicant_name||'—'}</strong>${isNonMonth?` <span style="color:#e65100;font-size:10px">⚠️</span>`:''}</td>
                 <td style="font-size:12px">${r.item_date?.slice?.(0,10)||'—'}</td>
@@ -8117,7 +8122,7 @@ function renderAccounting() {
                 const rYm = r.year_month ? r.year_month.slice(0,4)+'-'+r.year_month.slice(4,6) : '';
                 const invYm = r.item_date?.slice?.(0,7) || '';
                 const isNonMonth = rYm && invYm && rYm !== invYm;
-                const canEdit = isAdmin || r.applicant_id === state.user?.id;
+                const canEdit = isAdmin || r.applicant_id === effectiveUserId();
                 return `<tr style="${isNonMonth?'background:#fff8e1':''}" title="${isNonMonth?`非當月申請：發票${invYm}，申請${rYm}`:''}">
                 <td><strong style="font-size:12px">${r.applicant_name||'—'}</strong>${isNonMonth?` <span style="color:#e65100;font-size:10px">⚠️</span>`:''}</td>
                 <td style="font-size:12px">${r.item_date?.slice?.(0,10)||'—'}</td>
@@ -16317,8 +16322,8 @@ function _fmtJnlField(val) {
 }
 
 function _getMyTemplate(jd) {
-  const myId = state.user?.id;
-  const myProfile = (jd.profiles||[]).find(p=>p.id===myId);
+  // viewAs 模式下，用被模擬員工的 profile 決定日誌範本
+  const myProfile = state.data.viewAs || (jd.profiles||[]).find(p=>p.id===effectiveUserId());
   const tpl = myProfile?.journal_template || ROLE_TO_JOURNAL_TEMPLATE[myProfile?.role] || 'general';
   return JOURNAL_TEMPLATES[tpl] || JOURNAL_TEMPLATES.general;
 }
@@ -17341,8 +17346,8 @@ function renderJournal() {
   const todayLogs = jd.today || [];
   const history = jd.history || [];
   const profiles = jd.profiles || [];
-  const myId = state.user?.id;
-  const myProfile = profiles.find(p => p.id === myId);
+  const myId = effectiveUserId();
+  const myProfile = state.data.viewAs || profiles.find(p => p.id === myId);
   const isAdmin = ['admin','manager','management'].includes(myProfile?.role) || myProfile?.email === 'cailing0516@gmail.com';
   const myLog = todayLogs.find(l => l.user_id === myId);
   const hasSubmitted = !!myLog;
@@ -17610,7 +17615,7 @@ window._jnlAddRow = function(fieldKey, hasQty, descVal='', qtyVal='', placeholde
 
 window.modalEditJournal = async function(existingId = null) {
   const jd = state.data.journal || {};
-  const myId = state.user?.id;
+  const myId = effectiveUserId();
   const today = _localToday();
   let existing = null;
   if (existingId) {
@@ -17619,7 +17624,7 @@ window.modalEditJournal = async function(existingId = null) {
     existing = (jd.today||[]).find(l=>l.user_id===myId);
   }
   const logDate = existing?.date || today;
-  const myProfile = (jd.profiles||[]).find(p=>p.id===myId);
+  const myProfile = state.data.viewAs || (jd.profiles||[]).find(p=>p.id===myId);
   const myName = myProfile?.name || state.user?.email || '—';
   const tplKey = existing?.template_type || myProfile?.journal_template || ROLE_TO_JOURNAL_TEMPLATE[myProfile?.role] || 'general';
   const tpl = JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
@@ -19690,10 +19695,12 @@ async function modalCalEvent(existing=null) {
                 style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--accent)" title="標記完成">
               <input class="form-control" id="cal-sub-text-${i}" value="${(s.text||'').replace(/"/g,'&quot;')}"
                 placeholder="任務描述" style="flex:1;font-size:13px;${s.done?'text-decoration:line-through;color:var(--muted)':''}">
-              <select id="cal-sub-who-${i}" style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;min-width:80px;max-width:130px;background:#fff">
+              <select id="cal-sub-who-${i}" style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;min-width:80px;max-width:120px;background:#fff">
                 <option value="">— 負責人 —</option>
                 ${users.map(u=>`<option value="${u.id}" ${s.assignee_id===u.id?'selected':''}>${u.name}</option>`).join('')}
               </select>
+              <input type="date" id="cal-sub-due-${i}" value="${s.due_date||''}"
+                title="截止日期" style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:130px;background:#fff;color:${s.due_date?'var(--text)':'var(--muted)'}">
               <button type="button" onclick="document.getElementById('cal-sub-row-${i}').remove()"
                 style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除">×</button>
             </div>`).join('');
@@ -19853,7 +19860,8 @@ async function modalCalEvent(existing=null) {
             const text = document.getElementById(`cal-sub-text-${i}`)?.value.trim() || '';
             const assignee_id = document.getElementById(`cal-sub-who-${i}`)?.value || null;
             const done = document.getElementById(`cal-sub-done-${i}`)?.checked || false;
-            if (text) subs.push({ id: 'sub_'+Math.random().toString(36).slice(2,10), text, assignee_id: assignee_id||null, done });
+            const due_date = document.getElementById(`cal-sub-due-${i}`)?.value || null;
+            if (text) subs.push({ id: 'sub_'+Math.random().toString(36).slice(2,10), text, assignee_id: assignee_id||null, done, due_date: due_date||null });
           });
           return subs;
         })(),
@@ -20069,10 +20077,12 @@ window._calAddSubtask = function() {
       onchange="(function(el){var r=el.closest('[id^=\\'cal-sub-row\\']');r.style.background=el.checked?'#f1f8e9':'#fafafa';r.style.borderColor=el.checked?'#c8e6c9':'var(--border)'})(this)"
       style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--accent)" title="標記完成">
     <input class="form-control" id="cal-sub-text-${i}" placeholder="任務描述" style="flex:1;font-size:13px">
-    <select id="cal-sub-who-${i}" style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;min-width:80px;max-width:130px;background:#fff">
+    <select id="cal-sub-who-${i}" style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;min-width:80px;max-width:120px;background:#fff">
       <option value="">— 負責人 —</option>
       ${users.map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}
     </select>
+    <input type="date" id="cal-sub-due-${i}" title="截止日期"
+      style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:130px;background:#fff;color:var(--muted)">
     <button type="button" onclick="this.closest('[id^=\\'cal-sub-row\\']').remove()"
       style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除">×</button>
   `;
@@ -20152,10 +20162,22 @@ window.calViewEvent = function(id) {
         <div style="display:flex;flex-direction:column;gap:6px">
           ${subs.map((s, si) => {
             const who = s.assignee_id ? (state.data.users||[]).find(u=>u.id===s.assignee_id)?.name : '';
-            return `<div id="cal-view-sub-${si}" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:${s.done?'#f1f8e9':'#fafafa'};border:1px solid ${s.done?'#c8e6c9':'var(--border)'}">
+            const todayStr = _localToday();
+            const isOverdue = !s.done && s.due_date && s.due_date < todayStr;
+            const isDueToday = !s.done && s.due_date && s.due_date === todayStr;
+            const dueBadge = s.due_date
+              ? `<span style="font-size:11px;padding:2px 8px;border-radius:10px;white-space:nowrap;
+                  background:${isOverdue?'#ffebee':isDueToday?'#fff8e1':'#f5f5f5'};
+                  color:${isOverdue?'#c62828':isDueToday?'#e65100':'var(--muted)'};
+                  border:1px solid ${isOverdue?'#ffcdd2':isDueToday?'#ffe082':'#e0e0e0'}">
+                  ${isOverdue?'⚠ 逾期 ':isDueToday?'⏰ 今天截止 ':'📅 '}${s.due_date}
+                </span>`
+              : '';
+            return `<div id="cal-view-sub-${si}" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:${s.done?'#f1f8e9':isOverdue?'#fff5f5':'#fafafa'};border:1px solid ${s.done?'#c8e6c9':isOverdue?'#ffcdd2':'var(--border)'}">
               <input type="checkbox" ${s.done?'checked':''} style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--accent)"
                 onchange="window._calToggleSubtask('${ev.id}',${si},this.checked)">
               <span style="flex:1;font-size:13px;${s.done?'text-decoration:line-through;color:var(--muted)':''}">${s.text}</span>
+              ${dueBadge}
               ${who?`<span style="font-size:11px;color:var(--accent-dark);background:var(--accent-light);border-radius:10px;padding:2px 8px;white-space:nowrap">${who}</span>`:''}
             </div>`;
           }).join('')}
