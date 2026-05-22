@@ -1086,7 +1086,7 @@ function renderSidebar() {
       <div class="avatar">${(state.profile?.name||'U')[0]}</div>
       <div>
         <div style="font-size:12px;font-weight:600">${state.profile?.name||'使用者'}</div>
-        <div style="font-size:10px;opacity:.5">${state.profile?.role||''}</div>
+        ${state.profile?.job_title ? `<div style="font-size:10px;opacity:.5">${state.profile.job_title}</div>` : ''}
       </div>
       <button id="logout-btn" style="margin-left:auto;background:none;color:rgba(255,255,255,.4);font-size:16px;" title="登出">⏻</button>
     </div>
@@ -1222,66 +1222,54 @@ function renderDashboard() {
     </div>
 
     <div class="dashboard-grid">
-      <!-- 待辦事項（來自行事曆） -->
+      <!-- 我的待辦（行事曆事項 + 子任務合併） -->
       <div class="card">
         <div class="section-title">✅ 我的待辦
           <button class="btn btn-sm btn-outline" style="margin-left:auto" onclick="modalCalEvent()">+ 新增</button>
         </div>
-        ${todos.length === 0 ? '<div class="empty"><div class="empty-icon">✅</div><p>沒有待辦事項</p></div>' : (() => {
+        ${(()=>{
+          const dashMyId = effectiveUserId();
+          const tomorrow = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
+          const in3 = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()+3); return d.toISOString().slice(0,10); })();
+          const in7 = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()+7); return d.toISOString().slice(0,10); })();
+          const _urg = d => {
+            if (!d) return { color:'#bbb', label:'—' };
+            if (d < today)  return { color:'#c62828', label:'逾期 ⚠' };
+            if (d === today) return { color:'#c62828', label:'今天 🔴' };
+            if (d === tomorrow) return { color:'#e65100', label:'明天 🟠' };
+            if (d <= in3) return { color:'#f57f17', label: d.slice(5)+' 🟡' };
+            if (d <= in7) return { color:'#555', label: d.slice(5) };
+            return { color:'#999', label: d.slice(5) };
+          };
           const PRIORITY_ORDER = { '高':0, '中':1, '低':2 };
           const sorted = [...todos].sort((a,b) =>
             (PRIORITY_ORDER[a.priority]??1) - (PRIORITY_ORDER[b.priority]??1) ||
             (a.start_date||'').localeCompare(b.start_date||'')
           );
-          const calTypes = getCalEventTypes ? getCalEventTypes() : {};
-          const shown = sorted.slice(0, 5);
-          const rows = shown.map(t => {
-            const isOverdue = t.start_date < today;
+          if (sorted.length === 0) return '<div class="empty"><div class="empty-icon">✅</div><p>沒有待辦事項</p></div>';
+          const rows = sorted.slice(0, 8).map(t => {
+            const { color, label } = _urg(t.start_date);
             const pColor = t.priority==='高'?'#e53935':t.priority==='低'?'#43a047':'#f57c00';
-            const ct = calTypes[t.event_type] || { label: t.event_type||'一般', color:'#90a4ae', bg:'#eceff1' };
-            return `<div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
+            const mySubs = (Array.isArray(t.subtasks)?t.subtasks:[]).filter(s => !s.done && s.text && (s.assignee_id === dashMyId || !s.assignee_id));
+            const subsHtml = mySubs.map(s => {
+              const isOv = s.due_date && s.due_date < today;
+              const isTd = s.due_date && s.due_date === today;
+              const dueTxt = s.due_date ? (isOv?`⚠ 逾期 ${s.due_date.slice(5)}`:isTd?`⏰ 今日`:`📅 ${s.due_date.slice(5)}`) : '';
+              return `<span style="color:${isOv?'#e53935':isTd?'#e65100':'#aaa'}">${s.text}${dueTxt?`（${dueTxt}）`:''}</span>`;
+            }).join('　');
+            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
               <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</div>
-                <div style="font-size:11px;color:${isOverdue?'var(--danger)':'var(--muted)'}">📅 ${t.start_date}${t.end_date&&t.end_date!==t.start_date?' ～ '+t.end_date:''}</div>
+              <span style="font-size:11px;font-weight:700;color:${color};min-width:60px;white-space:nowrap;flex-shrink:0">${label}</span>
+              <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+                <span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
+                ${mySubs.length ? `<span style="font-size:11px">${subsHtml}</span>` : ''}
               </div>
-              <span style="font-size:10px;background:${ct.bg};color:${ct.color};border-radius:4px;padding:1px 6px;white-space:nowrap;flex-shrink:0">${ct.label}</span>
             </div>`;
           }).join('');
-          const more = sorted.length > 5 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" onclick="state.page='calendar';state.data.calView='list';renderApp()">查看全部 ${sorted.length} 件 →</div>` : '';
+          const more = sorted.length > 8 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" onclick="state.page='calendar';state.data.calView='list';renderApp()">查看全部 ${sorted.length} 件 →</div>` : '';
           return rows + more;
         })()}
       </div>
-
-      <!-- 我的子任務 -->
-      ${(()=>{
-        const dashMyId = effectiveUserId();
-        const myDashSubs = [];
-        todos.forEach(ev => {
-          (Array.isArray(ev.subtasks)?ev.subtasks:[]).forEach(s => {
-            if (!s.done && s.text && (s.assignee_id === dashMyId || !s.assignee_id))
-              myDashSubs.push({ ...s, evTitle: ev.title, evId: ev.id });
-          });
-        });
-        myDashSubs.sort((a,b)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1);
-        if (!myDashSubs.length) return '';
-        return `<div class="card">
-          <div class="section-title">✅ 我的子任務</div>
-          ${myDashSubs.slice(0,8).map(s => {
-            const isOv = s.due_date && s.due_date < today;
-            const isTd = s.due_date && s.due_date === today;
-            return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${s.evId}')">
-              <span style="width:8px;height:8px;border-radius:50%;background:${isOv?'#e53935':isTd?'#f57c00':'var(--accent)'};flex-shrink:0"></span>
-              <div style="flex:1;min-width:0">
-                <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.text}</div>
-                <div style="font-size:11px;color:var(--muted)">${s.evTitle}</div>
-              </div>
-              ${s.due_date?`<span style="font-size:10px;padding:2px 6px;border-radius:4px;white-space:nowrap;background:${isOv?'#ffebee':isTd?'#fff3e0':'#f5f5f5'};color:${isOv?'#c62828':isTd?'#e65100':'var(--muted)'}">
-                ${isOv?'⚠':''}${s.due_date.slice(5)}</span>`:''}
-            </div>`;
-          }).join('')}
-        </div>`;
-      })()}
 
       <!-- 近期訂單 -->
       <div class="card">
@@ -17585,7 +17573,6 @@ function renderJournal() {
     <div style="background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
       <div>
         <div style="font-weight:700;font-size:14px">你今天還沒填寫日誌 📝</div>
-        <div style="font-size:12px;opacity:.85;margin-top:2px">${myTpl.icon} ${myTpl.label} 模板 · 約 3～5 分鐘填完</div>
       </div>
       <button class="btn" style="background:#fff;color:var(--accent-dark);font-weight:700;white-space:nowrap" onclick="window.modalEditJournal()">立即填寫</button>
     </div>` : ''}
