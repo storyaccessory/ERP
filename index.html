@@ -7952,11 +7952,12 @@ function renderAccounting() {
 
   const _ep = effectiveProfile();
   const isAdmin = ['admin','manager','management','accounting'].includes(_ep?.role) || _ep?.email === 'cailing0516@gmail.com';
+  const _epPerms = Array.isArray(_ep?.permissions) ? _ep.permissions : [];
   // 儀表板：admin + accounting + management 可見（一般員工不顯示）
   const canSeeDashboard = isAdmin;
-  // 應付／應收：僅 admin/accounting/management 可見
-  const canSeeAP = isAdmin;
-  const canSeeAR = isAdmin;
+  // 應付／應收：admin/accounting/management，或個別開放 acct_ap_ar 權限的員工
+  const canSeeAP = isAdmin || _epPerms.includes('acct_ap_ar');
+  const canSeeAR = isAdmin || _epPerms.includes('acct_ap_ar');
   // 餐費／代墊：所有人可見，但只能編輯自己的（isAdmin 可編輯全部）
   // 若無 AP 權限且目前 tab 是 AP/AR，自動切到餐費
   if (!canSeeAP && (tab === '應付帳款' || tab === '應收帳款')) {
@@ -14598,6 +14599,7 @@ const PAGE_PERMISSIONS = [
   { section:'財務', pages:[
     { key:'wages',      label:'鑄件工資月結' },
     { key:'accounting', label:'會計月結' },
+    { key:'acct_ap_ar', label:'AP/AR 帳款瀏覽' },
     { key:'costs',      label:'成本管理' },
     { key:'peripheral', label:'周邊成本' },
   ]},
