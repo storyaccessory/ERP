@@ -19391,16 +19391,20 @@ function renderCalendar() {
           const hasTimed = !!(ev.start_time);
           const deco     = isDone ? 'text-decoration:line-through;opacity:.55;' : '';
           const onclick  = `data-event-id="${ev.id}" onclick="event.stopPropagation();calViewEvent('${ev.id}')"`;
+          const subs = Array.isArray(ev.subtasks) ? ev.subtasks.filter(s=>s.text) : [];
+          const subBadge = subs.length > 0
+            ? `<span style="font-size:9px;opacity:.75;flex-shrink:0"> ✓${ev.subtasks.filter(s=>s.done).length}/${subs.length}</span>`
+            : '';
           if (hasTimed) {
             // 有時間：圓點＋文字，整行用分類文字色
             const timeStr = ev.start_time.slice(0,5);
             const txtCol  = isDone ? '#bbb' : t.color;
-            return baseDiv(`${timeStr} ${t.label}-${ev.title}`, `padding:1px 2px;color:${txtCol};${deco}`, onclick);
+            return baseDiv(`${timeStr} ${t.label}-${ev.title}${subs.length?` ✓${ev.subtasks.filter(s=>s.done).length}/${subs.length}`:''}`, `padding:1px 2px;color:${txtCol};${deco}`, onclick);
           } else {
             // 整天：色塊
             const bg  = isDone ? '#ebebeb' : t.bg;
             const col = isDone ? '#bbb'    : t.color;
-            return baseDiv(`${t.label}-${ev.title}`, `padding:1px 4px;background:${bg};color:${col};border-radius:3px;${deco}`, onclick);
+            return baseDiv(`${t.label}-${ev.title}${subs.length?` ✓${ev.subtasks.filter(s=>s.done).length}/${subs.length}`:''}`, `padding:1px 4px;background:${bg};color:${col};border-radius:3px;${deco}`, onclick);
           }
         }
       }).join('')}
@@ -19830,6 +19834,18 @@ async function modalCalEvent(existing=null) {
         })(),
         assigned_to: assignedTo,
         assignee_ids: assigneeIds,
+        subtasks: (() => {
+          const rows = document.querySelectorAll('[id^="cal-sub-row-"]');
+          const subs = [];
+          rows.forEach(row => {
+            const i = row.id.replace('cal-sub-row-','');
+            const text = document.getElementById(`cal-sub-text-${i}`)?.value.trim() || '';
+            const assignee_id = document.getElementById(`cal-sub-who-${i}`)?.value || null;
+            const done = document.getElementById(`cal-sub-done-${i}`)?.checked || false;
+            if (text) subs.push({ id: 'sub_'+Math.random().toString(36).slice(2,10), text, assignee_id: assignee_id||null, done });
+          });
+          return subs;
+        })(),
         ...(completedAt !== undefined ? { completed_at: completedAt } : {}),
       };
 
@@ -20008,6 +20024,27 @@ window._calClearAll = function() {
   });
 };
 
+// 在「檢視事項」modal 即時切換子任務完成狀態
+window._calToggleSubtask = async function(evId, subIdx, checked) {
+  const ev = (state.data.calEvents||[]).find(e=>e.id===evId);
+  if (!ev || !Array.isArray(ev.subtasks)) return;
+  ev.subtasks[subIdx].done = checked;
+  // 更新 DOM 樣式
+  const row = document.getElementById('cal-view-sub-'+subIdx);
+  if (row) {
+    row.style.background = checked ? '#f1f8e9' : '#fafafa';
+    row.style.borderColor = checked ? '#c8e6c9' : 'var(--border)';
+    const txt = row.querySelector('span:first-of-type');
+    if (txt) txt.style.textDecoration = checked ? 'line-through' : '';
+  }
+  // 更新進度條
+  const doneCount = ev.subtasks.filter(s=>s.done).length;
+  const bar = document.querySelector('#cal-view-sub-0')?.closest('[style*="margin-bottom:12px"]')?.querySelector('[style*="background:var(--accent)"]');
+  if (bar) bar.style.width = Math.round(doneCount/ev.subtasks.length*100)+'%';
+  // 寫回 DB（fire-and-forget）
+  db.from('calendar_events').update({ subtasks: ev.subtasks }).eq('id', evId);
+};
+
 window._calAddSubtask = function() {
   const list = document.getElementById('cal-subtask-list');
   if (!list) return;
@@ -20087,6 +20124,33 @@ window.calViewEvent = function(id) {
     ${ev.description
       ? `<div style="font-size:14px;line-height:1.75;color:var(--text);margin-bottom:12px;padding:0 2px">${ev.description}</div>`
       : ''}
+    ${(()=>{
+      const subs = Array.isArray(ev.subtasks) ? ev.subtasks.filter(s=>s.text) : [];
+      if (!subs.length) return '';
+      const doneCount = subs.filter(s=>s.done).length;
+      const pct = Math.round(doneCount/subs.length*100);
+      return `<div style="border-top:1px solid var(--border);padding-top:12px;margin-top:4px;margin-bottom:12px">
+        <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+          <div style="font-size:12px;font-weight:600;color:var(--muted)">📋 子任務</div>
+          <div style="font-size:12px;color:var(--muted)">${doneCount}/${subs.length} 完成
+            <span style="display:inline-block;width:60px;height:6px;background:#e0e0e0;border-radius:3px;margin-left:6px;vertical-align:middle">
+              <span style="display:block;width:${pct}%;height:100%;background:var(--accent);border-radius:3px"></span>
+            </span>
+          </div>
+        </div>
+        <div style="display:flex;flex-direction:column;gap:6px">
+          ${subs.map((s, si) => {
+            const who = s.assignee_id ? (state.data.users||[]).find(u=>u.id===s.assignee_id)?.name : '';
+            return `<div id="cal-view-sub-${si}" style="display:flex;align-items:center;gap:8px;padding:7px 10px;border-radius:8px;background:${s.done?'#f1f8e9':'#fafafa'};border:1px solid ${s.done?'#c8e6c9':'var(--border)'}">
+              <input type="checkbox" ${s.done?'checked':''} style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--accent)"
+                onchange="window._calToggleSubtask('${ev.id}',${si},this.checked)">
+              <span style="flex:1;font-size:13px;${s.done?'text-decoration:line-through;color:var(--muted)':''}">${s.text}</span>
+              ${who?`<span style="font-size:11px;color:var(--accent-dark);background:var(--accent-light);border-radius:10px;padding:2px 8px;white-space:nowrap">${who}</span>`:''}
+            </div>`;
+          }).join('')}
+        </div>
+      </div>`;
+    })()}
     ${(()=>{
       const atts = Array.isArray(ev.attachments) ? ev.attachments.filter(a=>a.url) : [];
       if (!atts.length) return '';
