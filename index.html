@@ -17436,51 +17436,39 @@ function renderJournal() {
           ${isOv?'⚠ 逾期':isTd?'⏰ 今日':'📅'} ${s.due_date.slice(5)}</span>`:''}
       </div>`;
     };
-    // ── 合併「你的近期任務」：行事曆事項 + 子任務，依日期排序 ──
+    // ── 近期任務：以行事曆事項為單位，底下列屬於我的子任務 ──
     const jdMyId = effectiveUserId();
-    const mySubtasks = getPersonSubs(jdMyId);
+    // 建立 eventId → 我的未完成子任務 的對照表
+    const mySubMap = {};
+    (jd.subtaskEvents || []).forEach(ev => {
+      const isAssigned = ev.assigned_to === jdMyId || (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(jdMyId));
+      if (!isAssigned) return;
+      const mySubs = (Array.isArray(ev.subtasks) ? ev.subtasks : []).filter(s =>
+        !s.done && s.text && (s.assignee_id === jdMyId || !s.assignee_id)
+      );
+      if (mySubs.length > 0) mySubMap[ev.id] = mySubs;
+    });
 
-    // 將 upcoming 行事曆事項轉成統一格式
-    const upcomingItems = upcoming.map(ev => ({
-      _type: 'event',
-      _date: ev.start_date,
-      ev,
-    }));
-    // 將我的子任務轉成統一格式（優先用 due_date，沒有則用所屬事項的 start_date）
-    const subtaskItems = mySubtasks.map(s => ({
-      _type: 'subtask',
-      _date: s.due_date || s.evStart || '9999-12-31',
-      s,
-    }));
-    // 合併排序
-    const combinedItems = [...upcomingItems, ...subtaskItems].sort((a,b) => a._date < b._date ? -1 : a._date > b._date ? 1 : 0);
-
-    const upcomingHtml = combinedItems.length === 0 ? '' : `
+    const upcomingHtml = upcoming.length === 0 ? '' : `
       <div class="card" style="margin-bottom:16px;border-left:4px solid #f57c00">
         <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#e65100">📋 你的近期任務</div>
         <div style="display:flex;flex-direction:column;gap:4px">
-          ${combinedItems.map(item => {
-            if (item._type === 'event') {
-              const { bg, color, label } = _urgencyStyle(item.ev.start_date);
-              return `<div style="display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:8px;background:${bg}">
-                <span style="font-size:12px;font-weight:700;color:${color};min-width:68px;white-space:nowrap;flex-shrink:0">${label}</span>
-                <span style="font-size:14px;font-weight:700;color:#1a1a1a;flex:1">${item.ev.title}</span>
-              </div>`;
-            } else {
-              const s = item.s;
+          ${upcoming.map(ev => {
+            const { bg, color, label } = _urgencyStyle(ev.start_date);
+            const subs = mySubMap[ev.id] || [];
+            const subsHtml = subs.map(s => {
               const isOv = s.due_date && s.due_date < todayStr;
               const isTd = s.due_date && s.due_date === todayStr;
-              const dateBg  = isOv ? '#ffebee' : isTd ? '#fff3e0' : '#fafafa';
-              const dateClr = isOv ? '#c62828' : isTd ? '#e65100' : '#888';
-              const dateLabel = s.due_date ? (isOv?'⚠ 逾期 ':isTd?'⏰ 今日 ':'📅 ')+s.due_date.slice(5) : '無期限';
-              return `<div style="display:flex;align-items:center;gap:12px;padding:7px 10px;border-radius:8px;background:${dateBg}">
-                <span style="font-size:12px;font-weight:700;color:${dateClr};min-width:68px;white-space:nowrap;flex-shrink:0">${dateLabel}</span>
-                <div style="flex:1;min-width:0">
-                  <div style="font-size:14px;font-weight:700;color:#1a1a1a">✅ ${s.text}</div>
-                  <div style="font-size:11px;color:#999;margin-top:1px">${s.evTitle}</div>
-                </div>
-              </div>`;
-            }
+              const dueTxt = s.due_date ? (isOv ? `⚠ 逾期 ${s.due_date.slice(5)}` : isTd ? `⏰ 今日` : `📅 ${s.due_date.slice(5)}`) : '';
+              return `<span style="color:${isOv?'#e53935':isTd?'#e65100':'#999'}">${s.text}${dueTxt ? `（${dueTxt}）` : ''}</span>`;
+            }).join('　');
+            return `<div style="display:flex;align-items:${subs.length?'flex-start':'center'};gap:12px;padding:7px 10px;border-radius:8px;background:${bg}">
+              <span style="font-size:12px;font-weight:700;color:${color};min-width:68px;white-space:nowrap;flex-shrink:0;padding-top:${subs.length?'2px':'0'}">${label}</span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:14px;font-weight:700;color:#1a1a1a">${ev.title}</div>
+                ${subs.length ? `<div style="font-size:11px;margin-top:2px;line-height:1.6">${subsHtml}</div>` : ''}
+              </div>
+            </div>`;
           }).join('')}
         </div>
       </div>`;
