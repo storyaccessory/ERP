@@ -997,6 +997,13 @@ function canAccessPage(pageKey) {
   return perms.includes(pageKey);
 }
 
+// ── 視角切換：effectiveProfile() 回傳「目前生效的身份」──
+// 所有頁面的 role/權限判斷應改用此函式，而非直接讀 state.profile
+function effectiveProfile() {
+  return state.data.viewAs || state.profile || {};
+}
+window.effectiveProfile = effectiveProfile;
+
 // ── 視角切換（僅 cailing0516@gmail.com 可用）──
 window.setViewAs = function(userId) {
   if (!userId) { window.exitViewAs(); return; }
@@ -7908,7 +7915,8 @@ function renderAccounting() {
     empAdvSummary[n] = (empAdvSummary[n]||0) + (r.amount||0);
   });
 
-  const isAdmin = ['admin','manager','management','accounting'].includes(state.profile?.role) || state.profile?.email === 'cailing0516@gmail.com';
+  const _ep = effectiveProfile();
+  const isAdmin = ['admin','manager','management','accounting'].includes(_ep?.role) || _ep?.email === 'cailing0516@gmail.com';
   // 儀表板：admin + accounting + management 可見（一般員工不顯示）
   const canSeeDashboard = isAdmin;
   // 應付／應收：僅 admin/accounting/management 可見
@@ -14452,8 +14460,9 @@ function renderCosts() {
   const costs = state.data.costs || [];
   const periph = state.data.peripheralProjects || [];
   const tab = state.data.costTab || '銀飾成本';
-  const role = state.profile?.role;
-  if (!['admin','accounting','management'].includes(role) && state.profile?.email !== 'cailing0516@gmail.com') {
+  const _epC = effectiveProfile();
+  const role = _epC?.role;
+  if (!['admin','accounting','management'].includes(role) && _epC?.email !== 'cailing0516@gmail.com') {
     return `<div class="card"><div class="empty"><div class="empty-icon">🔒</div><p>您沒有權限查看成本資料</p></div></div>`;
   }
 
@@ -14616,7 +14625,8 @@ const ROLE_COLOR = {
 
 function renderUsers() {
   const users = state.data.users || [];
-  const isAdmin = state.profile?.role === 'admin' || state.profile?.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
+  const _epU = effectiveProfile();
+  const isAdmin = _epU?.role === 'admin' || _epU?.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
 
   return `
     <div class="search-bar">
