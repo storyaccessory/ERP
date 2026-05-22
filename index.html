@@ -19354,7 +19354,7 @@ function renderCalendar() {
   let allEvents = state.data.calEvents || [];
   // Apply 我的/全公司 filter
   let events = calFilter === 'mine'
-    ? allEvents.filter(ev => ev.assigned_to === myId || ev.created_by === myId || (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(myId)))
+    ? allEvents.filter(ev => ev.assigned_to === myId || (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(myId)))
     : allEvents;
   // Apply 分類 filter
   if (calTypeFilter) events = events.filter(ev => ev.event_type === calTypeFilter);
