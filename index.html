@@ -19314,7 +19314,8 @@ function renderCalendar() {
   const calFilter     = state.data.calFilter     || 'all';  // 'all' | 'mine'
   const calView       = state.data.calView       || 'month'; // 'month' | 'list'
   const calTypeFilter = state.data.calTypeFilter || null;    // null | event_type key
-  const myId = state.user?.id;
+  // viewAs 模式下，「我的」篩選要用被模擬員工的 ID
+  const myId = state.data.viewAs?.id || state.user?.id;
   let allEvents = state.data.calEvents || [];
   // Apply 我的/全公司 filter
   let events = calFilter === 'mine'
