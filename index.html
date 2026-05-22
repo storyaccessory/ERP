@@ -17471,78 +17471,65 @@ function renderJournal() {
           ${isOv?'⚠ 逾期':isTd?'⏰ 今日':'📅'} ${s.due_date.slice(5)}</span>`:''}
       </div>`;
     };
-    // 我的子任務（僅顯示在頁首，供快速查看）
+    // ── 合併「你的近期任務」：行事曆事項 + 子任務，依日期排序 ──
     const jdMyId = effectiveUserId();
     const mySubtasks = getPersonSubs(jdMyId);
-    const mySubtasksHtml = mySubtasks.length === 0 ? '' : `
-      <div class="card" style="margin-bottom:16px;border-left:4px solid var(--accent)">
-        <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--accent-dark)">✅ 我的子任務</div>
-        <div style="display:flex;flex-direction:column;gap:5px">${mySubtasks.map(_renderSubBadge).join('')}</div>
-      </div>`;
 
-    const upcomingHtml = upcoming.length === 0 ? '' : `
+    // 將 upcoming 行事曆事項轉成統一格式
+    const upcomingItems = upcoming.map(ev => ({
+      _type: 'event',
+      _date: ev.start_date,
+      ev,
+    }));
+    // 將我的子任務轉成統一格式（優先用 due_date，沒有則用所屬事項的 start_date）
+    const subtaskItems = mySubtasks.map(s => ({
+      _type: 'subtask',
+      _date: s.due_date || s.evStart || '9999-12-31',
+      s,
+    }));
+    // 合併排序
+    const combinedItems = [...upcomingItems, ...subtaskItems].sort((a,b) => a._date < b._date ? -1 : a._date > b._date ? 1 : 0);
+
+    const upcomingHtml = combinedItems.length === 0 ? '' : `
       <div class="card" style="margin-bottom:16px;border-left:4px solid #f57c00">
         <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#e65100">📋 你的近期任務</div>
         <div style="display:flex;flex-direction:column;gap:6px">
-          ${upcoming.map(ev => {
-            const { bg, color, label } = _urgencyStyle(ev.start_date);
-            const t = calTypes[ev.event_type] || { label: ev.event_type||'一般' };
-            return `<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;background:${bg}">
-              <span style="font-size:12px;font-weight:700;color:${color};min-width:72px;white-space:nowrap">${label}</span>
-              <span style="font-size:13px;flex:1;color:#333">${ev.title}</span>
-              <span style="font-size:11px;color:#999;white-space:nowrap">${t.label}</span>
-            </div>`;
-          }).join('')}
-        </div>
-      </div>`;
-
-    const teamEvents = jd.teamEvents || [];
-    const teamHtml = teamEvents.length === 0 ? '' : `
-      <div class="card" style="margin-bottom:16px;border-left:4px solid #6366f1">
-        <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#4338ca">🤝 部門團隊協作事項（近14天）</div>
-        <div style="display:flex;flex-direction:column;gap:6px">
-          ${teamEvents.map(ev => {
-            const { bg, color, label } = _urgencyStyle(ev.start_date);
-            const t = calTypes[ev.event_type] || { label: ev.event_type||'一般' };
-            const memberCount = Array.isArray(ev.assignee_ids) ? ev.assignee_ids.length : 0;
-            return `<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;background:${bg}">
-              <span style="font-size:12px;font-weight:700;color:${color};min-width:72px;white-space:nowrap">${label}</span>
-              <span style="font-size:13px;flex:1;color:#333">${ev.title}</span>
-              <span style="font-size:11px;color:#6366f1;white-space:nowrap">👥 ${memberCount}人</span>
-            </div>`;
+          ${combinedItems.map(item => {
+            if (item._type === 'event') {
+              const { bg, color, label } = _urgencyStyle(item.ev.start_date);
+              const t = calTypes[item.ev.event_type] || { label: item.ev.event_type||'一般' };
+              return `<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;background:${bg}">
+                <span style="font-size:12px;font-weight:700;color:${color};min-width:72px;white-space:nowrap">${label}</span>
+                <span style="font-size:13px;flex:1;color:#333">${item.ev.title}</span>
+                <span style="font-size:11px;color:#999;white-space:nowrap">${t.label}</span>
+              </div>`;
+            } else {
+              const s = item.s;
+              const isOv = s.due_date && s.due_date < todayStr;
+              const isTd = s.due_date && s.due_date === todayStr;
+              const dateBg  = isOv ? '#ffebee' : isTd ? '#fff3e0' : '#fafafa';
+              const dateClr = isOv ? '#c62828' : isTd ? '#e65100' : '#888';
+              const dateLabel = s.due_date ? (isOv?'⚠ 逾期 ':isTd?'⏰ 今日 ':'📅 ')+s.due_date.slice(5) : '無期限';
+              return `<div style="display:flex;align-items:center;gap:10px;padding:7px 10px;border-radius:8px;background:${dateBg}">
+                <span style="font-size:12px;font-weight:700;color:${dateClr};min-width:72px;white-space:nowrap">${dateLabel}</span>
+                <span style="font-size:13px;flex:1;color:#333">✅ ${s.text}</span>
+                <span style="font-size:11px;color:#999;white-space:nowrap">${s.evTitle}</span>
+              </div>`;
+            }
           }).join('')}
         </div>
       </div>`;
 
     return `
-      ${mySubtasksHtml}
       ${upcomingHtml}
-      ${teamHtml}
       ${allLogs.length === 0 && missing.length === 0 ?
         `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>這天還沒有人填寫日誌</p></div></div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
-        ${allLogs.map(log => {
-          const personSubs = getPersonSubs(log.user_id);
-          const subHtml = personSubs.length === 0 ? '' : `
-            <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
-              <div style="font-size:11px;font-weight:600;color:var(--accent-dark);margin-bottom:5px">📋 子任務（${personSubs.filter(s=>s.done).length}/${personSubs.length} 完成）</div>
-              <div style="display:flex;flex-direction:column;gap:4px">${personSubs.map(_renderSubBadge).join('')}</div>
-            </div>`;
-          return `<div>${_jnlCard(log)}${subHtml}</div>`;
-        }).join('')}
-        ${missing.map(p => {
-          const personSubs = getPersonSubs(p.id);
-          const subHtml = personSubs.length === 0 ? '' : `
-            <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
-              <div style="font-size:11px;font-weight:600;color:var(--accent-dark);margin-bottom:5px">📋 子任務（${personSubs.filter(s=>s.done).length}/${personSubs.length} 完成）</div>
-              <div style="display:flex;flex-direction:column;gap:4px">${personSubs.map(_renderSubBadge).join('')}</div>
-            </div>`;
-          return `<div class="card" style="border-left:4px solid var(--border);opacity:.7">
+        ${allLogs.map(log => `<div>${_jnlCard(log)}</div>`).join('')}
+        ${missing.map(p => `<div class="card" style="border-left:4px solid var(--border);opacity:.7">
             <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
             <div style="font-size:12px;color:var(--muted);margin-top:4px">尚未填寫日誌</div>
-            ${subHtml}
-          </div>`;
-        }).join('')}
+          </div>`).join('')}
       </div>`;
   };
 
