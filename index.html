@@ -718,7 +718,7 @@ async function loadDashboard() {
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     db.from('calendar_events')
-      .select('id,title,start_date,end_date,priority,event_type,completed_at,assigned_to,assignee_ids')
+      .select('id,title,start_date,end_date,priority,event_type,completed_at,assigned_to,assignee_ids,subtasks')
       .is('completed_at', null)
       .neq('is_template', true)
       .or(`assigned_to.eq.${myId},assignee_ids.cs.["${myId}"]`)
@@ -1288,6 +1288,36 @@ function renderDashboard() {
           return rows + more;
         })()}
       </div>
+
+      <!-- 我的子任務 -->
+      ${(()=>{
+        const dashMyId = effectiveUserId();
+        const myDashSubs = [];
+        todos.forEach(ev => {
+          (Array.isArray(ev.subtasks)?ev.subtasks:[]).forEach(s => {
+            if (!s.done && s.text && (s.assignee_id === dashMyId || !s.assignee_id))
+              myDashSubs.push({ ...s, evTitle: ev.title, evId: ev.id });
+          });
+        });
+        myDashSubs.sort((a,b)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1);
+        if (!myDashSubs.length) return '';
+        return `<div class="card">
+          <div class="section-title">✅ 我的子任務</div>
+          ${myDashSubs.slice(0,8).map(s => {
+            const isOv = s.due_date && s.due_date < today;
+            const isTd = s.due_date && s.due_date === today;
+            return `<div style="display:flex;align-items:center;gap:8px;padding:7px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${s.evId}')">
+              <span style="width:8px;height:8px;border-radius:50%;background:${isOv?'#e53935':isTd?'#f57c00':'var(--accent)'};flex-shrink:0"></span>
+              <div style="flex:1;min-width:0">
+                <div style="font-size:13px;font-weight:500;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${s.text}</div>
+                <div style="font-size:11px;color:var(--muted)">${s.evTitle}</div>
+              </div>
+              ${s.due_date?`<span style="font-size:10px;padding:2px 6px;border-radius:4px;white-space:nowrap;background:${isOv?'#ffebee':isTd?'#fff3e0':'#f5f5f5'};color:${isOv?'#c62828':isTd?'#e65100':'var(--muted)'}">
+                ${isOv?'⚠':''}${s.due_date.slice(5)}</span>`:''}
+            </div>`;
+          }).join('')}
+        </div>`;
+      })()}
 
       <!-- 近期訂單 -->
       <div class="card">
@@ -16339,13 +16369,13 @@ async function loadJournal() {
   // 未來 14 天的行事曆任務（指派給自己）
   const in14 = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()+14); return d.toISOString().slice(0,10); })();
   const myUid = (await db.auth.getUser()).data.user?.id || '';
-  const [todayRes, histRes, profilesRes, upcomingRes, teamEvRes] = await Promise.all([
+  const [todayRes, histRes, profilesRes, upcomingRes, teamEvRes, subtaskEvRes] = await Promise.all([
     db.from('work_journals').select('*').eq('date', today).order('created_at'),
     db.from('work_journals').select('*').order('date', { ascending: false }).limit(300),
     db.from('profiles').select('id, name, role, journal_template, journal_required').order('name'),
     // 個人近期事項（指派給自己）
     db.from('calendar_events')
-      .select('id, title, start_date, end_date, event_type, priority, assigned_to, assignee_ids, completed_at')
+      .select('id, title, start_date, end_date, event_type, priority, assigned_to, assignee_ids, completed_at, subtasks')
       .is('completed_at', null)
       .neq('is_template', true)
       .or(`assigned_to.eq.${myUid},assignee_ids.cs.["${myUid}"]`)
@@ -16354,12 +16384,21 @@ async function loadJournal() {
       .order('start_date'),
     // 部門團隊協作事項（多人指派，不限個人）
     db.from('calendar_events')
-      .select('id, title, start_date, end_date, event_type, priority, assignee_ids')
+      .select('id, title, start_date, end_date, event_type, priority, assignee_ids, subtasks')
       .is('completed_at', null)
       .neq('is_template', true)
       .not('assignee_ids', 'is', null)
       .gte('start_date', today)
       .lte('start_date', in14)
+      .order('start_date'),
+    // 全員子任務：有未完成子任務的行事曆事項（供日誌各人顯示）
+    db.from('calendar_events')
+      .select('id, title, start_date, assignee_ids, assigned_to, subtasks')
+      .is('completed_at', null)
+      .neq('is_template', true)
+      .not('subtasks', 'eq', '[]')
+      .not('subtasks', 'is', null)
+      .gte('start_date', today)
       .order('start_date'),
   ]);
   if (todayRes.error)   console.error('[journal] today query:', todayRes.error.message);
@@ -16372,6 +16411,7 @@ async function loadJournal() {
     todos: [],
     upcoming: upcomingRes.data || [],
     teamEvents: (teamEvRes.data || []).filter(ev => Array.isArray(ev.assignee_ids) && ev.assignee_ids.length > 1),
+    subtaskEvents: subtaskEvRes.data || [],
     todayDate: today,
   };
 }
@@ -17405,6 +17445,41 @@ function renderJournal() {
       return                          { bg:'#fafafa', color:'#888',    label:d.slice(5) };
     };
 
+    // 子任務資料來源：全員未完成子任務事項
+    const subtaskEvents = jd.subtaskEvents || [];
+    // 給定 userId，取出其所有未完成子任務
+    const getPersonSubs = (uid) => {
+      const result = [];
+      subtaskEvents.forEach(ev => {
+        const isAssigned = ev.assigned_to === uid || (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(uid));
+        if (!isAssigned) return;
+        (Array.isArray(ev.subtasks)?ev.subtasks:[]).forEach(s => {
+          if (!s.done && s.text && (s.assignee_id === uid || !s.assignee_id))
+            result.push({ ...s, evTitle: ev.title, evStart: ev.start_date });
+        });
+      });
+      result.sort((a,b)=>(a.due_date||'9999')<(b.due_date||'9999')?-1:1);
+      return result;
+    };
+    const _renderSubBadge = (s) => {
+      const isOv = s.due_date && s.due_date < todayStr;
+      const isTd = s.due_date && s.due_date === todayStr;
+      return `<div style="display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;background:${isOv?'#fff5f5':isTd?'#fff8e1':'#f9f9f9'};border:1px solid ${isOv?'#ffcdd2':isTd?'#ffe082':'#ebebeb'}">
+        <span style="font-size:12px;flex:1">${s.text}</span>
+        <span style="font-size:11px;color:var(--muted);white-space:nowrap">${s.evTitle}</span>
+        ${s.due_date?`<span style="font-size:10px;padding:1px 6px;border-radius:4px;white-space:nowrap;background:${isOv?'#ffebee':isTd?'#fff3e0':'#f0f0f0'};color:${isOv?'#c62828':isTd?'#e65100':'var(--muted)'}">
+          ${isOv?'⚠ 逾期':isTd?'⏰ 今日':'📅'} ${s.due_date.slice(5)}</span>`:''}
+      </div>`;
+    };
+    // 我的子任務（僅顯示在頁首，供快速查看）
+    const jdMyId = effectiveUserId();
+    const mySubtasks = getPersonSubs(jdMyId);
+    const mySubtasksHtml = mySubtasks.length === 0 ? '' : `
+      <div class="card" style="margin-bottom:16px;border-left:4px solid var(--accent)">
+        <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:var(--accent-dark)">✅ 我的子任務</div>
+        <div style="display:flex;flex-direction:column;gap:5px">${mySubtasks.map(_renderSubBadge).join('')}</div>
+      </div>`;
+
     const upcomingHtml = upcoming.length === 0 ? '' : `
       <div class="card" style="margin-bottom:16px;border-left:4px solid #f57c00">
         <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#e65100">📋 你的近期任務</div>
@@ -17440,16 +17515,34 @@ function renderJournal() {
       </div>`;
 
     return `
+      ${mySubtasksHtml}
       ${upcomingHtml}
       ${teamHtml}
       ${allLogs.length === 0 && missing.length === 0 ?
         `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>這天還沒有人填寫日誌</p></div></div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
-        ${allLogs.map(log => _jnlCard(log)).join('')}
-        ${missing.map(p => `<div class="card" style="border-left:4px solid var(--border);opacity:.7">
-          <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
-          <div style="font-size:12px;color:var(--muted);margin-top:4px">尚未填寫日誌</div>
-        </div>`).join('')}
+        ${allLogs.map(log => {
+          const personSubs = getPersonSubs(log.user_id);
+          const subHtml = personSubs.length === 0 ? '' : `
+            <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+              <div style="font-size:11px;font-weight:600;color:var(--accent-dark);margin-bottom:5px">📋 子任務（${personSubs.filter(s=>s.done).length}/${personSubs.length} 完成）</div>
+              <div style="display:flex;flex-direction:column;gap:4px">${personSubs.map(_renderSubBadge).join('')}</div>
+            </div>`;
+          return `<div>${_jnlCard(log)}${subHtml}</div>`;
+        }).join('')}
+        ${missing.map(p => {
+          const personSubs = getPersonSubs(p.id);
+          const subHtml = personSubs.length === 0 ? '' : `
+            <div style="margin-top:10px;padding-top:8px;border-top:1px solid var(--border)">
+              <div style="font-size:11px;font-weight:600;color:var(--accent-dark);margin-bottom:5px">📋 子任務（${personSubs.filter(s=>s.done).length}/${personSubs.length} 完成）</div>
+              <div style="display:flex;flex-direction:column;gap:4px">${personSubs.map(_renderSubBadge).join('')}</div>
+            </div>`;
+          return `<div class="card" style="border-left:4px solid var(--border);opacity:.7">
+            <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
+            <div style="font-size:12px;color:var(--muted);margin-top:4px">尚未填寫日誌</div>
+            ${subHtml}
+          </div>`;
+        }).join('')}
       </div>`;
   };
 
