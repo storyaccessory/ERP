@@ -16713,7 +16713,7 @@ window.modalAddBooking = async function(defaultDate = '', defaultSlot = '') {
       <div class="form-group"><label>接待人員</label>
         <select class="form-control" id="bk-staff">
           <option value="">— 未指定 —</option>
-          ${(state.data.users||[]).map(u=>`<option value="${u.id}">${u.name}</option>`).join('')}
+          ${(()=>{ const defId=(state.data.users||[]).find(u=>u.name==='陳秋惠')?.id||''; return (state.data.users||[]).map(u=>`<option value="${u.id}" ${u.id===defId?'selected':''}>${u.name}</option>`).join(''); })()}
         </select>
       </div>
     </div>
@@ -17042,7 +17042,7 @@ window.modalEditBooking = async function(bookingId) {
       <div class="form-group"><label>接待人員</label>
         <select class="form-control" id="eb-staff">
           <option value="">— 未指定 —</option>
-          ${(state.data.users||[]).map(u=>`<option value="${u.id}" ${u.id===b.staff_id?'selected':''}>${u.name}</option>`).join('')}
+          ${(()=>{ const defId=b.staff_id||(state.data.users||[]).find(u=>u.name==='陳秋惠')?.id||''; return (state.data.users||[]).map(u=>`<option value="${u.id}" ${u.id===defId?'selected':''}>${u.name}</option>`).join(''); })()}
         </select>
       </div>
     </div>
@@ -17085,7 +17085,18 @@ window.showCannedMessage = function(bookingId) {
   const dt2 = new Date((b.booking_date||'2000-01-01') + 'T00:00:00');
   const dateStr2 = `${dt2.getMonth()+1}/${dt2.getDate()} (週${DAY_ZH2[dt2.getDay()]})`;
 
-  const msg = `${b.customer_name||''} 您好😊～感謝您的預約，為您保留以下體驗時段，請確認：
+  const isPickup = b.source === '門市取貨';
+  const msg = isPickup
+    ? `${b.customer_name||''} 您好😊～感謝您的預約，為您保留以下時段，請確認：
+
+📅 日期：${dateStr2}
+⏰ 時間：${b.time_slot} ～ ${slotE}（共30分鐘）
+👥 人數：${b.attendees||1} 人
+📍 地址：台北市中山北路二段102號10樓${b.request ? `\n\n🛍 取貨訂單編號：${b.request}\n我們會提前為您準備，請確認商品資訊是否正確 ✔️` : ''}
+
+體驗店注意事項：
+📌 如因有事不克前來，請務必提前告知，謝謝您的配合 ❤️`
+    : `${b.customer_name||''} 您好😊～感謝您的預約，為您保留以下體驗時段，請確認：
 
 📅 日期：${dateStr2}
 ⏰ 時間：${b.time_slot} ～ ${slotE}（共30分鐘）
@@ -19433,7 +19444,7 @@ async function modalCalEvent(existing=null) {
         const btnStyle = `font-size:11px;padding:3px 10px;border-radius:12px;border:1px solid var(--border);background:#fff;cursor:pointer;font-weight:600;color:var(--text);white-space:nowrap`;
         const deptBtns = depts.map(dept => {
           const ids = JSON.stringify(users.filter(u=>u.department===dept).map(u=>u.id));
-          return `<button type="button" style="${btnStyle}" onclick="window._calToggleGroup(${ids})">${dept}</button>`;
+          return `<button type="button" style="${btnStyle}" onclick="window._calToggleGroup('${ids.replace(/'/g,"\\'")}')">${dept}</button>`;
         }).join('');
         return `<div style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:6px">
           <button type="button" style="${btnStyle};color:var(--accent);border-color:var(--accent)" onclick="window._calSelectAll()">全選</button>
@@ -19777,6 +19788,7 @@ window.modalCalEvent = modalCalEvent;
 
 // 行事曆群組 toggle：全部已勾 → 取消；否則 → 全勾（不動其他人）
 window._calToggleGroup = function(ids) {
+  if (typeof ids === 'string') { try { ids = JSON.parse(ids); } catch(e) { return; } }
   const allChecked = ids.every(id => document.getElementById('cal-u-'+id)?.checked);
   ids.forEach(id => {
     const cb = document.getElementById('cal-u-'+id);
