@@ -20454,6 +20454,13 @@ function bindLoginEvents() {
 }
 
 function bindEvents() {
+  // 防止 number input 在滾輪時改變數值
+  document.addEventListener('wheel', function() {
+    if (document.activeElement && document.activeElement.type === 'number') {
+      document.activeElement.blur();
+    }
+  }, { passive: true });
+
   // Sidebar nav
   document.querySelectorAll('[data-page]').forEach(el => {
     el.onclick = async () => {
