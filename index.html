@@ -17054,7 +17054,7 @@ window.modalEditBooking = async function(bookingId) {
     b = data;
   }
   const STATUS_OPTS = ['待確認','已確認','已取消'];
-  const initPickup = isPickup;
+  const initPickup = b.source === '門市取貨';
   showModal('✏️ 編輯預約', `
     <!-- 類型切換 -->
     <div style="margin-bottom:14px">
