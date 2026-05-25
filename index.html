@@ -19766,6 +19766,7 @@ async function modalCalEvent(existing=null) {
           const subs = Array.isArray(existing?.subtasks) ? existing.subtasks : [];
           return subs.map((s, i) => `
             <div style="display:flex;gap:6px;align-items:center;padding:4px 6px;border-radius:6px;background:${s.done?'#f1f8e9':'#fafafa'};border:1px solid ${s.done?'#c8e6c9':'var(--border)'}" id="cal-sub-row-${i}">
+              <span class="cal-sub-drag" title="拖曳排序" style="cursor:grab;color:#bbb;font-size:15px;flex-shrink:0;user-select:none;padding:0 1px;line-height:1">⠿</span>
               <input type="checkbox" id="cal-sub-done-${i}" ${s.done?'checked':''}
                 onchange="(function(el){var r=el.closest('[id^=cal-sub-row]');r.style.background=el.checked?'#f1f8e9':'#fafafa';r.style.borderColor=el.checked?'#c8e6c9':'var(--border)'})(this)"
                 style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--accent)" title="標記完成">
@@ -20050,6 +20051,9 @@ async function modalCalEvent(existing=null) {
     { label:'取消', onclick: closeModal },
   ]);
 
+  // 啟用子任務拖曳排序
+  window._bindCalSubtaskDrag();
+
   // 重新設定週期模式：自動展開週期設定區
   if (existing?._rebuildRecur) {
     setTimeout(() => {
@@ -20199,6 +20203,43 @@ window._calSubUseEventDate = function(id) {
   due.style.color = 'var(--text)';
 };
 
+// 子任務拖曳排序：用事件委派掛在容器上（可涵蓋動態新增的列）；只有按住握把 ⠿ 才能拖
+// 儲存時是依畫面上列的順序讀取，所以拖曳重排 DOM 即等同重排順序
+window._bindCalSubtaskDrag = function() {
+  const container = document.getElementById('cal-subtask-list');
+  if (!container || container._dragBound) return;
+  container._dragBound = true;
+  let dragRow = null;
+  const rowOf = el => el && el.closest && el.closest('[id^="cal-sub-row-"]');
+  container.addEventListener('mousedown', e => {
+    if (e.target.closest('.cal-sub-drag')) { const r = rowOf(e.target); if (r) r.draggable = true; }
+  });
+  const clearDraggable = () => container.querySelectorAll('[id^="cal-sub-row-"]').forEach(r => { r.draggable = false; });
+  container.addEventListener('mouseup', clearDraggable);
+  container.addEventListener('dragstart', e => {
+    const r = rowOf(e.target);
+    if (!r || !r.draggable) { e.preventDefault(); return; }
+    dragRow = r; r.style.opacity = '0.4';
+    if (e.dataTransfer) e.dataTransfer.effectAllowed = 'move';
+  });
+  container.addEventListener('dragend', () => {
+    if (dragRow) dragRow.style.opacity = '';
+    container.querySelectorAll('[id^="cal-sub-row-"]').forEach(r => { r.style.borderColor = ''; });
+    clearDraggable();
+    dragRow = null;
+  });
+  container.addEventListener('dragover', e => {
+    if (!dragRow) return;
+    e.preventDefault();
+    const target = rowOf(e.target);
+    if (!target || target === dragRow) return;
+    const rect = target.getBoundingClientRect();
+    const after = (e.clientY - rect.top) > rect.height / 2;
+    if (after) target.after(dragRow); else target.before(dragRow);
+  });
+  container.addEventListener('drop', e => { e.preventDefault(); });
+};
+
 window._calAddSubtask = function() {
   const list = document.getElementById('cal-subtask-list');
   if (!list) return;
@@ -20208,6 +20249,7 @@ window._calAddSubtask = function() {
   row.id = `cal-sub-row-${i}`;
   row.style.cssText = 'display:flex;gap:6px;align-items:center;padding:4px 6px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
   row.innerHTML = `
+    <span class="cal-sub-drag" title="拖曳排序" style="cursor:grab;color:#bbb;font-size:15px;flex-shrink:0;user-select:none;padding:0 1px;line-height:1">⠿</span>
     <input type="checkbox" id="cal-sub-done-${i}"
       onchange="(function(el){var r=el.closest('[id^=\\'cal-sub-row\\']');r.style.background=el.checked?'#f1f8e9':'#fafafa';r.style.borderColor=el.checked?'#c8e6c9':'var(--border)'})(this)"
       style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--accent)" title="標記完成">
