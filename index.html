@@ -20301,8 +20301,13 @@ function _canEditCalEvent(ev) {
 }
 window._canEditCalEvent = _canEditCalEvent;
 
-window.calViewEvent = function(id) {
-  const ev = (state.data.calEvents||[]).find(e=>e.id===id);
+window.calViewEvent = async function(id) {
+  let ev = (state.data.calEvents||[]).find(e=>e.id===id);
+  if (!ev) {
+    // 首頁待辦等情境下 calEvents 尚未載入此事項，直接從資料庫補抓完整資料
+    const { data } = await db.from('calendar_events').select('*').eq('id', id).single();
+    ev = data;
+  }
   if (!ev) return;
   const canEdit = _canEditCalEvent(ev);
   const t = getCalEventTypes()[ev.event_type]||getCalEventTypes().general||{label:'一般',color:'#90a4ae',bg:'#eceff1'};
