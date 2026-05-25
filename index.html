@@ -165,7 +165,7 @@ input[type=number] { -moz-appearance: textfield; }
 @media (max-width: 1100px) { .cards-4 { grid-template-columns: repeat(2,1fr); } }
 @media (max-width: 700px) { .cards-4,.cards-3 { grid-template-columns: repeat(2,1fr); } .cards-2 { grid-template-columns: repeat(2,1fr); } }
 /* 行事曆 layout */
-.cal-layout { display:grid; grid-template-columns:1fr 280px; gap:16px; align-items:start; width:100%; max-width:1280px; }   /* 上限避免寬螢幕每天格子過寬，窄視窗仍會縮放 */
+.cal-layout { display:grid; grid-template-columns:1fr 280px; gap:16px; align-items:start; width:100%; }   /* 寬度隨視窗縮放：螢幕大就變大、小就變小 */
 .cal-layout > div { min-width:0; }   /* 讓月曆欄能隨視窗縮放，不會把右側近期事項擠出畫面 */
 .cal-cell { min-height:140px; min-width:0; overflow:hidden; }
 .cal-cell-empty { min-height:140px; min-width:0; }
@@ -19908,9 +19908,9 @@ async function modalCalEvent(existing=null) {
       ]);
     }}] : []),
     { label: id ? '儲存' : '新增', primary: true, onclick: async () => {
-      // 權限防呆：編輯既有事項時，只有建立者或主管(蔡采玲)/管理員可儲存
+      // 權限防呆：新增不受限；修改既有事項一律需主管(蔡采玲)/管理員
       if (id && !_canEditCalEvent(existing)) {
-        showToast('此事項由他人建立，需主管 蔡采玲 審核才能修改', 'error');
+        showToast('修改既有事項需主管 蔡采玲 審核', 'error');
         return;
       }
       const title = document.getElementById('cal-title').value.trim();
@@ -20225,16 +20225,14 @@ window._calAddAttachRow = function() {
   row.querySelector(`#cal-att-url-${i}`)?.focus();
 };
 
-// 行事曆編輯權限：員工只能改自己建立的（created_by===自己）；主管蔡采玲、管理員、老闆帳號可改任何事項
+// 行事曆編輯權限：新增不受限；修改既有事項一律需主管審核
+// 只有主管蔡采玲、管理員、老闆帳號可修改既有事項，其他員工(含建立者本人)不可改既有事項
 function _canEditCalEvent(ev) {
   const me = effectiveProfile() || {};
-  const myId = effectiveUserId();
-  const isApprover = me.role === 'admin'
+  return me.role === 'admin'
     || me.email === 'cailing0516@gmail.com'
     || state.user?.email === 'cailing0516@gmail.com'
     || me.name === '蔡采玲';
-  if (isApprover) return true;
-  return !!ev && !!ev.created_by && ev.created_by === myId;
 }
 window._canEditCalEvent = _canEditCalEvent;
 
@@ -20360,8 +20358,7 @@ window.calViewEvent = function(id) {
     },
     { label: canEdit ? '編輯' : '🔒 需主管審核', onclick: () => {
         if (!canEdit) {
-          const _cn = (state.data.users||[]).find(u=>u.id===ev.created_by)?.name || '其他同仁';
-          showToast(`此事項由「${_cn}」建立，如需修改請洽主管 蔡采玲 審核`, 'error');
+          showToast('修改既有事項需主管 蔡采玲 審核（新增不受限）', 'error');
           return;
         }
         closeModal();
