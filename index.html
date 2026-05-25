@@ -165,7 +165,7 @@ input[type=number] { -moz-appearance: textfield; }
 @media (max-width: 1100px) { .cards-4 { grid-template-columns: repeat(2,1fr); } }
 @media (max-width: 700px) { .cards-4,.cards-3 { grid-template-columns: repeat(2,1fr); } .cards-2 { grid-template-columns: repeat(2,1fr); } }
 /* 行事曆 layout */
-.cal-layout { display:grid; grid-template-columns:1fr 280px; gap:16px; align-items:start; width:100%; }
+.cal-layout { display:grid; grid-template-columns:1fr 280px; gap:16px; align-items:start; width:100%; max-width:1280px; }   /* 上限避免寬螢幕每天格子過寬，窄視窗仍會縮放 */
 .cal-layout > div { min-width:0; }   /* 讓月曆欄能隨視窗縮放，不會把右側近期事項擠出畫面 */
 .cal-cell { min-height:140px; min-width:0; overflow:hidden; }
 .cal-cell-empty { min-height:140px; min-width:0; }
