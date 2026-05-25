@@ -19624,6 +19624,17 @@ async function modalCalEvent(existing=null) {
   const DAYS_ZH = ['日','一','二','三','四','五','六'];
   const WEEK_OPTS = ['第1個','第2個','第3個','第4個','最後一個'];
 
+  // 時間改用「時 / 分」下拉，避免部分裝置原生時間選擇器難以操作
+  const _stHM = (existing?.start_time||'').slice(0,5);
+  const _etHM = (existing?.end_time||'').slice(0,5);
+  const _hourOpts = (sel) => `<option value="">—</option>` +
+    Array.from({length:24},(_,h)=>String(h).padStart(2,'0')).map(h=>`<option value="${h}" ${sel===h?'selected':''}>${h}</option>`).join('');
+  const _minOpts = (sel) => {
+    let mins = ['00','05','10','15','20','25','30','35','40','45','50','55'];
+    if (sel && !mins.includes(sel)) { mins.push(sel); mins.sort(); }
+    return `<option value="">—</option>` + mins.map(m=>`<option value="${m}" ${sel===m?'selected':''}>${m}</option>`).join('');
+  };
+
   showModal(id ? '編輯行事曆事項' : '新增行事曆事項', `
     <div class="form-group">
       <label>標題 <span style="color:var(--danger)">*</span></label>
@@ -19658,11 +19669,19 @@ async function modalCalEvent(existing=null) {
       </div>
       <div class="form-group">
         <label>開始時間</label>
-        <input class="form-control" id="cal-start-time" type="time" value="${existing?.start_time||''}">
+        <div style="display:flex;align-items:center;gap:6px">
+          <select class="form-control" id="cal-start-hour">${_hourOpts(_stHM.slice(0,2))}</select>
+          <span style="color:var(--muted);font-weight:600">:</span>
+          <select class="form-control" id="cal-start-min">${_minOpts(_stHM.slice(3,5))}</select>
+        </div>
       </div>
       <div class="form-group">
         <label>結束時間</label>
-        <input class="form-control" id="cal-end-time" type="time" value="${existing?.end_time||''}">
+        <div style="display:flex;align-items:center;gap:6px">
+          <select class="form-control" id="cal-end-hour">${_hourOpts(_etHM.slice(0,2))}</select>
+          <span style="color:var(--muted);font-weight:600">:</span>
+          <select class="form-control" id="cal-end-min">${_minOpts(_etHM.slice(3,5))}</select>
+        </div>
       </div>
     </div>
 
@@ -19923,8 +19942,12 @@ async function modalCalEvent(existing=null) {
       const assignedTo = assigneeIds[0] || null; // 向下相容舊欄位
 
       const endDate = document.getElementById('cal-end')?.value || startDate;
-      const startTime = document.getElementById('cal-start-time')?.value || null;
-      const endTime   = document.getElementById('cal-end-time')?.value || null;
+      const _shv = document.getElementById('cal-start-hour')?.value || '';
+      const _smv = document.getElementById('cal-start-min')?.value || '';
+      const startTime = _shv ? `${_shv}:${_smv||'00'}` : null;
+      const _ehv = document.getElementById('cal-end-hour')?.value || '';
+      const _emv = document.getElementById('cal-end-min')?.value || '';
+      const endTime   = _ehv ? `${_ehv}:${_emv||'00'}` : null;
       const completedEl = document.getElementById('cal-completed');
       const completedAt = completedEl
         ? (completedEl.checked ? (existing?.completed_at || new Date().toISOString()) : null)
