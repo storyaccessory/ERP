@@ -7392,6 +7392,12 @@ function renderCS() {
 
   const statusColor = { '未回覆':'tag-red','處理中':'tag-orange','已回覆':'tag-blue','已結案':'tag-grey' };
   const platformColor = { 'Instagram DM':'tag-purple','LINE':'tag-green','蝦皮':'tag-orange','PINKOI':'tag-blue','官網-聯絡表單':'tag-teal','官網-信箱':'tag-teal','官網-聊天':'tag-teal','門市':'tag-grey' };
+  // 主管/管理員可刪除
+  const _ep = effectiveProfile() || {};
+  const isAdmin = ['admin','manager','management'].includes(_ep.role)
+    || _ep.email === 'cailing0516@gmail.com'
+    || state.user?.email === 'cailing0516@gmail.com'
+    || _ep.name === '蔡采玲';
 
   return `
     <div class="tabs">
@@ -7426,11 +7432,15 @@ function renderCS() {
               const logBadge = log.length > 0
                 ? `<span style="font-size:10px;color:var(--muted);margin-left:6px;white-space:nowrap" title="處理進度 ${log.length} 則">📋 ${log.length}</span>`
                 : '';
+              const stepCount = Array.isArray(r.handling_steps) ? r.handling_steps.length : 0;
+              const stepBadge = stepCount > 0
+                ? `<span style="font-size:10px;color:var(--muted);margin-left:6px;white-space:nowrap" title="處理階段 ${stepCount} 段">🛠 ${stepCount}</span>`
+                : '';
               return `<tr>
               <td><span class="tag ${r.record_type==='經銷商問題'?'tag-purple':'tag-blue'}">${r.record_type==='經銷商問題'?'經銷商':'一般'}</span></td>
               <td>${r.platform?`<span class="tag ${platformColor[r.platform]||'tag-grey'}">${r.platform}</span>`:'—'}</td>
               <td>${r.dealer_name||r.customer_name||'—'}</td>
-              <td style="max-width:240px"><div style="display:flex;align-items:center;gap:0;flex-wrap:wrap"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">${r.issue_summary||''}</span>${subBadge}${logBadge}</div></td>
+              <td style="max-width:280px"><div style="display:flex;flex-direction:column;gap:2px;min-width:0">${r.subject?`<div style="font-weight:600;font-size:13px;color:#1a1a1a;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.subject}</div>`:''}<div style="display:flex;align-items:center;gap:0;flex-wrap:wrap;font-size:12px;color:${r.subject?'var(--muted)':'inherit'}"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:200px">${r.issue_summary||''}</span>${subBadge}${stepBadge}${logBadge}</div></div></td>
               <td>${r.deadline||'—'}</td>
               <td><span class="tag ${statusColor[r.reply_status]||'tag-grey'}">${r.reply_status}</span></td>
               <td>
@@ -7438,6 +7448,7 @@ function renderCS() {
                   <button class="btn-table" style="background:#e3f2fd;color:#1565c0" data-action="view-cs" data-id="${r.id}">詳細</button>
                   ${r.reply_status!=='已結案'?`<button class="btn-table" style="background:var(--accent-light);color:var(--accent-dark)" data-action="reply-cs" data-id="${r.id}">已回覆</button>`:''}
                   <button class="btn-table" data-action="close-cs" data-id="${r.id}">結案</button>
+                  ${isAdmin?`<button class="btn-table danger" data-action="delete-cs" data-id="${r.id}" data-summary="${(r.subject||r.issue_summary||'').replace(/"/g,'&quot;').slice(0,30)}">刪除</button>`:''}
                 </div>
               </td>
             </tr>`;}).join('')}
@@ -20838,6 +20849,7 @@ async function modalAddCS() {
         </select>
       </div>
     </div>
+    <div class="form-group"><label>主旨</label><input class="form-control" id="m-subject" placeholder="一句話標題,例:退換貨申請、商品破損反映"></div>
     <div class="form-row form-row-2">
       <div class="form-group"><label>客戶名稱</label><input class="form-control" id="m-customer" placeholder="客戶/經銷商名稱"></div>
       <div class="form-group"><label>截止日（Deadline）</label><input class="form-control" type="date" id="m-deadline"></div>
@@ -20849,6 +20861,12 @@ async function modalAddCS() {
       <div id="cs-subtask-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
       <button type="button" onclick="window._csAddSubtask()"
         style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增子任務</button>
+    </div>
+    <div class="form-group">
+      <label>🛠 處理方式 <span style="font-size:11px;color:var(--muted);font-weight:400">（每個處理階段都有自己的日期時間，建立後也可在「詳細」內加）</span></label>
+      <div id="cs-step-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+      <button type="button" onclick="window._csAddStep()"
+        style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增處理階段</button>
     </div>
   `, `
     <button class="btn btn-outline" onclick="document.getElementById('modal-overlay').remove()">取消</button>
@@ -20875,9 +20893,12 @@ async function modalAddCS() {
         due_date: document.getElementById(`cs-sub-due-${i}`)?.value || null,
       });
     });
+    const handling_steps = window._csCollectSteps();
+    const subject = document.getElementById('m-subject')?.value.trim() || null;
     const { error } = await db.from('cs_records').insert({
       record_type: type,
       platform: document.getElementById('m-platform').value,
+      subject,
       customer_name: type === '一般客服' ? customer : null,
       dealer_name: type === '經銷商問題' ? customer : null,
       issue_summary: summary,
@@ -20885,6 +20906,7 @@ async function modalAddCS() {
       deadline: document.getElementById('m-deadline').value || null,
       subtasks: subtasks.length ? subtasks : [],
       progress_log: [],
+      handling_steps,
       created_by: state.user?.id,
     });
     if (error) { showToast('儲存失敗：'+error.message, 'error'); return; }
@@ -20902,8 +20924,9 @@ async function modalEditCS(id) {
     const { data: uData } = await db.from('profiles').select('id, name').order('name');
     state.data.users = uData || [];
   }
-  const subs = Array.isArray(record.subtasks) ? record.subtasks : [];
-  const log  = Array.isArray(record.progress_log) ? record.progress_log : [];
+  const subs  = Array.isArray(record.subtasks) ? record.subtasks : [];
+  const log   = Array.isArray(record.progress_log) ? record.progress_log : [];
+  const steps = Array.isArray(record.handling_steps) ? record.handling_steps : [];
   const platforms = ['Instagram DM','LINE','蝦皮','PINKOI','官網-聯絡表單','官網-信箱','官網-聊天','門市'];
   const escHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -20920,6 +20943,9 @@ async function modalEditCS(id) {
           ${platforms.map(p => `<option ${record.platform===p?'selected':''}>${p}</option>`).join('')}
         </select>
       </div>
+    </div>
+    <div class="form-group"><label>主旨</label>
+      <input class="form-control" id="m-subject" value="${(record.subject||'').replace(/"/g,'&quot;')}" placeholder="一句話標題">
     </div>
     <div class="form-row form-row-2">
       <div class="form-group"><label>客戶名稱</label>
@@ -20942,6 +20968,12 @@ async function modalEditCS(id) {
         style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增子任務</button>
     </div>
     <div class="form-group">
+      <label>🛠 處理方式 <span style="font-size:11px;color:var(--muted);font-weight:400">（每個處理階段都有自己的日期時間，依時間順序排）</span></label>
+      <div id="cs-step-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+      <button type="button" onclick="window._csAddStep()"
+        style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增處理階段</button>
+    </div>
+    <div class="form-group">
       <label>📋 處理進度回報</label>
       <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#fafafa;max-height:180px;overflow-y:auto">
         ${log.length === 0
@@ -20961,8 +20993,9 @@ async function modalEditCS(id) {
     <button class="btn btn-primary" id="save-cs-edit-btn">儲存</button>
   `);
 
-  // 預填既有子任務
+  // 預填既有子任務與處理階段
   subs.forEach(s => window._csAddSubtask(s));
+  steps.forEach(s => window._csAddStep(s));
 
   document.getElementById('save-cs-edit-btn').onclick = async () => {
     const summary = document.getElementById('m-summary').value.trim();
@@ -20993,9 +21026,12 @@ async function modalEditCS(id) {
         note: newProgress,
       });
     }
+    const handling_steps = window._csCollectSteps();
+    const subject = document.getElementById('m-subject')?.value.trim() || null;
     const { error } = await db.from('cs_records').update({
       record_type: type,
       platform: document.getElementById('m-platform').value,
+      subject,
       customer_name: type === '一般客服' ? customer : null,
       dealer_name: type === '經銷商問題' ? customer : null,
       issue_summary: summary,
@@ -21003,6 +21039,7 @@ async function modalEditCS(id) {
       deadline: document.getElementById('m-deadline').value || null,
       subtasks,
       progress_log,
+      handling_steps,
     }).eq('id', id);
     if (error) { showToast('儲存失敗：'+error.message, 'error'); return; }
     showToast('已更新！');
@@ -21011,6 +21048,53 @@ async function modalEditCS(id) {
   };
 }
 window.modalEditCS = modalEditCS;
+
+// 處理階段列共用渲染(modalAddCS / modalEditCS 共用):每階段有日期時間 + 處理內容
+window._csAddStep = function(prefill) {
+  const list = document.getElementById('cs-step-list');
+  if (!list) return;
+  const i = '_' + Date.now() + Math.floor(Math.random()*1000);
+  const p = prefill || {};
+  // 預設帶當下時間(YYYY-MM-DDTHH:MM,給 datetime-local 用)
+  let defaultDt;
+  if (p.datetime) {
+    const d = new Date(p.datetime);
+    defaultDt = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}T${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+  } else {
+    const n = new Date();
+    defaultDt = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}T${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
+  }
+  const row = document.createElement('div');
+  row.id = `cs-step-row-${i}`;
+  row.style.cssText = 'display:flex;gap:6px;align-items:center;padding:6px 8px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
+  row.innerHTML = `
+    <input type="datetime-local" id="cs-step-time-${i}" value="${defaultDt}"
+      style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:170px;background:#fff;color:var(--text)">
+    <input class="form-control" id="cs-step-desc-${i}" value="${(p.description||'').replace(/"/g,'&quot;')}" placeholder="處理內容,例:通知客戶寄回商品"
+      style="flex:1;font-size:13px">
+    <button type="button" onclick="this.closest('[id^=\\'cs-step-row\\']').remove()"
+      style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除">×</button>
+  `;
+  list.appendChild(row);
+};
+
+// 收集畫面上的處理階段(modalAddCS / modalEditCS 共用)
+window._csCollectSteps = function() {
+  const steps = [];
+  document.querySelectorAll('#cs-step-list [id^="cs-step-row-"]').forEach(row => {
+    const i = row.id.replace('cs-step-row-','');
+    const desc = document.getElementById(`cs-step-desc-${i}`)?.value.trim() || '';
+    if (!desc) return;
+    const dtVal = document.getElementById(`cs-step-time-${i}`)?.value || '';
+    steps.push({
+      id: 'step_'+Math.random().toString(36).slice(2,10),
+      datetime: dtVal ? new Date(dtVal).toISOString() : new Date().toISOString(),
+      description: desc,
+    });
+  });
+  steps.sort((a,b) => (a.datetime||'').localeCompare(b.datetime||''));
+  return steps;
+};
 
 // 子任務列共用渲染(modalAddCS / modalEditCS 共用)
 window._csAddSubtask = function(prefill) {
@@ -22012,6 +22096,22 @@ async function handleAction(action, id, dataset) {
       showToast('已結案');
       await loadCS(); renderApp();
       break;
+
+    case 'delete-cs': {
+      const _ep = effectiveProfile() || {};
+      const _isAdmin = ['admin','manager','management'].includes(_ep.role)
+        || _ep.email === 'cailing0516@gmail.com'
+        || state.user?.email === 'cailing0516@gmail.com'
+        || _ep.name === '蔡采玲';
+      if (!_isAdmin) { showToast('只有主管/管理員可以刪除客服記錄', 'error'); return; }
+      const summary = el.dataset.summary || '';
+      if (!confirm(`確定要刪除這筆客服記錄?\n${summary?`「${summary}」\n`:''}刪除後不可復原。`)) return;
+      const { error } = await db.from('cs_records').delete().eq('id', id);
+      if (error) { showToast('刪除失敗:'+error.message, 'error'); return; }
+      showToast('已刪除');
+      await loadCS(); renderApp();
+      break;
+    }
 
     case 'approve-request':
       await approveRequest(id);
