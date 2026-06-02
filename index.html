@@ -7422,20 +7422,31 @@ function renderCS() {
           </tr></thead>
           <tbody>
           ${filtered.length === 0 ? `<tr><td colspan="7"><div class="empty"><div class="empty-icon">💬</div><p>尚無記錄</p></div></td></tr>` :
-            filtered.map(r => `<tr>
+            filtered.map(r => {
+              const subs = Array.isArray(r.subtasks) ? r.subtasks : [];
+              const doneCount = subs.filter(s=>s.done).length;
+              const subBadge = subs.length > 0
+                ? `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:${doneCount===subs.length?'#e8f5e9':'#fff3e0'};color:${doneCount===subs.length?'#2e7d32':'#e65100'};font-weight:600;margin-left:6px;white-space:nowrap">✓${doneCount}/${subs.length}</span>`
+                : '';
+              const log = Array.isArray(r.progress_log) ? r.progress_log : [];
+              const logBadge = log.length > 0
+                ? `<span style="font-size:10px;color:var(--muted);margin-left:6px;white-space:nowrap" title="處理進度 ${log.length} 則">📋 ${log.length}</span>`
+                : '';
+              return `<tr>
               <td><span class="tag ${r.record_type==='經銷商問題'?'tag-purple':'tag-blue'}">${r.record_type==='經銷商問題'?'經銷商':'一般'}</span></td>
               <td>${r.platform?`<span class="tag ${platformColor[r.platform]||'tag-grey'}">${r.platform}</span>`:'—'}</td>
               <td>${r.dealer_name||r.customer_name||'—'}</td>
-              <td style="max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${r.issue_summary}</td>
+              <td style="max-width:240px"><div style="display:flex;align-items:center;gap:0;flex-wrap:wrap"><span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px">${r.issue_summary||''}</span>${subBadge}${logBadge}</div></td>
               <td>${r.deadline||'—'}</td>
               <td><span class="tag ${statusColor[r.reply_status]||'tag-grey'}">${r.reply_status}</span></td>
               <td>
                 <div class="action-btns">
+                  <button class="btn-table" style="background:#e3f2fd;color:#1565c0" data-action="view-cs" data-id="${r.id}">詳細</button>
                   ${r.reply_status!=='已結案'?`<button class="btn-table" style="background:var(--accent-light);color:var(--accent-dark)" data-action="reply-cs" data-id="${r.id}">已回覆</button>`:''}
                   <button class="btn-table" data-action="close-cs" data-id="${r.id}">結案</button>
                 </div>
               </td>
-            </tr>`).join('')}
+            </tr>`;}).join('')}
           </tbody>
         </table>
       </div>
@@ -20815,7 +20826,12 @@ function modalAddTodo(existing = null) {
   };
 }
 
-function modalAddCS() {
+async function modalAddCS() {
+  // 確保人員資料已載入(子任務指派負責人需要)
+  if (!state.data.users?.length) {
+    const { data: uData } = await db.from('profiles').select('id, name').order('name');
+    state.data.users = uData || [];
+  }
   showModal('新增客服記錄', `
     <div class="form-row form-row-2">
       <div class="form-group"><label>記錄類型</label>
@@ -20836,6 +20852,12 @@ function modalAddCS() {
     </div>
     <div class="form-group"><label>問題摘要 *</label><textarea class="form-control" id="m-summary" rows="3" placeholder="說明客服內容、問題描述…"></textarea></div>
     <div class="form-group"><label>標籤（用逗號分隔）</label><input class="form-control" id="m-tags" placeholder="例：退換貨, 尺寸詢問, 庫存"></div>
+    <div class="form-group">
+      <label>子任務 <span style="font-size:11px;color:var(--muted);font-weight:400">（可指派負責人和截止日，建立後也可在「詳細」內調整）</span></label>
+      <div id="cs-subtask-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+      <button type="button" onclick="window._csAddSubtask()"
+        style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增子任務</button>
+    </div>
   `, `
     <button class="btn btn-outline" onclick="document.getElementById('modal-overlay').remove()">取消</button>
     <button class="btn btn-primary" id="save-cs-btn">儲存</button>
@@ -20847,6 +20869,20 @@ function modalAddCS() {
     const tags = document.getElementById('m-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
     const type = document.getElementById('m-cs-type').value;
     const customer = document.getElementById('m-customer').value;
+    // 收集子任務(依畫面順序)
+    const subtasks = [];
+    document.querySelectorAll('#cs-subtask-list [id^="cs-sub-row-"]').forEach(row => {
+      const i = row.id.replace('cs-sub-row-','');
+      const text = document.getElementById(`cs-sub-text-${i}`)?.value.trim() || '';
+      if (!text) return;
+      subtasks.push({
+        id: 'sub_'+Math.random().toString(36).slice(2,10),
+        text,
+        done: document.getElementById(`cs-sub-done-${i}`)?.checked || false,
+        assignee_id: document.getElementById(`cs-sub-who-${i}`)?.value || null,
+        due_date: document.getElementById(`cs-sub-due-${i}`)?.value || null,
+      });
+    });
     const { error } = await db.from('cs_records').insert({
       record_type: type,
       platform: document.getElementById('m-platform').value,
@@ -20855,14 +20891,162 @@ function modalAddCS() {
       issue_summary: summary,
       issue_tags: tags.length ? tags : null,
       deadline: document.getElementById('m-deadline').value || null,
+      subtasks: subtasks.length ? subtasks : [],
+      progress_log: [],
       created_by: state.user?.id,
     });
-    if (error) { showToast('儲存失敗', 'error'); return; }
+    if (error) { showToast('儲存失敗：'+error.message, 'error'); return; }
     showToast('客服記錄已新增！');
     document.getElementById('modal-overlay')?.remove();
     await loadCS(); renderApp();
   };
 }
+
+// 客服記錄詳細視窗:可改基本資料 + 管理子任務 + 回報處理進度
+async function modalEditCS(id) {
+  const record = (state.data.cs||[]).find(r => r.id === id);
+  if (!record) { showToast('找不到記錄', 'error'); return; }
+  if (!state.data.users?.length) {
+    const { data: uData } = await db.from('profiles').select('id, name').order('name');
+    state.data.users = uData || [];
+  }
+  const subs = Array.isArray(record.subtasks) ? record.subtasks : [];
+  const log  = Array.isArray(record.progress_log) ? record.progress_log : [];
+  const platforms = ['Instagram DM','LINE','蝦皮','PINKOI','官網-聯絡表單','官網-信箱','官網-聊天','門市'];
+  const escHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  showModal('編輯客服記錄', `
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>記錄類型</label>
+        <select class="form-control" id="m-cs-type">
+          <option ${record.record_type==='一般客服'?'selected':''}>一般客服</option>
+          <option ${record.record_type==='經銷商問題'?'selected':''}>經銷商問題</option>
+        </select>
+      </div>
+      <div class="form-group"><label>平台</label>
+        <select class="form-control" id="m-platform">
+          ${platforms.map(p => `<option ${record.platform===p?'selected':''}>${p}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>客戶名稱</label>
+        <input class="form-control" id="m-customer" value="${(record.dealer_name||record.customer_name||'').replace(/"/g,'&quot;')}" placeholder="客戶/經銷商名稱">
+      </div>
+      <div class="form-group"><label>截止日（Deadline）</label>
+        <input class="form-control" type="date" id="m-deadline" value="${record.deadline||''}">
+      </div>
+    </div>
+    <div class="form-group"><label>問題摘要 *</label>
+      <textarea class="form-control" id="m-summary" rows="3">${escHtml(record.issue_summary)}</textarea>
+    </div>
+    <div class="form-group"><label>標籤（用逗號分隔）</label>
+      <input class="form-control" id="m-tags" value="${(Array.isArray(record.issue_tags)?record.issue_tags.join(', '):'').replace(/"/g,'&quot;')}" placeholder="例：退換貨, 尺寸詢問, 庫存">
+    </div>
+    <div class="form-group">
+      <label>子任務 <span style="font-size:11px;color:var(--muted);font-weight:400">（${subs.filter(s=>s.done).length}/${subs.length} 完成；可指派負責人與截止日）</span></label>
+      <div id="cs-subtask-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
+      <button type="button" onclick="window._csAddSubtask()"
+        style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增子任務</button>
+    </div>
+    <div class="form-group">
+      <label>📋 處理進度回報</label>
+      <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#fafafa;max-height:180px;overflow-y:auto">
+        ${log.length === 0
+          ? '<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">尚無進度紀錄</div>'
+          : log.slice().reverse().map(p => `
+            <div style="padding:6px 0;border-bottom:1px solid #eee">
+              <div style="font-size:11px;color:var(--muted)">${new Date(p.timestamp).toLocaleString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${escHtml(p.user_name||'—')}</div>
+              <div style="font-size:13px;margin-top:2px;white-space:pre-wrap">${escHtml(p.note||'')}</div>
+            </div>`).join('')
+        }
+      </div>
+      <textarea class="form-control" id="cs-progress-new" rows="2" placeholder="回報處理進度，例：已聯繫客戶確認規格、廠商回信報價、預計X日結案…" style="margin-top:6px;font-size:13px"></textarea>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">送出儲存時，這條進度會自動加上時間與你的名字</div>
+    </div>
+  `, `
+    <button class="btn btn-outline" onclick="document.getElementById('modal-overlay').remove()">取消</button>
+    <button class="btn btn-primary" id="save-cs-edit-btn">儲存</button>
+  `);
+
+  // 預填既有子任務
+  subs.forEach(s => window._csAddSubtask(s));
+
+  document.getElementById('save-cs-edit-btn').onclick = async () => {
+    const summary = document.getElementById('m-summary').value.trim();
+    if (!summary) { showToast('請填寫問題摘要', 'error'); return; }
+    const tags = document.getElementById('m-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
+    const type = document.getElementById('m-cs-type').value;
+    const customer = document.getElementById('m-customer').value;
+    const subtasks = [];
+    document.querySelectorAll('#cs-subtask-list [id^="cs-sub-row-"]').forEach(row => {
+      const i = row.id.replace('cs-sub-row-','');
+      const text = document.getElementById(`cs-sub-text-${i}`)?.value.trim() || '';
+      if (!text) return;
+      subtasks.push({
+        id: 'sub_'+Math.random().toString(36).slice(2,10),
+        text,
+        done: document.getElementById(`cs-sub-done-${i}`)?.checked || false,
+        assignee_id: document.getElementById(`cs-sub-who-${i}`)?.value || null,
+        due_date: document.getElementById(`cs-sub-due-${i}`)?.value || null,
+      });
+    });
+    const newProgress = document.getElementById('cs-progress-new').value.trim();
+    const progress_log = log.slice();
+    if (newProgress) {
+      progress_log.push({
+        timestamp: new Date().toISOString(),
+        user_id: state.user?.id,
+        user_name: state.profile?.name || state.user?.email || '—',
+        note: newProgress,
+      });
+    }
+    const { error } = await db.from('cs_records').update({
+      record_type: type,
+      platform: document.getElementById('m-platform').value,
+      customer_name: type === '一般客服' ? customer : null,
+      dealer_name: type === '經銷商問題' ? customer : null,
+      issue_summary: summary,
+      issue_tags: tags.length ? tags : null,
+      deadline: document.getElementById('m-deadline').value || null,
+      subtasks,
+      progress_log,
+    }).eq('id', id);
+    if (error) { showToast('儲存失敗：'+error.message, 'error'); return; }
+    showToast('已更新！');
+    document.getElementById('modal-overlay')?.remove();
+    await loadCS(); renderApp();
+  };
+}
+window.modalEditCS = modalEditCS;
+
+// 子任務列共用渲染(modalAddCS / modalEditCS 共用)
+window._csAddSubtask = function(prefill) {
+  const list = document.getElementById('cs-subtask-list');
+  if (!list) return;
+  const i = '_' + Date.now() + Math.floor(Math.random()*1000);
+  const users = state.data.users || [];
+  const p = prefill || {};
+  const row = document.createElement('div');
+  row.id = `cs-sub-row-${i}`;
+  row.style.cssText = `display:flex;gap:6px;align-items:center;padding:4px 6px;border-radius:6px;background:${p.done?'#f1f8e9':'#fafafa'};border:1px solid ${p.done?'#c8e6c9':'var(--border)'}`;
+  row.innerHTML = `
+    <input type="checkbox" id="cs-sub-done-${i}" ${p.done?'checked':''}
+      onchange="(function(el){var r=el.closest('[id^=\\'cs-sub-row\\']');r.style.background=el.checked?'#f1f8e9':'#fafafa';r.style.borderColor=el.checked?'#c8e6c9':'var(--border)'})(this)"
+      style="width:16px;height:16px;cursor:pointer;flex-shrink:0;accent-color:var(--accent)" title="標記完成">
+    <input class="form-control" id="cs-sub-text-${i}" value="${(p.text||'').replace(/"/g,'&quot;')}" placeholder="任務描述"
+      style="flex:1;font-size:13px;${p.done?'text-decoration:line-through;color:var(--muted)':''}">
+    <select id="cs-sub-who-${i}" style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;min-width:80px;max-width:120px;background:#fff">
+      <option value="">— 負責人 —</option>
+      ${users.map(u=>`<option value="${u.id}" ${p.assignee_id===u.id?'selected':''}>${u.name}</option>`).join('')}
+    </select>
+    <input type="date" id="cs-sub-due-${i}" value="${p.due_date||''}" title="截止日期"
+      style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:130px;background:#fff;color:${p.due_date?'var(--text)':'var(--muted)'}">
+    <button type="button" onclick="this.closest('[id^=\\'cs-sub-row\\']').remove()"
+      style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除">×</button>
+  `;
+  list.appendChild(row);
+};
 
 // ═══════════════════════════════════════════
 // Utility
@@ -21819,6 +22003,10 @@ async function handleAction(action, id, dataset) {
       await db.from('todos').delete().eq('id', id);
       showToast('待辦事項已刪除');
       await loadTodos(); renderApp();
+      break;
+
+    case 'view-cs':
+      await modalEditCS(id);
       break;
 
     case 'reply-cs':
