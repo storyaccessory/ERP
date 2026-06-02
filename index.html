@@ -7987,7 +7987,9 @@ function renderAccounting() {
   const thisYm = now2.getFullYear().toString() + String(now2.getMonth()+1).padStart(2,'0');
   const prevYm = (() => { const d = new Date(now2.getFullYear(), now2.getMonth()-1, 1); return d.getFullYear().toString() + String(d.getMonth()+1).padStart(2,'0'); })();
   // acctYmMode: 'this'=本月 'prev'=前月 'all'=全部 'pick'=自選月份
-  const ymMode = state.data._acctYmMode || 'this';
+  // 預設:每月 10 號前進來顯示前月(讓會計對上個月帳),10 號(含)後顯示當月
+  const _defaultYmMode = now2.getDate() < 10 ? 'prev' : 'this';
+  const ymMode = state.data._acctYmMode || _defaultYmMode;
   const selectedYm = ymMode === 'this' ? thisYm : ymMode === 'prev' ? prevYm : ymMode === 'all' ? '' : (ym || thisYm);
   const savedF = state.data._apFilter || {};
   const filterVendor = savedF.vendor || '';
