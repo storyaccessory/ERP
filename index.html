@@ -8313,12 +8313,38 @@ function renderAccounting() {
         </div>
       </div>
       <div class="card acct-tab-summary">
-        <div style="font-weight:600;margin-bottom:12px;font-size:13px">員工統計</div>
-        ${Object.entries(empAdvSummary).map(([name, total]) => `
-          <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
-            <span style="font-size:13px">${name}</span>
-            <span style="font-weight:700;color:var(--accent)">$${total.toLocaleString()}</span>
-          </div>`).join('')}
+        <div style="font-weight:600;margin-bottom:4px;font-size:13px">員工統計</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">沒申請代墊也會列出 $0</div>
+        ${(() => {
+          // 同餐費邏輯:名單來源 profiles + 餐費預算 localStorage;預算為 0 者不列入
+          const _budgetsRaw = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
+          const _empNoByName = {};
+          (state.data.users||[]).forEach(u => { if (u.name) _empNoByName[u.name] = u.employee_no || null; });
+          const _allNames = Array.from(new Set([
+            ...((state.data.users||[]).map(u => u.name).filter(Boolean)),
+            ...Object.keys(_budgetsRaw),
+          ]));
+          const _rows = _allNames
+            .map(name => ({ name, employee_no: _empNoByName[name] || null, total: empAdvSummary[name] || 0 }))
+            .filter(r => getMealBudgetForEmployee(r.name) > 0)  // 沿用餐費預算判斷誰算「員工」
+            .sort((a,b) => {
+              // 員編只用來排序,不顯示;沒員編的放最後
+              const aHas = a.employee_no != null && a.employee_no !== '';
+              const bHas = b.employee_no != null && b.employee_no !== '';
+              if (aHas !== bHas) return aHas ? -1 : 1;
+              if (aHas && bHas) {
+                const cmp = String(a.employee_no).localeCompare(String(b.employee_no), 'zh-Hant', { numeric: true });
+                if (cmp !== 0) return cmp;
+              }
+              return a.name.localeCompare(b.name, 'zh-Hant');
+            });
+          if (_rows.length === 0) return '<div style="font-size:12px;color:var(--muted);padding:8px 0">無員工資料</div>';
+          return _rows.map(({ name, total }) => `
+            <div style="display:flex;justify-content:space-between;padding:6px 0;border-bottom:1px solid var(--border)">
+              <span style="font-size:13px">${name}</span>
+              <span style="font-weight:700;color:${total > 0 ? 'var(--accent)' : '#bbb'}">$${total.toLocaleString()}</span>
+            </div>`).join('');
+        })()}
         <div style="display:flex;justify-content:space-between;padding:8px 0;margin-top:4px">
           <span style="font-weight:600">合計</span>
           <span style="font-weight:700;color:var(--danger)">$${advanceTotal.toLocaleString()}</span>
@@ -16759,11 +16785,10 @@ function _renderBookingMonth(bd, today) {
             } else if (activeBookings.length > 0) {
               content = activeBookings.map(b => {
                 const isPickup = b.source === '門市取貨';
-                const typeTag = isPickup
-                  ? `<span style="color:#1565c0;font-weight:600">取貨</span>`
-                  : `<span style="color:#2e7d32;font-weight:600">鑑賞</span>`;
+                const typeTag = `<span style="font-weight:600">${isPickup?'取貨':'鑑賞'}</span>`;
                 const timeStr = b.time_slot ? b.time_slot.slice(0,5) : '--:--';
-                const sc = b.status==='已確認' ? '#2e7d32' : '#e65100';
+                // 取貨 → 整行藍字(無論狀態);鑑賞 → 依狀態色(已確認綠、待確認橘)
+                const sc = isPickup ? '#1565c0' : (b.status==='已確認' ? '#2e7d32' : '#e65100');
                 return `<div onclick="event.stopPropagation();window.modalViewBooking('${b.id}')"
                   style="font-size:10.5px;line-height:1.4;padding:2px 3px;margin-top:2px;background:${b.status==='已確認'?'#f0faf1':'#fffde7'};border-radius:3px;cursor:pointer;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:${sc}">
                   ${timeStr} ${typeTag} ${b.customer_name||'—'} ${b.phone||''}
