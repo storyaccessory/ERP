@@ -19452,6 +19452,14 @@ async function loadCalendarEvents() {
     .neq('source', '公休日');
   state.data.calBookings = bkData || [];
 
+  // 客服:本月有 deadline 的未結案記錄(疊加到行事曆)
+  const { data: csData } = await db.from('cs_records')
+    .select('id,subject,issue_summary,platform,deadline,reply_status,customer_name,dealer_name,created_by,subtasks')
+    .gte('deadline', firstOfMonth)
+    .lte('deadline', lastOfMonth)
+    .neq('reply_status', '已結案');
+  state.data.calCS = csData || [];
+
   // 近期事項：今天起未來 14 天（獨立於目前檢視月份，故另外撈一份）
   const upFrom = _localToday();
   const upTo = _localDateStr((() => { const d = new Date(upFrom+'T00:00:00'); d.setDate(d.getDate()+14); return d; })());
@@ -19483,6 +19491,7 @@ const CAL_EVENT_TYPES = {
   urgent:    { label:'緊急',   color:'#c62828', bg:'#ffebee' },
   goldsmith: { label:'金工',   color:'#558b2f', bg:'#f1f8e9' },
   meeting:   { label:'會議',   color:'#5e35b1', bg:'#ede7f6' },
+  cs:        { label:'客服',   color:'#0277bd', bg:'#e1f5fe' },
 };
 
 function renderCalendar() {
@@ -19511,6 +19520,17 @@ function renderCalendar() {
   // 體驗預約：切「我的」時，只顯示負責人（接待人員 staff_id）為自己的預約
   if (calFilter === 'mine') calBookings = calBookings.filter(b => b.staff_id === myId);
 
+  // 客服疊加層:套「我的」(建立者或子任務負責人) 與分類篩選(只在 cs/未指定 時顯示)
+  let calCS = state.data.calCS || [];
+  if (calFilter === 'mine') {
+    calCS = calCS.filter(c => {
+      if (c.created_by === myId) return true;
+      const subs = Array.isArray(c.subtasks) ? c.subtasks : [];
+      return subs.some(s => s.assignee_id === myId);
+    });
+  }
+  if (calTypeFilter && calTypeFilter !== 'cs') calCS = [];
+
   // build a map: dateStr → events[]
   const eventMap = {};
   events.forEach(ev => {
@@ -19531,18 +19551,28 @@ function renderCalendar() {
     if (!eventMap[ds]) eventMap[ds] = [];
     eventMap[ds].push({ _type:'booking', b });
   });
+  // Overlay 客服(以 deadline 為日期)
+  calCS.forEach(c => {
+    if (!c.deadline) return;
+    const ds = c.deadline;
+    if (!eventMap[ds]) eventMap[ds] = [];
+    eventMap[ds].push({ _type:'cs', c });
+  });
   // Sort each day: 未完成優先 → 整天優先 → 依下方分類列順序 → 同分類依時間
   const _typeOrder = Object.keys(getCalEventTypes());
   const _catIdx = item => {
-    const key = item._type === 'booking' ? 'store' : (item.ev.event_type || 'general');
+    let key;
+    if (item._type === 'booking') key = 'store';
+    else if (item._type === 'cs') key = 'cs';
+    else key = (item.ev.event_type || 'general');
     const i = _typeOrder.indexOf(key);
     return i === -1 ? 999 : i;
   };
   Object.keys(eventMap).forEach(ds => {
     eventMap[ds].sort((a, b) => {
-      const isTimed = item => item._type === 'booking' ? !!(item.b.time_slot) : !!(item.ev.start_time);
-      const isDone  = item => item._type === 'booking' ? item.b.status === '已完成' : !!item.ev.completed_at;
-      const getTime = item => item._type === 'booking' ? (item.b.time_slot||'') : (item.ev.start_time||'');
+      const isTimed = item => item._type === 'booking' ? !!(item.b.time_slot) : item._type === 'cs' ? false : !!(item.ev.start_time);
+      const isDone  = item => item._type === 'booking' ? item.b.status === '已完成' : item._type === 'cs' ? item.c.reply_status === '已結案' : !!item.ev.completed_at;
+      const getTime = item => item._type === 'booking' ? (item.b.time_slot||'') : item._type === 'cs' ? '' : (item.ev.start_time||'');
       const aDone = isDone(a), bDone = isDone(b);
       if (aDone !== bDone) return aDone ? 1 : -1;          // 未完成優先
       const aAllDay = !isTimed(a), bAllDay = !isTimed(b);
@@ -19588,6 +19618,16 @@ function renderCalendar() {
           } else {
             return baseDiv(`門市-${typeLabel} ${cust}`, `padding:1px 4px;background:${bBg};color:${bColor};border-radius:3px;${bDeco}`, onclick);
           }
+        } else if (item._type === 'cs') {
+          const c = item.c;
+          const csT = getCalEventTypes().cs || {label:'客服', color:'#0277bd', bg:'#e1f5fe'};
+          const csDone = c.reply_status === '已結案';
+          const csTitle = c.subject || c.issue_summary || '客服';
+          const csDeco = csDone ? 'text-decoration:line-through;opacity:.55;' : '';
+          const csColor = csDone ? '#aaa' : csT.color;
+          const csBg    = csDone ? '#ebebeb' : csT.bg;
+          const onclick = `onclick="event.stopPropagation();window.modalEditCS('${c.id}')"`;
+          return baseDiv(`${csT.label}-${csTitle}`, `padding:1px 4px;background:${csBg};color:${csColor};border-radius:3px;${csDeco}`, onclick);
         } else {
           const ev = item.ev;
           const t = getCalEventTypes()[ev.event_type] || getCalEventTypes().general || {label:'一般',color:'#90a4ae',bg:'#eceff1'};
@@ -20843,14 +20883,22 @@ async function modalAddCS() {
           <option>一般客服</option><option>經銷商問題</option>
         </select>
       </div>
-      <div class="form-group"><label>平台</label>
+      <div class="form-group"><label>問題反應平台</label>
         <select class="form-control" id="m-platform">
-          <option>Instagram DM</option><option>LINE</option><option>蝦皮</option>
+          <option>Instagram DM</option><option>Facebook Messenger</option><option>LINE</option><option>蝦皮</option>
           <option>PINKOI</option><option>官網-聯絡表單</option><option>官網-信箱</option><option>官網-聊天</option><option>門市</option>
         </select>
       </div>
     </div>
-    <div class="form-group"><label>主旨</label><input class="form-control" id="m-subject" placeholder="一句話標題,例:退換貨申請、商品破損反映"></div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>主旨</label><input class="form-control" id="m-subject" placeholder="一句話標題,例:退換貨申請、商品破損反映"></div>
+      <div class="form-group"><label>購買平台 <span style="font-size:11px;color:var(--muted);font-weight:400">(可選,若與反應平台不同)</span></label>
+        <select class="form-control" id="m-purchase-platform">
+          <option value="">— 未指定 —</option>
+          <option>蝦皮</option><option>PINKOI</option><option>官網</option><option>Instagram DM</option><option>Facebook Messenger</option><option>LINE</option><option>門市</option><option>展售活動</option><option>經銷商</option>
+        </select>
+      </div>
+    </div>
     <div class="form-row form-row-2">
       <div class="form-group"><label>客戶名稱</label><input class="form-control" id="m-customer" placeholder="客戶/經銷商名稱"></div>
       <div class="form-group"><label>截止日（Deadline）</label><input class="form-control" type="date" id="m-deadline"></div>
@@ -20993,21 +21041,6 @@ async function modalEditCS(id) {
       <button type="button" onclick="window._csAddStep()"
         style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增處理階段</button>
     </div>
-    <div class="form-group">
-      <label>📋 處理進度回報</label>
-      <div style="border:1px solid var(--border);border-radius:8px;padding:10px;background:#fafafa;max-height:180px;overflow-y:auto">
-        ${log.length === 0
-          ? '<div style="font-size:12px;color:var(--muted);text-align:center;padding:8px">尚無進度紀錄</div>'
-          : log.slice().reverse().map(p => `
-            <div style="padding:6px 0;border-bottom:1px solid #eee">
-              <div style="font-size:11px;color:var(--muted)">${new Date(p.timestamp).toLocaleString('zh-TW',{year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'})} · ${escHtml(p.user_name||'—')}</div>
-              <div style="font-size:13px;margin-top:2px;white-space:pre-wrap">${escHtml(p.note||'')}</div>
-            </div>`).join('')
-        }
-      </div>
-      <textarea class="form-control" id="cs-progress-new" rows="2" placeholder="回報處理進度，例：已聯繫客戶確認規格、廠商回信報價、預計X日結案…" style="margin-top:6px;font-size:13px"></textarea>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">送出儲存時，這條進度會自動加上時間與你的名字</div>
-    </div>
   `, `
     <button class="btn btn-outline" onclick="document.getElementById('modal-overlay').remove()">取消</button>
     <button class="btn btn-primary" id="save-cs-edit-btn">儲存</button>
@@ -21037,22 +21070,14 @@ async function modalEditCS(id) {
         due_date: document.getElementById(`cs-sub-due-${i}`)?.value || null,
       });
     });
-    const newProgress = document.getElementById('cs-progress-new').value.trim();
-    const progress_log = log.slice();
-    if (newProgress) {
-      progress_log.push({
-        timestamp: new Date().toISOString(),
-        user_id: state.user?.id,
-        user_name: state.profile?.name || state.user?.email || '—',
-        note: newProgress,
-      });
-    }
     const handling_steps = window._csCollectSteps();
     const issue_images = window._csCollectIssueImages();
     const subject = document.getElementById('m-subject')?.value.trim() || null;
+    const purchase_platform = document.getElementById('m-purchase-platform')?.value || null;
     const { error } = await db.from('cs_records').update({
       record_type: type,
       platform: document.getElementById('m-platform').value,
+      purchase_platform,
       subject,
       customer_name: type === '一般客服' ? customer : null,
       dealer_name: type === '經銷商問題' ? customer : null,
@@ -21061,7 +21086,6 @@ async function modalEditCS(id) {
       issue_tags: tags.length ? tags : null,
       deadline: document.getElementById('m-deadline').value || null,
       subtasks,
-      progress_log,
       handling_steps,
     }).eq('id', id);
     if (error) { showToast('儲存失敗：'+error.message, 'error'); return; }
