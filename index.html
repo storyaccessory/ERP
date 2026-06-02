@@ -1344,35 +1344,36 @@ function renderDashboard() {
         })()}
       </div>
 
-      <!-- 近期訂單 -->
-      <div class="card">
-        <div class="section-title">📦 進行中訂單</div>
-        ${orders.length === 0 ? '<div class="empty"><div class="empty-icon">📦</div><p>沒有進行中訂單</p></div>' :
-          orders.slice(0,5).map(o => `
-            <div style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid #f0f0f0">
-              <div style="flex:1">
-                <div style="font-size:13px;font-weight:500">${o.order_no} ${o.customer_name}</div>
-                <div style="font-size:11px;color:var(--muted)">交件日：<span style="color:${o.due_date < today ? 'var(--danger)' : 'inherit'}">${o.due_date||'—'}</span></div>
-              </div>
-              <span class="tag ${o.status==='待排圖'?'tag-orange':o.status==='排圖製作中'?'tag-blue':'tag-teal'}">${o.status}</span>
-            </div>
-          `).join('') + (orders.length > 5 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" data-page="orders">查看全部</div>` : '')
-        }
-      </div>
-
       <!-- 客服未回覆 -->
       <div class="card">
         <div class="section-title">💬 未回覆客服</div>
         ${cs.length === 0 ? '<div class="empty"><div class="empty-icon">💬</div><p>沒有未回覆的客服</p></div>' :
-          cs.slice(0,4).map(c => `
-            <div style="padding:8px 0;border-bottom:1px solid #f0f0f0">
-              <div style="display:flex;justify-content:space-between;align-items:center">
-                <span class="tag tag-blue">${c.platform||'—'}</span>
-                <span style="font-size:11px;color:var(--muted)">${c.created_at?.slice(0,10)||''}</span>
+          cs.slice(0,5).map(c => {
+            const subs = Array.isArray(c.subtasks) ? c.subtasks : [];
+            const doneCount = subs.filter(s=>s.done).length;
+            const subBadge = subs.length > 0
+              ? `<span style="font-size:10px;padding:1px 6px;border-radius:10px;background:${doneCount===subs.length?'#e8f5e9':'#fff3e0'};color:${doneCount===subs.length?'#2e7d32':'#e65100'};font-weight:600;white-space:nowrap">✓${doneCount}/${subs.length} 子任務</span>`
+              : '';
+            const isOverdue = c.deadline && c.deadline < today;
+            const isDueToday = c.deadline === today;
+            const timeLabel = c.deadline
+              ? `${isOverdue?'逾期':isDueToday?'今天':'截止'} ${c.deadline.slice(5)}`
+              : (c.created_at?.slice(0,10)||'');
+            const timeColor = isOverdue ? 'var(--danger)' : isDueToday ? '#e65100' : 'var(--muted)';
+            const timeWeight = (isOverdue||isDueToday) ? '700' : '400';
+            return `<div style="padding:10px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="modalEditCS('${c.id}')">
+              <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:4px;flex-wrap:wrap">
+                <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap;min-width:0">
+                  <span class="tag tag-blue">${c.platform||'—'}</span>
+                  ${c.dealer_name || c.customer_name ? `<span style="font-size:11px;color:var(--muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:120px">${c.dealer_name || c.customer_name}</span>` : ''}
+                </div>
+                <span style="font-size:11px;color:${timeColor};white-space:nowrap;font-weight:${timeWeight}">${timeLabel}</span>
               </div>
-              <div style="font-size:13px;margin-top:4px">${c.issue_summary||''}</div>
-            </div>
-          `).join('') + (cs.length > 4 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" data-page="cs">查看全部 ${cs.length} 件</div>` : '')
+              ${c.subject ? `<div style="font-size:13px;font-weight:700;color:#1a1a1a;margin-bottom:2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${c.subject}</div>` : ''}
+              <div style="font-size:12px;color:${c.subject?'var(--muted)':'#1a1a1a'};line-height:1.5;overflow:hidden;text-overflow:ellipsis;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical">${c.issue_summary||''}</div>
+              ${subBadge ? `<div style="margin-top:4px">${subBadge}</div>` : ''}
+            </div>`;
+          }).join('') + (cs.length > 5 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" data-page="cs">查看全部 ${cs.length} 件</div>` : '')
         }
       </div>
 
