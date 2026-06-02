@@ -714,7 +714,7 @@ async function loadDashboard() {
   const threeDays = new Date(Date.now() + 3*86400000).toISOString().split('T')[0];
 
   const myId = state.user?.id;
-  const [orders, restock, calTodos, cs, repair, dev, bookingPending] = await Promise.all([
+  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     db.from('calendar_events')
@@ -729,7 +729,21 @@ async function loadDashboard() {
     db.from('repair_orders').select('*').not('status','in','("已完成","已寄回","取消")'),
     db.from('dev_projects').select('*').eq('status','進行中'),
     db.from('experience_bookings').select('id').eq('status','待確認').neq('source','人工封鎖'),
+    // 團隊過期任務:全員未完成、end_date 早於今天
+    db.from('calendar_events')
+      .select('id,title,start_date,end_date,priority,event_type,completed_at,assigned_to,assignee_ids,subtasks')
+      .is('completed_at', null)
+      .neq('is_template', true)
+      .lt('end_date', today)
+      .order('end_date')
+      .limit(50),
   ]);
+
+  // 載入人員資料(用於顯示負責人名字)
+  if (!state.data.users?.length) {
+    const { data: uData } = await db.from('profiles').select('id, name').order('name');
+    state.data.users = uData || [];
+  }
 
   state.data.dashboard = {
     orders: orders.data || [],
@@ -739,6 +753,7 @@ async function loadDashboard() {
     repair: repair.data || [],
     dev: dev.data || [],
     bookingPending: (bookingPending.data||[]).length,
+    overdue: overdueAll.data || [],
     today,
     threeDays,
   };
@@ -1270,6 +1285,39 @@ function renderDashboard() {
           }).join('');
           const more = sorted.length > 8 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" onclick="state.page='calendar';state.data.calView='list';renderApp()">查看全部 ${sorted.length} 件 →</div>` : '';
           return rows + more;
+        })()}
+      </div>
+
+      <!-- 團隊過期任務（全員、未完成、end_date 早於今天）-->
+      <div class="card">
+        <div class="section-title">🔴 團隊過期任務</div>
+        ${(()=>{
+          const overdueAll = d.overdue || [];
+          if (overdueAll.length === 0) {
+            return '<div class="empty"><div class="empty-icon">✅</div><p>沒有過期任務</p></div>';
+          }
+          const PRIORITY_ORDER_OV = { '高':0, '中':1, '低':2 };
+          const sortedOv = [...overdueAll].sort((a,b) =>
+            (PRIORITY_ORDER_OV[a.priority]??1) - (PRIORITY_ORDER_OV[b.priority]??1) ||
+            (a.end_date||a.start_date||'').localeCompare(b.end_date||b.start_date||'')
+          );
+          const rowsOv = sortedOv.slice(0, 8).map(t => {
+            const pColor = t.priority==='高'?'#e53935':t.priority==='低'?'#43a047':'#f57c00';
+            const overdueDate = (t.end_date || t.start_date || '');
+            const dueLabel = overdueDate ? `過期 ${overdueDate.slice(5)}` : '過期';
+            const assigneeIds = Array.isArray(t.assignee_ids) ? t.assignee_ids : (t.assigned_to ? [t.assigned_to] : []);
+            const names = assigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean).join('、');
+            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
+              <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
+              <span style="font-size:11px;font-weight:700;color:var(--danger);min-width:60px;white-space:nowrap;flex-shrink:0">${dueLabel}</span>
+              <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+                <span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
+                ${names ? `<span style="font-size:11px;color:var(--muted)">👤 ${names}</span>` : ''}
+              </div>
+            </div>`;
+          }).join('');
+          const moreOv = sortedOv.length > 8 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" onclick="state.page='calendar';state.data.calView='list';renderApp()">查看全部 ${sortedOv.length} 件 →</div>` : '';
+          return rowsOv + moreOv;
         })()}
       </div>
 
@@ -19430,7 +19478,13 @@ function renderCalendar() {
     if (!eventMap[ds]) eventMap[ds] = [];
     eventMap[ds].push({ _type:'booking', b });
   });
-  // Sort each day: incomplete before done → all-day before timed → by time
+  // Sort each day: 未完成優先 → 整天優先 → 依下方分類列順序 → 同分類依時間
+  const _typeOrder = Object.keys(getCalEventTypes());
+  const _catIdx = item => {
+    const key = item._type === 'booking' ? 'store' : (item.ev.event_type || 'general');
+    const i = _typeOrder.indexOf(key);
+    return i === -1 ? 999 : i;
+  };
   Object.keys(eventMap).forEach(ds => {
     eventMap[ds].sort((a, b) => {
       const isTimed = item => item._type === 'booking' ? !!(item.b.time_slot) : !!(item.ev.start_time);
@@ -19440,7 +19494,9 @@ function renderCalendar() {
       if (aDone !== bDone) return aDone ? 1 : -1;          // 未完成優先
       const aAllDay = !isTimed(a), bAllDay = !isTimed(b);
       if (aAllDay !== bAllDay) return aAllDay ? -1 : 1;    // 整天優先
-      return getTime(a).localeCompare(getTime(b));          // 有時間的依時間排
+      const aCi = _catIdx(a), bCi = _catIdx(b);
+      if (aCi !== bCi) return aCi - bCi;                   // 同組依下方分類列順序
+      return getTime(a).localeCompare(getTime(b));          // 同分類:有時間的依時間,整天的維持來源順序
     });
   });
 
