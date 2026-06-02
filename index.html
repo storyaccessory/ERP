@@ -714,7 +714,9 @@ async function loadDashboard() {
   const threeDays = new Date(Date.now() + 3*86400000).toISOString().split('T')[0];
 
   const myId = state.user?.id;
-  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll] = await Promise.all([
+  // 當月年月字串(YYYYMM)用於餐費查詢
+  const _thisYmStr = today.slice(0,4) + today.slice(5,7);
+  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     db.from('calendar_events')
@@ -736,11 +738,13 @@ async function loadDashboard() {
       .neq('is_template', true)
       .order('end_date')
       .limit(200),
+    // 當月餐費(用於儀表板進度卡片)
+    db.from('meal_expenses').select('applicant_name,amount').eq('year_month', _thisYmStr),
   ]);
 
-  // 載入人員資料(用於顯示負責人名字)
-  if (!state.data.users?.length) {
-    const { data: uData } = await db.from('profiles').select('id, name').order('name');
+  // 載入人員資料(顯示負責人名字 + 餐費依員編排序)
+  if (!state.data.users?.length || !state.data.users.some(u => u.employee_no !== undefined)) {
+    const { data: uData } = await db.from('profiles').select('id, name, employee_no').order('employee_no', { ascending: true, nullsFirst: false });
     state.data.users = uData || [];
   }
 
@@ -753,6 +757,8 @@ async function loadDashboard() {
     dev: dev.data || [],
     bookingPending: (bookingPending.data||[]).length,
     overdue: overdueAll.data || [],
+    mealThis: mealThis.data || [],
+    ym: _thisYmStr,
     today,
     threeDays,
   };
@@ -877,9 +883,9 @@ async function loadAccounting() {
     db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month').order('billing_month', { ascending: true }),
   ]);
   state.data.accounting = { ap: apResult.data||[], meal: meal.data||[], advance: advance.data||[], ym, vendors: vendors.data||[], ar: ar.data||[], ar_all: arAll.data||[] };
-  // 載入人員資料(餐費統計需要列出所有預算>0的員工,包括這個月還沒花的)
-  if (!state.data.users?.length) {
-    const { data: uData } = await db.from('profiles').select('id, name').order('name');
+  // 載入人員資料(餐費統計需要列出所有預算>0的員工,包括這個月還沒花的);employee_no 給排序用
+  if (!state.data.users?.length || !state.data.users.some(u => u.employee_no !== undefined)) {
+    const { data: uData } = await db.from('profiles').select('id, name, employee_no').order('employee_no', { ascending: true, nullsFirst: false });
     state.data.users = uData || [];
   }
 }
@@ -1381,6 +1387,58 @@ function renderDashboard() {
             </div>`;
           }).join('') + (cs.length > 5 ? `<div style="text-align:center;padding:8px;font-size:12px;color:var(--accent);cursor:pointer" data-page="cs">查看全部 ${cs.length} 件</div>` : '')
         }
+      </div>
+
+      <!-- 餐費進度(本月) -->
+      <div class="card">
+        <div class="section-title">🍱 本月餐費進度</div>
+        ${(() => {
+          const mealArr = d.mealThis || [];
+          const _emp = {};
+          mealArr.forEach(r => {
+            const n = r.applicant_name || '未知';
+            _emp[n] = (_emp[n] || 0) + (r.amount || 0);
+          });
+          const _budgetsRaw = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
+          const _empNoByName = {};
+          (state.data.users||[]).forEach(u => { if (u.name) _empNoByName[u.name] = u.employee_no || null; });
+          const _allNames = Array.from(new Set([
+            ...((state.data.users||[]).map(u => u.name).filter(Boolean)),
+            ...Object.keys(_budgetsRaw),
+          ]));
+          const _rows = _allNames
+            .map(name => ({ name, employee_no: _empNoByName[name] || null, budget: getMealBudgetForEmployee(name), total: _emp[name] || 0 }))
+            .filter(r => r.budget > 0)
+            .map(r => ({ ...r, diff: r.budget - r.total, over: r.total > r.budget }))
+            .sort((a,b) => {
+              const aHas = a.employee_no != null && a.employee_no !== '';
+              const bHas = b.employee_no != null && b.employee_no !== '';
+              if (aHas !== bHas) return aHas ? -1 : 1;
+              if (aHas && bHas) {
+                const cmp = String(a.employee_no).localeCompare(String(b.employee_no), 'zh-Hant', { numeric: true });
+                if (cmp !== 0) return cmp;
+              }
+              return a.name.localeCompare(b.name, 'zh-Hant');
+            });
+          if (_rows.length === 0) {
+            return '<div class="empty"><div class="empty-icon">🍱</div><p>尚無預算員工</p></div>';
+          }
+          return _rows.map(({ name, employee_no, total, budget, diff, over }) => {
+            const pct = budget ? Math.min(100, Math.round(total / budget * 100)) : 0;
+            return `<div style="padding:6px 0;border-bottom:1px solid #f0f0f0">
+              <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;gap:8px">
+                <span style="font-size:12px;font-weight:600;color:#1a1a1a">${name}${employee_no?`<span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:4px">#${employee_no}</span>`:''}</span>
+                <span style="font-size:12px;font-weight:700;color:${over?'var(--danger)':'var(--accent)'};white-space:nowrap">$${total.toLocaleString()}<span style="font-size:10px;color:var(--muted);font-weight:400"> / $${budget.toLocaleString()}</span></span>
+              </div>
+              <div style="background:#e0e0e0;border-radius:3px;height:4px;overflow:hidden;margin-bottom:2px">
+                <div style="width:${pct}%;height:100%;background:${over?'var(--danger)':'var(--accent)'};border-radius:3px"></div>
+              </div>
+              <div style="font-size:10px;color:${diff<0?'var(--danger)':diff===0?'var(--success)':'var(--muted)'}">
+                ${diff > 0 ? `尚差 $${diff.toLocaleString()}` : diff === 0 ? '✅ 剛好達標' : `⚠️ 超出 $${Math.abs(diff).toLocaleString()}`}
+              </div>
+            </div>`;
+          }).join('');
+        })()}
       </div>
 
       <!-- 商品開發進度 -->
@@ -8169,25 +8227,35 @@ function renderAccounting() {
         ${(() => {
           // 列出「所有預算 > 0」的員工(不只是有送發票的);名單來源:profiles + 預算 localStorage
           const _budgetsRaw = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
+          // 建 name → employee_no 對照
+          const _empNoByName = {};
+          (state.data.users||[]).forEach(u => { if (u.name) _empNoByName[u.name] = u.employee_no || null; });
           const _allNames = Array.from(new Set([
             ...((state.data.users||[]).map(u => u.name).filter(Boolean)),
             ...Object.keys(_budgetsRaw),
           ]));
           const _rows = _allNames
-            .map(name => ({ name, budget: getMealBudgetForEmployee(name), total: empMealSummary[name] || 0 }))
+            .map(name => ({ name, employee_no: _empNoByName[name] || null, budget: getMealBudgetForEmployee(name), total: empMealSummary[name] || 0 }))
             .filter(r => r.budget > 0)
             .map(r => ({ ...r, diff: r.budget - r.total, over: r.total > r.budget }))
             .sort((a,b) => {
-              if (a.over !== b.over) return a.over ? -1 : 1;   // 超出的優先
-              return b.total - a.total;                          // 同組依花費由多到少
+              // 依員編升冪排序;沒員編的放最後;同員編(或都沒員編)依名字排
+              const aHas = a.employee_no != null && a.employee_no !== '';
+              const bHas = b.employee_no != null && b.employee_no !== '';
+              if (aHas !== bHas) return aHas ? -1 : 1;
+              if (aHas && bHas) {
+                const cmp = String(a.employee_no).localeCompare(String(b.employee_no), 'zh-Hant', { numeric: true });
+                if (cmp !== 0) return cmp;
+              }
+              return a.name.localeCompare(b.name, 'zh-Hant');
             });
           if (_rows.length === 0) return '<div style="font-size:12px;color:var(--muted);padding:8px 0">無預算員工</div>';
-          return _rows.map(({ name, total, budget, diff, over }) => {
+          return _rows.map(({ name, employee_no, total, budget, diff, over }) => {
             const pct = budget ? Math.min(100, Math.round(total / budget * 100)) : 0;
             return `
             <div style="padding:8px 0;border-bottom:1px solid var(--border)">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                <span style="font-size:13px;font-weight:600">${name}</span>
+                <span style="font-size:13px;font-weight:600">${name}${employee_no?`<span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:5px">#${employee_no}</span>`:''}</span>
                 <span style="font-weight:700;color:${over?'var(--danger)':'var(--accent)'}">$${total.toLocaleString()}<span style="font-size:11px;color:var(--muted);font-weight:400"> / $${budget.toLocaleString()}</span></span>
               </div>
               <div style="background:#e0e0e0;border-radius:4px;height:5px;overflow:hidden;margin-bottom:3px">
