@@ -729,14 +729,13 @@ async function loadDashboard() {
     db.from('repair_orders').select('*').not('status','in','("已完成","已寄回","取消")'),
     db.from('dev_projects').select('*').eq('status','進行中'),
     db.from('experience_bookings').select('id').eq('status','待確認').neq('source','人工封鎖'),
-    // 團隊過期任務:全員未完成、end_date 早於今天
+    // 團隊過期任務:全員未完成事項(含子任務一起載入,由前端判斷事項或子任務任一過期)
     db.from('calendar_events')
       .select('id,title,start_date,end_date,priority,event_type,completed_at,assigned_to,assignee_ids,subtasks')
       .is('completed_at', null)
       .neq('is_template', true)
-      .lt('end_date', today)
       .order('end_date')
-      .limit(50),
+      .limit(200),
   ]);
 
   // 載入人員資料(用於顯示負責人名字)
@@ -1288,31 +1287,58 @@ function renderDashboard() {
         })()}
       </div>
 
-      <!-- 團隊過期任務（全員、未完成、end_date 早於今天）-->
+      <!-- 團隊過期任務（事項本身過期 或 任一子任務過期）-->
       <div class="card">
         <div class="section-title">🔴 團隊過期任務</div>
         ${(()=>{
-          const overdueAll = d.overdue || [];
-          if (overdueAll.length === 0) {
+          const all = d.overdue || [];
+          // 為每筆事項標記「事項過期」與「過期子任務」
+          const annotated = all.map(t => {
+            const eventOv = !!(t.end_date && t.end_date < today);
+            const overdueSubs = (Array.isArray(t.subtasks) ? t.subtasks : [])
+              .filter(s => !s.done && s.text && s.due_date && s.due_date < today);
+            return { t, eventOv, overdueSubs };
+          }).filter(x => x.eventOv || x.overdueSubs.length > 0);
+
+          if (annotated.length === 0) {
             return '<div class="empty"><div class="empty-icon">✅</div><p>沒有過期任務</p></div>';
           }
+
           const PRIORITY_ORDER_OV = { '高':0, '中':1, '低':2 };
-          const sortedOv = [...overdueAll].sort((a,b) =>
-            (PRIORITY_ORDER_OV[a.priority]??1) - (PRIORITY_ORDER_OV[b.priority]??1) ||
-            (a.end_date||a.start_date||'').localeCompare(b.end_date||b.start_date||'')
+          // 過期日期取「事項 end_date」或「最早過期子任務的 due_date」
+          const earliestOverdue = x => {
+            const ed = x.eventOv ? x.t.end_date : '';
+            const sd = x.overdueSubs.length ? x.overdueSubs.map(s=>s.due_date).sort()[0] : '';
+            if (ed && sd) return ed < sd ? ed : sd;
+            return ed || sd || '';
+          };
+          const sortedOv = [...annotated].sort((a,b) =>
+            (PRIORITY_ORDER_OV[a.t.priority]??1) - (PRIORITY_ORDER_OV[b.t.priority]??1) ||
+            (earliestOverdue(a)||'').localeCompare(earliestOverdue(b)||'')
           );
-          const rowsOv = sortedOv.slice(0, 8).map(t => {
+
+          const rowsOv = sortedOv.slice(0, 8).map(({ t, eventOv, overdueSubs }) => {
             const pColor = t.priority==='高'?'#e53935':t.priority==='低'?'#43a047':'#f57c00';
-            const overdueDate = (t.end_date || t.start_date || '');
-            const dueLabel = overdueDate ? `過期 ${overdueDate.slice(5)}` : '過期';
+            // 標籤:事項過期 → 「過期 X/XX」;只有子任務過期 → 「子任務 X/XX」
+            const ovDate = eventOv ? t.end_date : (overdueSubs.map(s=>s.due_date).sort()[0] || '');
+            const dueLabel = ovDate
+              ? (eventOv ? `過期 ${ovDate.slice(5)}` : `子任務 ${ovDate.slice(5)}`)
+              : '過期';
             const assigneeIds = Array.isArray(t.assignee_ids) ? t.assignee_ids : (t.assigned_to ? [t.assigned_to] : []);
             const names = assigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean).join('、');
-            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
-              <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
-              <span style="font-size:11px;font-weight:700;color:var(--danger);min-width:60px;white-space:nowrap;flex-shrink:0">${dueLabel}</span>
-              <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
-                <span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
-                ${names ? `<span style="font-size:11px;color:var(--muted)">👤 ${names}</span>` : ''}
+            const subsHtml = overdueSubs.map(s => {
+              const subWho = (state.data.users||[]).find(u=>u.id===s.assignee_id)?.name || '';
+              return `<span style="color:#e53935">⚠ ${s.text}（${s.due_date.slice(5)}${subWho?` · ${subWho}`:''}）</span>`;
+            }).join('　');
+            return `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
+              <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0;margin-top:5px"></span>
+              <span style="font-size:11px;font-weight:700;color:var(--danger);min-width:72px;white-space:nowrap;flex-shrink:0;margin-top:1px">${dueLabel}</span>
+              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
+                <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+                  <span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
+                  ${names ? `<span style="font-size:11px;color:var(--muted)">👤 ${names}</span>` : ''}
+                </div>
+                ${subsHtml ? `<div style="font-size:11px;line-height:1.6">${subsHtml}</div>` : ''}
               </div>
             </div>`;
           }).join('');
@@ -13407,6 +13433,13 @@ function salesGetDay(year, platform, month1, day) {
   if (cached !== undefined) return parseFloat(cached)||0;
   return SALES_DAILY[platform]?.[year]?.[month1]?.[day-1] ?? 0;
 }
+// 是否有實際輸入紀錄(含 0):用於判斷格子要不要顯示「已填」樣式
+function salesHasDay(year, platform, month1, day) {
+  const k = `${year}_${platform}_${month1}_${day}`;
+  if ((state.data.salesCache||{})[k] !== undefined) return true;
+  const legacy = SALES_DAILY[platform]?.[year]?.[month1]?.[day-1];
+  return legacy !== undefined && legacy !== null;
+}
 function salesSetDay(year, platform, month1, day, val) {
   if (!state.data.salesCache) state.data.salesCache = {};
   const k = `${year}_${platform}_${month1}_${day}`;
@@ -14075,8 +14108,8 @@ function renderSalesInput() {
       const isExp = p === '體驗店'; // 體驗店由右側付款方式加總，不可手動輸入
       const twdVal = isTB && raw ? Math.round(raw*salesGetCNYRate(salesInputYear,salesInputMonth)) : 0;
       const twdHint = isTB && raw ? ` title="TWD≈${salesFmtFull(twdVal)}"` : '';
-      const hasFilled = raw > 0;
-      const dispVal = raw > 0 ? String(raw) : '';
+      const hasFilled = salesHasDay(salesInputYear, p, month1, d);  // 用實際是否輸入過判斷(含 0)
+      const dispVal = hasFilled ? String(raw) : '';
       // 體驗店：永遠唯讀，但樣式與其他平台一致（白底灰字）
       const isReadonly = !salesEditable || isExp;
       const bgFinal = hasFilled ? '#fff' : '#f7f7f7';
