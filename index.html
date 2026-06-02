@@ -19577,12 +19577,10 @@ function renderCalendar() {
           const bDeco = bDone ? 'text-decoration:line-through;opacity:.45;' : '';
           const bColor = bDone ? '#aaa' : storeT.color;
           const bBg    = bDone ? '#ebebeb' : storeT.bg;
-          const bStaff = (state.data.users||[]).find(u=>u.id===b.staff_id)?.name || '';
-          const bStaffStr = bStaff ? ` · ${bStaff}` : '';
           if (hasTimed) {
-            return baseDiv(`${timeStr} 門市-${typeLabel} ${cust}${bStaffStr}`, `padding:1px 2px;color:${bColor};${bDeco}`, onclick);
+            return baseDiv(`${timeStr} 門市-${typeLabel} ${cust}`, `padding:1px 2px;color:${bColor};${bDeco}`, onclick);
           } else {
-            return baseDiv(`門市-${typeLabel} ${cust}${bStaffStr}`, `padding:1px 4px;background:${bBg};color:${bColor};border-radius:3px;${bDeco}`, onclick);
+            return baseDiv(`門市-${typeLabel} ${cust}`, `padding:1px 4px;background:${bBg};color:${bColor};border-radius:3px;${bDeco}`, onclick);
           }
         } else {
           const ev = item.ev;
