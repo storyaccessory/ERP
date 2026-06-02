@@ -8259,12 +8259,12 @@ function renderAccounting() {
               return a.name.localeCompare(b.name, 'zh-Hant');
             });
           if (_rows.length === 0) return '<div style="font-size:12px;color:var(--muted);padding:8px 0">無預算員工</div>';
-          return _rows.map(({ name, employee_no, total, budget, diff, over }) => {
+          return _rows.map(({ name, total, budget, diff, over }) => {
             const pct = budget ? Math.min(100, Math.round(total / budget * 100)) : 0;
             return `
             <div style="padding:8px 0;border-bottom:1px solid var(--border)">
               <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-                <span style="font-size:13px;font-weight:600">${name}${employee_no?`<span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:5px">#${employee_no}</span>`:''}</span>
+                <span style="font-size:13px;font-weight:600">${name}</span>
                 <span style="font-weight:700;color:${over?'var(--danger)':'var(--accent)'}">$${total.toLocaleString()}<span style="font-size:11px;color:var(--muted);font-weight:400"> / $${budget.toLocaleString()}</span></span>
               </div>
               <div style="background:#e0e0e0;border-radius:4px;height:5px;overflow:hidden;margin-bottom:3px">
