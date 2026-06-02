@@ -20854,7 +20854,16 @@ async function modalAddCS() {
       <div class="form-group"><label>客戶名稱</label><input class="form-control" id="m-customer" placeholder="客戶/經銷商名稱"></div>
       <div class="form-group"><label>截止日（Deadline）</label><input class="form-control" type="date" id="m-deadline"></div>
     </div>
-    <div class="form-group"><label>問題摘要 *</label><textarea class="form-control" id="m-summary" rows="3" placeholder="說明客服內容、問題描述…"></textarea></div>
+    <div class="form-group">
+      <label>問題摘要 *</label>
+      <textarea class="form-control" id="m-summary" rows="3" placeholder="說明客服內容、問題描述…"></textarea>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <input type="file" id="cs-issue-file" accept="image/*" style="display:none" onchange="window._csUploadIssueImage()">
+        <button type="button" onclick="document.getElementById('cs-issue-file').click()"
+          style="font-size:12px;padding:5px 10px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;cursor:pointer">📷 加圖片(自動壓到 100KB)</button>
+        <div id="cs-issue-images" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      </div>
+    </div>
     <div class="form-group"><label>標籤（用逗號分隔）</label><input class="form-control" id="m-tags" placeholder="例：退換貨, 尺寸詢問, 庫存"></div>
     <div class="form-group">
       <label>子任務 <span style="font-size:11px;color:var(--muted);font-weight:400">（可指派負責人和截止日，建立後也可在「詳細」內調整）</span></label>
@@ -20894,6 +20903,7 @@ async function modalAddCS() {
       });
     });
     const handling_steps = window._csCollectSteps();
+    const issue_images = window._csCollectIssueImages();
     const subject = document.getElementById('m-subject')?.value.trim() || null;
     const { error } = await db.from('cs_records').insert({
       record_type: type,
@@ -20902,6 +20912,7 @@ async function modalAddCS() {
       customer_name: type === '一般客服' ? customer : null,
       dealer_name: type === '經銷商問題' ? customer : null,
       issue_summary: summary,
+      issue_images,
       issue_tags: tags.length ? tags : null,
       deadline: document.getElementById('m-deadline').value || null,
       subtasks: subtasks.length ? subtasks : [],
@@ -20924,9 +20935,10 @@ async function modalEditCS(id) {
     const { data: uData } = await db.from('profiles').select('id, name').order('name');
     state.data.users = uData || [];
   }
-  const subs  = Array.isArray(record.subtasks) ? record.subtasks : [];
-  const log   = Array.isArray(record.progress_log) ? record.progress_log : [];
-  const steps = Array.isArray(record.handling_steps) ? record.handling_steps : [];
+  const subs   = Array.isArray(record.subtasks) ? record.subtasks : [];
+  const log    = Array.isArray(record.progress_log) ? record.progress_log : [];
+  const steps  = Array.isArray(record.handling_steps) ? record.handling_steps : [];
+  const issueImgs = Array.isArray(record.issue_images) ? record.issue_images : [];
   const platforms = ['Instagram DM','LINE','蝦皮','PINKOI','官網-聯絡表單','官網-信箱','官網-聊天','門市'];
   const escHtml = s => String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
 
@@ -20955,8 +20967,15 @@ async function modalEditCS(id) {
         <input class="form-control" type="date" id="m-deadline" value="${record.deadline||''}">
       </div>
     </div>
-    <div class="form-group"><label>問題摘要 *</label>
+    <div class="form-group">
+      <label>問題摘要 *</label>
       <textarea class="form-control" id="m-summary" rows="3">${escHtml(record.issue_summary)}</textarea>
+      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
+        <input type="file" id="cs-issue-file" accept="image/*" style="display:none" onchange="window._csUploadIssueImage()">
+        <button type="button" onclick="document.getElementById('cs-issue-file').click()"
+          style="font-size:12px;padding:5px 10px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;cursor:pointer">📷 加圖片(自動壓到 100KB)</button>
+        <div id="cs-issue-images" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+      </div>
     </div>
     <div class="form-group"><label>標籤（用逗號分隔）</label>
       <input class="form-control" id="m-tags" value="${(Array.isArray(record.issue_tags)?record.issue_tags.join(', '):'').replace(/"/g,'&quot;')}" placeholder="例：退換貨, 尺寸詢問, 庫存">
@@ -20993,9 +21012,10 @@ async function modalEditCS(id) {
     <button class="btn btn-primary" id="save-cs-edit-btn">儲存</button>
   `);
 
-  // 預填既有子任務與處理階段
+  // 預填既有子任務、處理階段、問題摘要圖片
   subs.forEach(s => window._csAddSubtask(s));
   steps.forEach(s => window._csAddStep(s));
+  issueImgs.forEach(u => window._csAddIssueImage(u));
 
   document.getElementById('save-cs-edit-btn').onclick = async () => {
     const summary = document.getElementById('m-summary').value.trim();
@@ -21027,6 +21047,7 @@ async function modalEditCS(id) {
       });
     }
     const handling_steps = window._csCollectSteps();
+    const issue_images = window._csCollectIssueImages();
     const subject = document.getElementById('m-subject')?.value.trim() || null;
     const { error } = await db.from('cs_records').update({
       record_type: type,
@@ -21035,6 +21056,7 @@ async function modalEditCS(id) {
       customer_name: type === '一般客服' ? customer : null,
       dealer_name: type === '經銷商問題' ? customer : null,
       issue_summary: summary,
+      issue_images,
       issue_tags: tags.length ? tags : null,
       deadline: document.getElementById('m-deadline').value || null,
       subtasks,
@@ -21049,7 +21071,7 @@ async function modalEditCS(id) {
 }
 window.modalEditCS = modalEditCS;
 
-// 處理階段列共用渲染(modalAddCS / modalEditCS 共用):每階段有日期時間 + 處理內容
+// 處理階段列共用渲染(modalAddCS / modalEditCS 共用):每階段有日期時間 + 處理內容 + 連結 + 圖片
 window._csAddStep = function(prefill) {
   const list = document.getElementById('cs-step-list');
   if (!list) return;
@@ -21066,16 +21088,70 @@ window._csAddStep = function(prefill) {
   }
   const row = document.createElement('div');
   row.id = `cs-step-row-${i}`;
-  row.style.cssText = 'display:flex;gap:6px;align-items:center;padding:6px 8px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
+  row.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:6px 8px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
+  const imgUrl = p.image_url || '';
   row.innerHTML = `
-    <input type="datetime-local" id="cs-step-time-${i}" value="${defaultDt}"
-      style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:170px;background:#fff;color:var(--text)">
-    <input class="form-control" id="cs-step-desc-${i}" value="${(p.description||'').replace(/"/g,'&quot;')}" placeholder="處理內容,例:通知客戶寄回商品"
-      style="flex:1;font-size:13px">
-    <button type="button" onclick="this.closest('[id^=\\'cs-step-row\\']').remove()"
-      style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除">×</button>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input type="datetime-local" id="cs-step-time-${i}" value="${defaultDt}"
+        style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:170px;background:#fff;color:var(--text)">
+      <input class="form-control" id="cs-step-desc-${i}" value="${(p.description||'').replace(/"/g,'&quot;')}" placeholder="處理內容,例:通知客戶寄回商品"
+        style="flex:1;font-size:13px">
+      <button type="button" onclick="this.closest('[id^=\\'cs-step-row\\']').remove()"
+        style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除此階段">×</button>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center">
+      <input class="form-control" id="cs-step-link-${i}" value="${(p.link||'').replace(/"/g,'&quot;')}" placeholder="🔗 連結(選填,例:訂單頁、對話截圖網址)"
+        style="flex:1;font-size:12px;padding:4px 8px">
+      <input type="file" id="cs-step-file-${i}" accept="image/*" style="display:none"
+        onchange="window._csUploadStepImage('${i}')">
+      <button type="button" onclick="document.getElementById('cs-step-file-${i}').click()"
+        style="flex-shrink:0;font-size:12px;padding:5px 10px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;cursor:pointer;white-space:nowrap">📷 圖片</button>
+      <div id="cs-step-img-${i}" style="display:${imgUrl?'flex':'none'};align-items:center;gap:4px;flex-shrink:0">
+        ${imgUrl ? `<a href="${imgUrl}" target="_blank"><img src="${imgUrl}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border)"></a>
+        <button type="button" onclick="window._csRemoveStepImage('${i}')" style="background:none;border:none;cursor:pointer;color:#aaa;font-size:14px" title="移除圖片">🗑</button>` : ''}
+      </div>
+      <input type="hidden" id="cs-step-imgurl-${i}" value="${imgUrl}">
+    </div>
   `;
   list.appendChild(row);
+};
+
+// 上傳並壓縮圖片到 ≤100KB,存到 Supabase Storage 後把網址寫回隱藏欄位
+window._csUploadStepImage = async function(id) {
+  const fileInput = document.getElementById(`cs-step-file-${id}`);
+  const file = fileInput?.files?.[0];
+  if (!file) return;
+  if (!/^image\//.test(file.type)) { showToast('請選擇圖片檔', 'error'); return; }
+  try {
+    showToast('壓縮上傳中…');
+    const compressed = await compressImage(file, 100);
+    const ext = (compressed.type && compressed.type.split('/')[1]) || (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `cs/step_${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
+    const { error: upErr } = await db.storage.from('ar-attachments').upload(path, compressed, { upsert: true });
+    if (upErr) { showToast('上傳失敗:'+upErr.message, 'error'); return; }
+    const { data: urlData } = db.storage.from('ar-attachments').getPublicUrl(path);
+    const url = urlData?.publicUrl || '';
+    if (!url) { showToast('無法取得圖片網址', 'error'); return; }
+    const urlInput = document.getElementById(`cs-step-imgurl-${id}`);
+    const preview  = document.getElementById(`cs-step-img-${id}`);
+    if (urlInput) urlInput.value = url;
+    if (preview) {
+      preview.style.display = 'flex';
+      preview.innerHTML = `<a href="${url}" target="_blank"><img src="${url}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border)"></a>
+        <button type="button" onclick="window._csRemoveStepImage('${id}')" style="background:none;border:none;cursor:pointer;color:#aaa;font-size:14px" title="移除圖片">🗑</button>`;
+    }
+    fileInput.value = '';  // 清掉,讓同一張圖能重選
+    showToast('圖片已上傳');
+  } catch(e) {
+    showToast('上傳失敗:'+(e.message||e), 'error');
+  }
+};
+
+window._csRemoveStepImage = function(id) {
+  const preview = document.getElementById(`cs-step-img-${id}`);
+  const urlInput = document.getElementById(`cs-step-imgurl-${id}`);
+  if (urlInput) urlInput.value = '';
+  if (preview) { preview.style.display = 'none'; preview.innerHTML = ''; }
 };
 
 // 收集畫面上的處理階段(modalAddCS / modalEditCS 共用)
@@ -21090,10 +21166,56 @@ window._csCollectSteps = function() {
       id: 'step_'+Math.random().toString(36).slice(2,10),
       datetime: dtVal ? new Date(dtVal).toISOString() : new Date().toISOString(),
       description: desc,
+      link: document.getElementById(`cs-step-link-${i}`)?.value.trim() || '',
+      image_url: document.getElementById(`cs-step-imgurl-${i}`)?.value || '',
     });
   });
   steps.sort((a,b) => (a.datetime||'').localeCompare(b.datetime||''));
   return steps;
+};
+
+// 問題摘要圖片:上傳並壓縮到 ≤100KB,加入畫面預覽清單
+window._csUploadIssueImage = async function() {
+  const fileInput = document.getElementById('cs-issue-file');
+  const file = fileInput?.files?.[0];
+  if (!file) return;
+  if (!/^image\//.test(file.type)) { showToast('請選擇圖片檔', 'error'); return; }
+  try {
+    showToast('壓縮上傳中…');
+    const compressed = await compressImage(file, 100);
+    const ext = (compressed.type && compressed.type.split('/')[1]) || (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `cs/issue_${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
+    const { error: upErr } = await db.storage.from('ar-attachments').upload(path, compressed, { upsert: true });
+    if (upErr) { showToast('上傳失敗:'+upErr.message, 'error'); return; }
+    const { data: urlData } = db.storage.from('ar-attachments').getPublicUrl(path);
+    const url = urlData?.publicUrl || '';
+    if (!url) { showToast('無法取得圖片網址', 'error'); return; }
+    window._csAddIssueImage(url);
+    fileInput.value = '';
+    showToast('圖片已上傳');
+  } catch(e) {
+    showToast('上傳失敗:'+(e.message||e), 'error');
+  }
+};
+
+// 加一個圖片縮圖到問題摘要區
+window._csAddIssueImage = function(url) {
+  const list = document.getElementById('cs-issue-images');
+  if (!list) return;
+  const wrap = document.createElement('div');
+  wrap.style.cssText = 'position:relative;display:inline-block';
+  wrap.innerHTML = `
+    <a href="${url}" target="_blank"><img src="${url}" style="width:60px;height:60px;object-fit:cover;border-radius:6px;border:1px solid var(--border)"></a>
+    <button type="button" onclick="this.parentElement.remove()" title="移除"
+      style="position:absolute;top:-6px;right:-6px;width:18px;height:18px;border-radius:50%;background:#fff;border:1px solid #ccc;cursor:pointer;font-size:11px;line-height:1;padding:0;color:#666">×</button>
+    <input type="hidden" class="cs-issue-img-url" value="${url}">
+  `;
+  list.appendChild(wrap);
+};
+
+// 收集所有問題摘要圖片網址
+window._csCollectIssueImages = function() {
+  return Array.from(document.querySelectorAll('#cs-issue-images .cs-issue-img-url')).map(el => el.value).filter(Boolean);
 };
 
 // 子任務列共用渲染(modalAddCS / modalEditCS 共用)
