@@ -1326,19 +1326,22 @@ function renderDashboard() {
               : '過期';
             const assigneeIds = Array.isArray(t.assignee_ids) ? t.assignee_ids : (t.assigned_to ? [t.assigned_to] : []);
             const names = assigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean).join('、');
+            // 有過期子任務 → 主任務 + 負責人變紅字
+            const hasOverdueSub = overdueSubs.length > 0;
+            const titleColor = hasOverdueSub ? '#e53935' : '#1a1a1a';
+            const assigneeColor = hasOverdueSub ? '#e53935' : 'var(--muted)';
+            // 子任務 inline 顯示(類似我的待辦),過期子任務紅字
             const subsHtml = overdueSubs.map(s => {
               const subWho = (state.data.users||[]).find(u=>u.id===s.assignee_id)?.name || '';
-              return `<span style="color:#e53935">⚠ ${s.text}（${s.due_date.slice(5)}${subWho?` · ${subWho}`:''}）</span>`;
+              return `<span style="color:#e53935">⚠ ${s.text}（逾期 ${s.due_date.slice(5)}${subWho?` · ${subWho}`:''}）</span>`;
             }).join('　');
-            return `<div style="display:flex;align-items:flex-start;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
-              <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0;margin-top:5px"></span>
-              <span style="font-size:11px;font-weight:700;color:var(--danger);min-width:72px;white-space:nowrap;flex-shrink:0;margin-top:1px">${dueLabel}</span>
-              <div style="flex:1;min-width:0;display:flex;flex-direction:column;gap:3px">
-                <div style="display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
-                  <span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
-                  ${names ? `<span style="font-size:11px;color:var(--muted)">👤 ${names}</span>` : ''}
-                </div>
-                ${subsHtml ? `<div style="font-size:11px;line-height:1.6">${subsHtml}</div>` : ''}
+            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
+              <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
+              <span style="font-size:11px;font-weight:700;color:var(--danger);min-width:70px;white-space:nowrap;flex-shrink:0">${dueLabel}</span>
+              <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
+                <span style="font-size:13px;font-weight:700;color:${titleColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
+                ${names ? `<span style="font-size:11px;color:${assigneeColor};font-weight:${hasOverdueSub?'700':'400'}">👤 ${names}</span>` : ''}
+                ${subsHtml ? `<span style="font-size:11px">${subsHtml}</span>` : ''}
               </div>
             </div>`;
           }).join('');
