@@ -869,8 +869,9 @@ async function loadAccounting() {
     console.log('[AP載入] 共', apResult.data?.length, '筆，範例:', apResult.data?.[0]);
   }
   const [meal, advance, vendors, ar, arAll] = await Promise.all([
-    db.from('meal_expenses').select('*').eq('year_month', ym).order('item_date'),
-    db.from('advance_payments').select('*').eq('year_month', ym).order('item_date'),
+    // 餐費/代墊:撈全部月份,由前端「本月/前月/全部」篩選器決定顯示
+    db.from('meal_expenses').select('*').order('item_date', { ascending: false }),
+    db.from('advance_payments').select('*').order('item_date', { ascending: false }),
     db.from('vendors').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('name'),
     db.from('accounts_receivable').select('*').eq('year_month', ym).order('shipment_date'),
     db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month').order('billing_month', { ascending: true }),
