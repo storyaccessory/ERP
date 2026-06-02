@@ -877,6 +877,11 @@ async function loadAccounting() {
     db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month').order('billing_month', { ascending: true }),
   ]);
   state.data.accounting = { ap: apResult.data||[], meal: meal.data||[], advance: advance.data||[], ym, vendors: vendors.data||[], ar: ar.data||[], ar_all: arAll.data||[] };
+  // 載入人員資料(餐費統計需要列出所有預算>0的員工,包括這個月還沒花的)
+  if (!state.data.users?.length) {
+    const { data: uData } = await db.from('profiles').select('id, name').order('name');
+    state.data.users = uData || [];
+  }
 }
 
 async function loadCosts() {
@@ -8160,26 +8165,40 @@ function renderAccounting() {
       </div>
       <div class="card acct-tab-summary" style="min-width:200px">
         <div style="font-weight:600;margin-bottom:4px;font-size:13px">員工餐費統計</div>
-        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">每月預算（可於系統設定調整）</div>
-        ${Object.entries(empMealSummary).filter(([name]) => getMealBudgetForEmployee(name) > 0).map(([name, total]) => {
-          const budget = getMealBudgetForEmployee(name);
-          const diff = budget - total;
-          const pct = Math.min(100, Math.round(total / budget * 100));
-          const over = total > budget;
-          return `
-          <div style="padding:8px 0;border-bottom:1px solid var(--border)">
-            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
-              <span style="font-size:13px;font-weight:600">${name}</span>
-              <span style="font-weight:700;color:${over?'var(--danger)':'var(--accent)'}">$${total.toLocaleString()}</span>
-            </div>
-            <div style="background:#e0e0e0;border-radius:4px;height:5px;overflow:hidden;margin-bottom:3px">
-              <div style="width:${pct}%;height:100%;background:${over?'var(--danger)':'var(--accent)'};border-radius:4px"></div>
-            </div>
-            <div style="font-size:11px;color:${diff<0?'var(--danger)':diff===0?'var(--success)':'var(--muted)'}">
-              ${diff > 0 ? `尚差 $${diff.toLocaleString()}` : diff === 0 ? '✅ 剛好達標' : `⚠️ 超出 $${Math.abs(diff).toLocaleString()}`}
-            </div>
-          </div>`;
-        }).join('')}
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">每月預算（可於系統設定調整,預算為 0 者不列入）</div>
+        ${(() => {
+          // 列出「所有預算 > 0」的員工(不只是有送發票的);名單來源:profiles + 預算 localStorage
+          const _budgetsRaw = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
+          const _allNames = Array.from(new Set([
+            ...((state.data.users||[]).map(u => u.name).filter(Boolean)),
+            ...Object.keys(_budgetsRaw),
+          ]));
+          const _rows = _allNames
+            .map(name => ({ name, budget: getMealBudgetForEmployee(name), total: empMealSummary[name] || 0 }))
+            .filter(r => r.budget > 0)
+            .map(r => ({ ...r, diff: r.budget - r.total, over: r.total > r.budget }))
+            .sort((a,b) => {
+              if (a.over !== b.over) return a.over ? -1 : 1;   // 超出的優先
+              return b.total - a.total;                          // 同組依花費由多到少
+            });
+          if (_rows.length === 0) return '<div style="font-size:12px;color:var(--muted);padding:8px 0">無預算員工</div>';
+          return _rows.map(({ name, total, budget, diff, over }) => {
+            const pct = budget ? Math.min(100, Math.round(total / budget * 100)) : 0;
+            return `
+            <div style="padding:8px 0;border-bottom:1px solid var(--border)">
+              <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px">
+                <span style="font-size:13px;font-weight:600">${name}</span>
+                <span style="font-weight:700;color:${over?'var(--danger)':'var(--accent)'}">$${total.toLocaleString()}<span style="font-size:11px;color:var(--muted);font-weight:400"> / $${budget.toLocaleString()}</span></span>
+              </div>
+              <div style="background:#e0e0e0;border-radius:4px;height:5px;overflow:hidden;margin-bottom:3px">
+                <div style="width:${pct}%;height:100%;background:${over?'var(--danger)':'var(--accent)'};border-radius:4px"></div>
+              </div>
+              <div style="font-size:11px;color:${diff<0?'var(--danger)':diff===0?'var(--success)':'var(--muted)'}">
+                ${diff > 0 ? `尚差 $${diff.toLocaleString()}` : diff === 0 ? '✅ 剛好達標' : `⚠️ 超出 $${Math.abs(diff).toLocaleString()}`}
+              </div>
+            </div>`;
+          }).join('');
+        })()}
         <div style="display:flex;justify-content:space-between;padding:8px 0;margin-top:4px">
           <span style="font-weight:600">合計</span>
           <span style="font-weight:700;color:var(--danger)">$${mealTotal.toLocaleString()}</span>
