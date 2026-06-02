@@ -19736,11 +19736,13 @@ function renderCalendar() {
 
     const holidayName = getTwHoliday(ds);
     const isHoliday = !!holidayName;
-    const cellBg = isToday?'#fff5f5':isHoliday?'#f0f0f0':isWeekend?'#fafafa':'#fff';
-    const cellBorder = isToday?'#e53935':isHoliday?'#d0d0d0':isWeekend?'#e8e8e8':'var(--border)';
-    const dayNumColor = isToday?'#c62828':isHoliday?'#888':isWeekend?'#bbb':'var(--text)';
+    // 國定假日與週末統一用淡粉色底(非上班日標記)
+    const isOffDay = isHoliday || isWeekend;
+    const cellBg = isToday?'#fff5f5':isOffDay?'#fff5f5':'#fff';
+    const cellBorder = isToday?'#e53935':isOffDay?'#fde2e1':'var(--border)';
+    const dayNumColor = isToday?'#c62828':isHoliday?'#c62828':isWeekend?'#c98a8a':'var(--text)';
     cells.push(`<div class="cal-cell" data-date="${ds}" style="border:1px solid ${cellBorder};border-radius:6px;padding:4px 5px;cursor:pointer;background:${cellBg};${isToday?'outline:2px solid #e53935;':''}">
-      <div style="font-size:12px;font-weight:${isToday?800:400};color:${dayNumColor};margin-bottom:3px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">${isToday?`<span style="display:inline-flex;align-items:center;justify-content:center;background:#e53935;color:#fff;width:21px;height:21px;border-radius:50%;font-size:11px">${d}</span>`:d}${isHoliday?`<span style="font-size:10px;color:#888;font-weight:600;background:#e8e8e8;border-radius:3px;padding:1px 5px">🏖 ${holidayName}</span>`:''}</div>
+      <div style="font-size:12px;font-weight:${isToday?800:400};color:${dayNumColor};margin-bottom:3px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">${isToday?`<span style="display:inline-flex;align-items:center;justify-content:center;background:#e53935;color:#fff;width:21px;height:21px;border-radius:50%;font-size:11px">${d}</span>`:d}${isHoliday?`<span style="font-size:10px;color:#c62828;font-weight:600;background:#fde2e1;border-radius:3px;padding:1px 5px">🏖 ${holidayName}</span>`:''}</div>
       ${shown.map(item => {
         const baseDiv = (content, style, onclick) =>
           `<div style="font-size:11px;line-height:1.4;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${style}" ${onclick}><span style="font-size:9px">●</span> ${content}</div>`;
