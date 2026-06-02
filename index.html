@@ -1319,28 +1319,22 @@ function renderDashboard() {
 
           const rowsOv = sortedOv.slice(0, 8).map(({ t, eventOv, overdueSubs }) => {
             const pColor = t.priority==='高'?'#e53935':t.priority==='低'?'#43a047':'#f57c00';
-            // 左邊日期一律顯示主任務 end_date;前綴指出過期原因(過期 = 主任務本身過期;子任務 = 只是子任務逾期)
+            // 左邊只顯示主任務日期,紅字即代表過期,無需前綴
             const mainDate = t.end_date || t.start_date || '';
-            const dueLabel = mainDate
-              ? (eventOv ? `過期 ${mainDate.slice(5)}` : `子任務 ${mainDate.slice(5)}`)
-              : (eventOv ? '過期' : '子任務');
+            const dueLabel = mainDate ? mainDate.slice(5) : '—';
             const assigneeIds = Array.isArray(t.assignee_ids) ? t.assignee_ids : (t.assigned_to ? [t.assigned_to] : []);
             const names = assigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean).join('、');
-            // 有過期子任務 → 主任務 + 負責人變紅字
-            const hasOverdueSub = overdueSubs.length > 0;
-            const titleColor = hasOverdueSub ? '#e53935' : '#1a1a1a';
-            const assigneeColor = hasOverdueSub ? '#e53935' : 'var(--muted)';
-            // 子任務 inline 顯示(類似我的待辦),過期子任務紅字
+            // 紅字只用在過期子任務本身;主任務標題與負責人維持一般樣式
             const subsHtml = overdueSubs.map(s => {
               const subWho = (state.data.users||[]).find(u=>u.id===s.assignee_id)?.name || '';
               return `<span style="color:#e53935">⚠ ${s.text}（逾期 ${s.due_date.slice(5)}${subWho?` · ${subWho}`:''}）</span>`;
             }).join('　');
             return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
               <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
-              <span style="font-size:11px;font-weight:700;color:var(--danger);min-width:70px;white-space:nowrap;flex-shrink:0">${dueLabel}</span>
+              <span style="font-size:11px;font-weight:700;color:var(--danger);min-width:50px;white-space:nowrap;flex-shrink:0">${dueLabel}</span>
               <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
-                <span style="font-size:13px;font-weight:700;color:${titleColor};white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
-                ${names ? `<span style="font-size:11px;color:${assigneeColor};font-weight:${hasOverdueSub?'700':'400'}">👤 ${names}</span>` : ''}
+                <span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
+                ${names ? `<span style="font-size:11px;color:var(--muted)">👤 ${names}</span>` : ''}
                 ${subsHtml ? `<span style="font-size:11px">${subsHtml}</span>` : ''}
               </div>
             </div>`;
