@@ -20360,10 +20360,16 @@ window._calClearAll = function() {
 
 // 在「檢視事項」modal 即時切換子任務完成狀態
 window._calToggleSubtask = async function(evId, subIdx, checked) {
-  const ev = (state.data.calEvents||[]).find(e=>e.id===evId);
-  if (!ev || !Array.isArray(ev.subtasks)) return;
+  // 找事項:先看本地快取,沒有就直接從 DB 抓一筆
+  let ev = (state.data.calEvents||[]).find(e=>e.id===evId);
+  if (!ev) {
+    const { data } = await db.from('calendar_events').select('*').eq('id', evId).single();
+    ev = data;
+  }
+  if (!ev || !Array.isArray(ev.subtasks)) { showToast('找不到事項', 'error'); return; }
+  const prevDone = ev.subtasks[subIdx].done;
   ev.subtasks[subIdx].done = checked;
-  // 更新 DOM 樣式
+  // 更新 DOM 樣式(樂觀更新)
   const row = document.getElementById('cal-view-sub-'+subIdx);
   if (row) {
     row.style.background = checked ? '#f1f8e9' : '#fafafa';
@@ -20375,8 +20381,24 @@ window._calToggleSubtask = async function(evId, subIdx, checked) {
   const doneCount = ev.subtasks.filter(s=>s.done).length;
   const bar = document.querySelector('#cal-view-sub-0')?.closest('[style*="margin-bottom:12px"]')?.querySelector('[style*="background:var(--accent)"]');
   if (bar) bar.style.width = Math.round(doneCount/ev.subtasks.length*100)+'%';
-  // 寫回 DB（fire-and-forget）
-  db.from('calendar_events').update({ subtasks: ev.subtasks }).eq('id', evId);
+  // 寫回 DB,真的失敗就回滾 UI 並提示
+  const { error } = await db.from('calendar_events').update({ subtasks: ev.subtasks }).eq('id', evId);
+  if (error) {
+    // 回滾本地狀態與畫面
+    ev.subtasks[subIdx].done = prevDone;
+    if (row) {
+      row.style.background = prevDone ? '#f1f8e9' : '#fafafa';
+      row.style.borderColor = prevDone ? '#c8e6c9' : 'var(--border)';
+      const txt2 = row.querySelector('span:first-of-type');
+      if (txt2) txt2.style.textDecoration = prevDone ? 'line-through' : '';
+      const cb = row.querySelector('input[type=checkbox]');
+      if (cb) cb.checked = prevDone;
+    }
+    const doneCount2 = ev.subtasks.filter(s=>s.done).length;
+    if (bar) bar.style.width = Math.round(doneCount2/ev.subtasks.length*100)+'%';
+    console.error('subtask toggle failed:', error);
+    showToast('勾選未存檔:' + error.message, 'error');
+  }
 };
 
 // 子任務日期：一鍵帶入行事曆事項本身的日期（cal-start）
