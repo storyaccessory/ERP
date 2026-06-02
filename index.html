@@ -1319,11 +1319,11 @@ function renderDashboard() {
 
           const rowsOv = sortedOv.slice(0, 8).map(({ t, eventOv, overdueSubs }) => {
             const pColor = t.priority==='高'?'#e53935':t.priority==='低'?'#43a047':'#f57c00';
-            // 標籤:事項過期 → 「過期 X/XX」;只有子任務過期 → 「子任務 X/XX」
-            const ovDate = eventOv ? t.end_date : (overdueSubs.map(s=>s.due_date).sort()[0] || '');
-            const dueLabel = ovDate
-              ? (eventOv ? `過期 ${ovDate.slice(5)}` : `子任務 ${ovDate.slice(5)}`)
-              : '過期';
+            // 左邊日期一律顯示主任務 end_date;前綴指出過期原因(過期 = 主任務本身過期;子任務 = 只是子任務逾期)
+            const mainDate = t.end_date || t.start_date || '';
+            const dueLabel = mainDate
+              ? (eventOv ? `過期 ${mainDate.slice(5)}` : `子任務 ${mainDate.slice(5)}`)
+              : (eventOv ? '過期' : '子任務');
             const assigneeIds = Array.isArray(t.assignee_ids) ? t.assignee_ids : (t.assigned_to ? [t.assigned_to] : []);
             const names = assigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean).join('、');
             // 有過期子任務 → 主任務 + 負責人變紅字
