@@ -714,8 +714,16 @@ async function loadDashboard() {
   const threeDays = new Date(Date.now() + 3*86400000).toISOString().split('T')[0];
 
   const myId = state.user?.id;
-  // 當月年月字串(YYYYMM)用於餐費查詢
-  const _thisYmStr = today.slice(0,4) + today.slice(5,7);
+  // 餐費年月:每月 5 號前看前月,5 號(含)後看當月
+  const _todayDay = parseInt(today.slice(8,10), 10);
+  const _mealYmDate = (() => {
+    const d = new Date(today + 'T00:00:00');
+    if (_todayDay < 5) d.setMonth(d.getMonth() - 1);
+    return d;
+  })();
+  const _mealYmStr = _mealYmDate.getFullYear().toString() + String(_mealYmDate.getMonth()+1).padStart(2,'0');
+  const _mealYmLabel = `${_mealYmDate.getFullYear()}年 ${_mealYmDate.getMonth()+1} 月`;
+  const _thisYmStr = _mealYmStr; // 保留變數名供其他地方參考
   const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
@@ -738,8 +746,8 @@ async function loadDashboard() {
       .neq('is_template', true)
       .order('end_date')
       .limit(200),
-    // 當月餐費(用於儀表板進度卡片)
-    db.from('meal_expenses').select('applicant_name,amount').eq('year_month', _thisYmStr),
+    // 餐費(用於儀表板進度卡片,5號前抓前月、5號後抓當月)
+    db.from('meal_expenses').select('applicant_name,amount').eq('year_month', _mealYmStr),
   ]);
 
   // 載入人員資料(顯示負責人名字 + 餐費依員編排序)
@@ -759,6 +767,7 @@ async function loadDashboard() {
     overdue: overdueAll.data || [],
     mealThis: mealThis.data || [],
     ym: _thisYmStr,
+    mealYmLabel: _mealYmLabel,
     today,
     threeDays,
   };
@@ -1389,9 +1398,9 @@ function renderDashboard() {
         }
       </div>
 
-      <!-- 餐費進度(本月) -->
+      <!-- 餐費進度(5號前顯示前月、5號後顯示當月) -->
       <div class="card">
-        <div class="section-title">🍱 本月餐費進度</div>
+        <div class="section-title">🍱 ${d.mealYmLabel || '本月'} 餐費進度</div>
         ${(() => {
           const mealArr = d.mealThis || [];
           const _emp = {};
@@ -1409,8 +1418,9 @@ function renderDashboard() {
           const _rows = _allNames
             .map(name => ({ name, employee_no: _empNoByName[name] || null, budget: getMealBudgetForEmployee(name), total: _emp[name] || 0 }))
             .filter(r => r.budget > 0)
-            .map(r => ({ ...r, diff: r.budget - r.total, over: r.total > r.budget }))
+            .map(r => ({ ...r, over: r.total > r.budget }))
             .sort((a,b) => {
+              // 員編只用來排序,不顯示;沒員編的放最後
               const aHas = a.employee_no != null && a.employee_no !== '';
               const bHas = b.employee_no != null && b.employee_no !== '';
               if (aHas !== bHas) return aHas ? -1 : 1;
@@ -1423,18 +1433,15 @@ function renderDashboard() {
           if (_rows.length === 0) {
             return '<div class="empty"><div class="empty-icon">🍱</div><p>尚無預算員工</p></div>';
           }
-          return _rows.map(({ name, employee_no, total, budget, diff, over }) => {
+          return _rows.map(({ name, total, budget, over }) => {
             const pct = budget ? Math.min(100, Math.round(total / budget * 100)) : 0;
             return `<div style="padding:6px 0;border-bottom:1px solid #f0f0f0">
               <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;gap:8px">
-                <span style="font-size:12px;font-weight:600;color:#1a1a1a">${name}${employee_no?`<span style="font-size:10px;color:var(--muted);font-weight:400;margin-left:4px">#${employee_no}</span>`:''}</span>
+                <span style="font-size:12px;font-weight:600;color:#1a1a1a">${name}</span>
                 <span style="font-size:12px;font-weight:700;color:${over?'var(--danger)':'var(--accent)'};white-space:nowrap">$${total.toLocaleString()}<span style="font-size:10px;color:var(--muted);font-weight:400"> / $${budget.toLocaleString()}</span></span>
               </div>
-              <div style="background:#e0e0e0;border-radius:3px;height:4px;overflow:hidden;margin-bottom:2px">
+              <div style="background:#e0e0e0;border-radius:3px;height:4px;overflow:hidden">
                 <div style="width:${pct}%;height:100%;background:${over?'var(--danger)':'var(--accent)'};border-radius:3px"></div>
-              </div>
-              <div style="font-size:10px;color:${diff<0?'var(--danger)':diff===0?'var(--success)':'var(--muted)'}">
-                ${diff > 0 ? `尚差 $${diff.toLocaleString()}` : diff === 0 ? '✅ 剛好達標' : `⚠️ 超出 $${Math.abs(diff).toLocaleString()}`}
               </div>
             </div>`;
           }).join('');
