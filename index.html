@@ -22104,7 +22104,7 @@ async function handleAction(action, id, dataset) {
         || state.user?.email === 'cailing0516@gmail.com'
         || _ep.name === '蔡采玲';
       if (!_isAdmin) { showToast('只有主管/管理員可以刪除客服記錄', 'error'); return; }
-      const summary = el.dataset.summary || '';
+      const summary = (dataset && dataset.summary) || '';
       if (!confirm(`確定要刪除這筆客服記錄?\n${summary?`「${summary}」\n`:''}刪除後不可復原。`)) return;
       const { error } = await db.from('cs_records').delete().eq('id', id);
       if (error) { showToast('刪除失敗:'+error.message, 'error'); return; }
