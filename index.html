@@ -4852,11 +4852,11 @@ async function modalAddAcct(tab, existing) {
 
       const payload = {
         applicant_id: myId || null,
-        applicant_name: myName,
+        applicant_name: myName || '',
         item_date: date,
         amount,
-        item_desc: desc || null,
-        invoice_no: invoice || null,
+        item_desc: desc || '',   // 改空字串,避免 NOT NULL 拒絕
+        invoice_no: invoice || '',
         invoice_file_url: invoiceFileUrl || (existing?.invoice_file_url || null),
         invoice_file_name: invoiceFileName || (existing?.invoice_file_name || null),
         year_month: ymStr,
