@@ -17351,19 +17351,38 @@ function renderJournal() {
   const myTpl = _getMyTemplate(jd);
   const today3d = new Date(Date.now()+3*86400000).toISOString().slice(0,10);
 
+  // ── 本月補填統計 ──（建檔日 > 日誌日 視為補填；統計本月份的次數，依使用者）
+  const _ym = today.slice(0,7);
+  const _monthlyBackfill = {};
+  (history || []).forEach(l => {
+    if (!l.date || !l.created_at) return;
+    if (!l.date.startsWith(_ym)) return;
+    if (l.created_at.slice(0,10) > l.date) {
+      _monthlyBackfill[l.user_id] = (_monthlyBackfill[l.user_id]||0) + 1;
+    }
+  });
+
   // ── 單張日誌 card ──
   const _jnlCard = (log, { showActions = true } = {}) => {
     const isMe = log.user_id === myId;
     const tpl = _getTemplateForLog(log, jd);
     const fields = log.fields || {};
     const logProfile = profiles.find(p => p.id === log.user_id);
+    const isBackfill = log.date && log.created_at && log.created_at.slice(0,10) > log.date;
+    const backfillTag = isBackfill
+      ? `<span style="background:#fff8e1;color:#e65100;border:1px solid #ffe082;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-right:6px;white-space:nowrap">⚠ 補填於 ${log.created_at.slice(5,10).replace('-','/')}</span>`
+      : '';
+    const mbCount = _monthlyBackfill[log.user_id] || 0;
+    const monthlyTag = mbCount > 0
+      ? `<span style="margin-left:8px;font-size:11px;color:#e65100;font-weight:700">本月補填 ${mbCount} 次</span>`
+      : '';
     return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
-      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
         <div>
           <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
-          <div style="font-size:11px;color:var(--muted)">${logProfile?.job_title||tpl.label}</div>
+          <div style="font-size:11px;color:var(--muted)">${logProfile?.job_title||tpl.label}${monthlyTag}</div>
         </div>
-        <div style="font-size:11px;color:var(--muted)">${log.updated_at ? new Date(log.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
+        <div style="font-size:11px;color:var(--muted);display:flex;align-items:center">${backfillTag}${log.updated_at ? new Date(log.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
       </div>
       ${tpl.fields.map(f => {
         if (f.private && !isMe && !isAdmin) return '';
@@ -17655,9 +17674,19 @@ window.modalEditJournal = async function(existingId = null) {
   const tpl = JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
   const existingFields = existing?.fields || {};
 
+  // 補填:可選今天起往前 2 天內;未來日期不允許
+  const _jnlMinDate = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()-2); return _localDateStr(d); })();
+
   showModal(`${existing?'修改':'填寫'}工作日誌`, `
-    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border)">
-      📅 ${logDate} &nbsp;·&nbsp; ${myName}
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+      📅
+      ${existing
+        ? `<span style="font-size:13px;color:var(--text);font-weight:600">${logDate}</span>`
+        : `<input type="date" id="jnl-log-date" value="${today}" min="${_jnlMinDate}" max="${today}"
+             style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;color:var(--text)">
+           <span style="font-size:11px;color:var(--muted)">(可補填近 2 天內,選非今天會自動標記)</span>`}
+      <span style="color:var(--muted)">·</span>
+      <span>${myName}</span>
     </div>
     ${tpl.fields.map(f => `
     <div class="form-group" style="margin-bottom:14px">
@@ -17727,9 +17756,16 @@ window.modalEditJournal = async function(existingId = null) {
         });
         if (items.length > 0) fields[f.key] = items;
       });
+      // 取所選日期(新建用 picker,修改沿用原日期);驗證 2 天範圍
+      const _picked = document.getElementById('jnl-log-date')?.value || '';
+      const _dateToUse = existing ? logDate : (_picked || today);
+      if (!existing && (_dateToUse > today || _dateToUse < _jnlMinDate)) {
+        showToast('只能補填今天起前 2 天內的日誌', 'error');
+        return;
+      }
       const payload = {
         user_id: myId, user_name: myName,
-        date: logDate, template_type: tplKey,
+        date: _dateToUse, template_type: tplKey,
         fields, updated_at: new Date().toISOString(),
       };
       let dbErr;
