@@ -13457,19 +13457,21 @@ function salesHasDay(year, platform, month1, day) {
   const legacy = SALES_DAILY[platform]?.[year]?.[month1]?.[day-1];
   return legacy !== undefined && legacy !== null;
 }
-function salesSetDay(year, platform, month1, day, val) {
+async function salesSetDay(year, platform, month1, day, val) {
   if (!state.data.salesCache) state.data.salesCache = {};
   const k = `${year}_${platform}_${month1}_${day}`;
-  const uid = state.data.profile?.id;
+  const uid = state.profile?.id || state.user?.id || null;
   if (val === null || val === undefined) {
     delete state.data.salesCache[k];
-    db.from('sales_daily').delete().match({year, platform, month1, day});
+    const { error } = await db.from('sales_daily').delete().match({year, platform, month1, day});
+    if (error) { console.error('sales_daily delete failed:', error); showToast('清除失敗:'+error.message, 'error'); }
   } else {
     state.data.salesCache[k] = val;
-    db.from('sales_daily').upsert(
+    const { error } = await db.from('sales_daily').upsert(
       {year, platform, month1, day, value: val, updated_by: uid, updated_at: new Date().toISOString()},
       {onConflict: 'year,month1,day,platform'}
     );
+    if (error) { console.error('sales_daily upsert failed:', error); showToast('業績存檔失敗:'+error.message, 'error'); }
   }
 }
 
@@ -14321,13 +14323,16 @@ function salesExpInput(key, field, val) {
   const data = state.data.expCache[ek];
   if (field === 'stall') data.stall = !!val;
   else data[field] = parseFloat(val)||0;
-  // Upsert to Supabase (fire-and-forget)
-  const uid = state.data.profile?.id;
+  // Upsert to Supabase
+  const uid = state.profile?.id || state.user?.id || null;
   const dbVal = field === 'stall' ? (!!val ? 1 : 0) : (parseFloat(val)||0);
-  db.from('sales_exp_detail').upsert(
-    {year, month1, day, field, value: dbVal, updated_by: uid, updated_at: new Date().toISOString()},
-    {onConflict: 'year,month1,day,field'}
-  );
+  (async () => {
+    const { error } = await db.from('sales_exp_detail').upsert(
+      {year, month1, day, field, value: dbVal, updated_by: uid, updated_at: new Date().toISOString()},
+      {onConflict: 'year,month1,day,field'}
+    );
+    if (error) { console.error('sales_exp_detail upsert failed:', error); showToast('體驗店資料存檔失敗:'+error.message, 'error'); }
+  })();
   // Auto-sum cash+card+linepay -> 體驗店 cell for that day
   const dayTotal = (parseFloat(data.cash)||0) + (parseFloat(data.card)||0) + (parseFloat(data.linepay)||0);
   salesSetDay(year, '體驗店', month1, day, dayTotal);
