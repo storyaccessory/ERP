@@ -19738,7 +19738,7 @@ function renderCalendar() {
     const isHoliday = !!holidayName;
     // 國定假日與週末統一用淡粉色底(非上班日標記)
     const isOffDay = isHoliday || isWeekend;
-    const cellBg = isToday?'#fff5f5':isOffDay?'#fff5f5':'#fff';
+    const cellBg = isToday?'#FFFAFA':isOffDay?'#FFFAFA':'#fff';
     const cellBorder = isToday?'#e53935':isOffDay?'#fde2e1':'var(--border)';
     const dayNumColor = isToday?'#c62828':isHoliday?'#c62828':isWeekend?'#c98a8a':'var(--text)';
     cells.push(`<div class="cal-cell" data-date="${ds}" style="border:1px solid ${cellBorder};border-radius:6px;padding:4px 5px;cursor:pointer;background:${cellBg};${isToday?'outline:2px solid #e53935;':''}">
