@@ -19853,14 +19853,24 @@ function renderCalendar() {
     </div>`);
   }
 
-  // upcoming events list：今天起未來 14 天（不受檢視月份限制），套用相同的 我的/分類 篩選
+  // upcoming + overdue:今天起未來 14 天 + 未完成的過期事項;套用相同的 我的/分類 篩選
   const upTo14 = _localDateStr((() => { const d = new Date(todayStr+'T00:00:00'); d.setDate(d.getDate()+14); return d; })());
   let upSrc = state.data.calUpcoming || [];
   if (calFilter === 'mine') upSrc = upSrc.filter(ev => ev.assigned_to === myId || (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(myId)));
   if (calTypeFilter) upSrc = upSrc.filter(ev => ev.event_type === calTypeFilter);
   const upcoming = upSrc
-    .filter(e => (e.end_date||e.start_date) >= todayStr && e.start_date <= upTo14)
-    .sort((a,b) => (a.start_date||'').localeCompare(b.start_date||''))
+    .filter(e => {
+      const inUpcoming = (e.end_date||e.start_date) >= todayStr && e.start_date <= upTo14;
+      const isOverdue  = e.end_date && e.end_date < todayStr && !e.completed_at;
+      return inUpcoming || isOverdue;
+    })
+    .sort((a,b) => {
+      // 逾期者排前面,然後依日期升冪
+      const aOv = a.end_date && a.end_date < todayStr && !a.completed_at;
+      const bOv = b.end_date && b.end_date < todayStr && !b.completed_at;
+      if (aOv !== bOv) return aOv ? -1 : 1;
+      return (a.start_date||'').localeCompare(b.start_date||'');
+    })
     .slice(0,20);
 
   return `
@@ -19949,10 +19959,10 @@ function renderCalendar() {
     </div>
     <div>
       <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:10px">
-        <div style="font-size:14px;font-weight:600;color:var(--accent-dark)">📌 近期事項</div>
+        <div style="font-size:14px;font-weight:600;color:var(--accent-dark)">📌 近期 & 過期事項</div>
         <button class="btn btn-primary btn-sm" id="cal-add-btn">+ 新增</button>
       </div>
-      ${upcoming.length===0?`<div class="card"><div class="empty" style="padding:20px"><p style="font-size:13px">近 14 天無事項</p></div></div>`:''}
+      ${upcoming.length===0?`<div class="card"><div class="empty" style="padding:20px"><p style="font-size:13px">近期/過期無事項</p></div></div>`:''}
       ${upcoming.map(ev=>{
         const t = getCalEventTypes()[ev.event_type]||getCalEventTypes().general||{label:'一般',color:'#90a4ae',bg:'#eceff1'};
         const isMulti = ev.end_date && ev.end_date !== ev.start_date;
