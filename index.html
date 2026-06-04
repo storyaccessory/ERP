@@ -19772,8 +19772,14 @@ function renderCalendar() {
       const aAllDay = !isTimed(a), bAllDay = !isTimed(b);
       if (aAllDay !== bAllDay) return aAllDay ? -1 : 1;    // 整天優先
       const aCi = _catIdx(a), bCi = _catIdx(b);
-      if (aCi !== bCi) return aCi - bCi;                   // 同組依下方分類列順序
-      return getTime(a).localeCompare(getTime(b));          // 同分類:有時間的依時間,整天的維持來源順序
+      if (aAllDay && bAllDay) {
+        // 兩個都整天 → 依下方分類列順序
+        return aCi - bCi;
+      }
+      // 兩個都有時間 → 時間優先,同時間再依分類
+      const timeCmp = getTime(a).localeCompare(getTime(b));
+      if (timeCmp !== 0) return timeCmp;
+      return aCi - bCi;
     });
   });
 
