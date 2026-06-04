@@ -732,7 +732,6 @@ async function loadDashboard() {
       .is('completed_at', null)
       .neq('is_template', true)
       .or(`assigned_to.eq.${myId},assignee_ids.cs.["${myId}"]`)
-      .gte('end_date', today)
       .order('priority')
       .order('start_date'),
     db.from('cs_records').select('*').eq('reply_status','未回覆'),
@@ -1258,9 +1257,9 @@ function renderDashboard() {
     </div>
 
     <div class="dashboard-grid">
-      <!-- 我的待辦（行事曆事項 + 子任務合併） -->
+      <!-- 我的待辦 & 我的過期任務（含逾期事項,逾期者排前） -->
       <div class="card">
-        <div class="section-title">✅ 我的待辦
+        <div class="section-title">✅ 我的待辦 & 我的過期任務
           <button class="btn btn-sm btn-outline" style="margin-left:auto" onclick="modalCalEvent()">+ 新增</button>
         </div>
         ${(()=>{
@@ -1279,10 +1278,15 @@ function renderDashboard() {
             return { color:'#999', label: d.slice(5) };
           };
           const PRIORITY_ORDER = { '高':0, '中':1, '低':2 };
-          const sorted = [...todos].sort((a,b) =>
-            (PRIORITY_ORDER[a.priority]??1) - (PRIORITY_ORDER[b.priority]??1) ||
-            (a.start_date||'').localeCompare(b.start_date||'')
-          );
+          // 排序:逾期事項優先 → 優先級高 → 早到期
+          const sorted = [...todos].sort((a,b) => {
+            const aOv = (a.end_date||a.start_date||'') < _todayStr;
+            const bOv = (b.end_date||b.start_date||'') < _todayStr;
+            if (aOv !== bOv) return aOv ? -1 : 1;
+            const pr = (PRIORITY_ORDER[a.priority]??1) - (PRIORITY_ORDER[b.priority]??1);
+            if (pr !== 0) return pr;
+            return (a.start_date||'').localeCompare(b.start_date||'');
+          });
           if (sorted.length === 0) return '<div class="empty"><div class="empty-icon">✅</div><p>沒有待辦事項</p></div>';
           const rows = sorted.slice(0, 8).map(t => {
             const { color, label } = _urg(t.start_date);
@@ -16556,13 +16560,12 @@ async function loadJournal() {
     db.from('work_journals').select('*').eq('date', today).order('created_at'),
     db.from('work_journals').select('*').order('date', { ascending: false }).limit(300),
     db.from('profiles').select('id, name, role, job_title, journal_template, journal_required').order('name'),
-    // 個人近期事項（指派給自己）
+    // 個人近期事項 + 過期事項(指派給自己):未完成且 start_date <= today+1個月 (拿掉 gte today 的限制,讓過期事項一起進來)
     db.from('calendar_events')
       .select('id, title, start_date, end_date, event_type, priority, assigned_to, assignee_ids, completed_at, subtasks')
       .is('completed_at', null)
       .neq('is_template', true)
       .or(`assigned_to.eq.${myUid},assignee_ids.cs.["${myUid}"]`)
-      .gte('start_date', today)
       .lte('start_date', in14)
       .order('start_date'),
     // 部門團隊協作事項（多人指派，不限個人）
@@ -17686,11 +17689,18 @@ function renderJournal() {
       if (mySubs.length > 0) mySubMap[ev.id] = mySubs;
     });
 
-    const upcomingHtml = upcoming.length === 0 ? '' : `
+    // 逾期事項排前面
+    const _upcomingSorted = [...upcoming].sort((a,b) => {
+      const aOv = (a.end_date||a.start_date||'') < todayStr;
+      const bOv = (b.end_date||b.start_date||'') < todayStr;
+      if (aOv !== bOv) return aOv ? -1 : 1;
+      return (a.start_date||'').localeCompare(b.start_date||'');
+    });
+    const upcomingHtml = _upcomingSorted.length === 0 ? '' : `
       <div class="card" style="margin-bottom:16px;border-left:4px solid #f57c00">
-        <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#e65100">📋 你的近期任務</div>
+        <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#e65100">📋 你的近期任務 & 你的過期任務</div>
         <div style="display:flex;flex-direction:column;gap:4px">
-          ${upcoming.map(ev => {
+          ${_upcomingSorted.map(ev => {
             const { bg, color, label } = _urgencyStyle(ev.start_date);
             const subs = mySubMap[ev.id] || [];
             const subsHtml = subs.map(s => {
@@ -17928,21 +17938,30 @@ window.modalEditJournal = async function(existingId = null) {
     </div>`).join('')}
     <div style="font-size:11px;color:var(--muted);text-align:right">建議 3～5 分鐘完成，簡短清楚即可 ✍️</div>
     ${(() => {
-      const myItems = (jd.upcoming||[]);
+      let myItems = (jd.upcoming||[]);
       if (myItems.length === 0) return '';
       const _ts = _localToday();
       const _tm = (() => { const d = new Date(_ts+'T00:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
       const _t3 = (() => { const d = new Date(_ts+'T00:00:00'); d.setDate(d.getDate()+3); return d.toISOString().slice(0,10); })();
       const _t7 = (() => { const d = new Date(_ts+'T00:00:00'); d.setDate(d.getDate()+7); return d.toISOString().slice(0,10); })();
       const _urg = d => {
+        if (!d) return { bg:'#fafafa', color:'#888', label:'—' };
+        if (d < _ts)    return { bg:'#ffebee', color:'#c62828', label:`逾期 ⚠ ${d.slice(5)}` };
         if (d === _ts)  return { bg:'#ffebee', color:'#c62828', label:'今天 🔴' };
         if (d === _tm)  return { bg:'#fff3e0', color:'#e65100', label:'明天 🟠' };
         if (d <= _t3)   return { bg:'#fffde7', color:'#f57f17', label:d.slice(5)+' 🟡' };
         if (d <= _t7)   return { bg:'#f5f5f5', color:'#555',    label:d.slice(5) };
         return                 { bg:'#fafafa', color:'#888',    label:d.slice(5) };
       };
+      // 逾期事項排前面
+      myItems = [...myItems].sort((a,b) => {
+        const aOv = (a.end_date||a.start_date||'') < _ts;
+        const bOv = (b.end_date||b.start_date||'') < _ts;
+        if (aOv !== bOv) return aOv ? -1 : 1;
+        return (a.start_date||'').localeCompare(b.start_date||'');
+      });
       return `<div style="margin-top:16px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
-        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📋 你的近期任務（共 ${myItems.length} 件）</div>
+        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📋 你的近期任務 & 你的過期任務（共 ${myItems.length} 件）</div>
         <div style="display:flex;flex-direction:column;gap:4px">
         ${myItems.map(ev => {
           const { bg, color, label } = _urg(ev.start_date);
