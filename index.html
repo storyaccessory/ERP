@@ -1439,7 +1439,8 @@ function renderDashboard() {
           }
           return _rows.map(({ name, total, budget, over }) => {
             const pct = budget ? Math.min(100, Math.round(total / budget * 100)) : 0;
-            return `<div style="padding:6px 0;border-bottom:1px solid #f0f0f0">
+            const _nameEsc = name.replace(/'/g,"\\'");
+            return `<div style="padding:6px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="window.modalMealDetail('${_nameEsc}','${d.ym||''}','${(d.mealYmLabel||'').replace(/'/g,"\\'")}')">
               <div style="display:flex;justify-content:space-between;align-items:baseline;margin-bottom:3px;gap:8px">
                 <span style="font-size:12px;font-weight:600;color:#1a1a1a">${name}</span>
                 <span style="font-size:12px;font-weight:700;color:${over?'var(--danger)':'var(--accent)'};white-space:nowrap">$${total.toLocaleString()}<span style="font-size:10px;color:var(--muted);font-weight:400"> / $${budget.toLocaleString()}</span></span>
@@ -19697,7 +19698,9 @@ function renderCalendar() {
   const daysInMonth = new Date(y, m+1, 0).getDate();
   const monthNames = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
   const calFilter     = state.data.calFilter     || 'all';  // 'all' | 'mine'
-  const calView       = state.data.calView       || 'month'; // 'month' | 'list'
+  // 手機(≤700px)預設用清單檢視(月曆太擠);只有使用者明確指定時才用 month
+  const _isMobile = typeof window !== 'undefined' && window.innerWidth <= 700;
+  const calView       = state.data.calView       || (_isMobile ? 'list' : 'month'); // 'month' | 'list'
   const calTypeFilter = state.data.calTypeFilter || null;    // null | event_type key
   const myId = state.user?.id;
   let allEvents = state.data.calEvents || [];
@@ -19901,13 +19904,13 @@ function renderCalendar() {
           ${['日','一','二','三','四','五','六'].map((d,i)=>`<div style="font-size:11px;font-weight:600;color:${i===0||i===6?'#9e9e9e':'var(--muted)'};text-align:center;padding:3px 0">${d}</div>`).join('')}
           ${cells.join('')}
         </div>
-        <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap;align-items:center">
+        <div style="margin-top:10px;display:flex;gap:6px;align-items:center;${_isMobile?'overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;padding-bottom:4px':'flex-wrap:wrap'}">
           <span onclick="state.data.calTypeFilter=null;renderApp()"
-            style="font-size:10px;border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer;border:1px solid ${!calTypeFilter?'var(--accent)':'var(--border)'};background:${!calTypeFilter?'var(--accent)':'#f5f5f5'};color:${!calTypeFilter?'#fff':'#888'}">全部</span>
+            style="font-size:10px;border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer;border:1px solid ${!calTypeFilter?'var(--accent)':'var(--border)'};background:${!calTypeFilter?'var(--accent)':'#f5f5f5'};color:${!calTypeFilter?'#fff':'#888'};flex-shrink:0;white-space:nowrap">全部</span>
           ${Object.entries(getCalEventTypes()).map(([k,t])=>{
             const active = calTypeFilter === k;
             return `<span onclick="state.data.calTypeFilter=${active?'null':`'${k}'`};renderApp()"
-              style="font-size:10px;border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer;border:1px solid ${active?t.color:'transparent'};background:${active?t.color:t.bg};color:${active?'#fff':t.color};box-shadow:${active?`0 0 0 2px ${t.color}33`:''};transition:.15s">● ${t.label}</span>`;
+              style="font-size:10px;border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer;border:1px solid ${active?t.color:'transparent'};background:${active?t.color:t.bg};color:${active?'#fff':t.color};box-shadow:${active?`0 0 0 2px ${t.color}33`:''};transition:.15s;flex-shrink:0;white-space:nowrap">● ${t.label}</span>`;
           }).join('')}
         </div>` : `
         <!-- 清單視圖 -->
@@ -20539,6 +20542,60 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
 }
 
 window.modalCalEvent = modalCalEvent;
+
+// 餐費明細彈窗:點儀表板的員工進度條開啟,列出該員工該月發票明細
+window.modalMealDetail = async function(applicantName, ymStr, ymLabel) {
+  const _budget = getMealBudgetForEmployee(applicantName);
+  // 先用本地快取(d.mealThis)抓,沒有的話打 DB
+  let rows = (state.data.dashboard?.mealThis||[]).filter(r => r.applicant_name === applicantName);
+  // 如果本地沒這人的紀錄但 ym 存在,從 DB 補抓(完整欄位)
+  if (rows.length === 0 && ymStr) {
+    const { data } = await db.from('meal_expenses').select('*').eq('year_month', ymStr).eq('applicant_name', applicantName).order('item_date');
+    rows = data || [];
+  } else if (ymStr) {
+    // 從 DB 抓完整欄位(本地 cache 只有 applicant_name+amount)
+    const { data } = await db.from('meal_expenses').select('*').eq('year_month', ymStr).eq('applicant_name', applicantName).order('item_date');
+    rows = data || rows;
+  }
+  const total = rows.reduce((s,r) => s + (r.amount||0), 0);
+  const remain = _budget - total;
+  const over = total > _budget;
+  const body = `
+    <div style="padding:10px 14px;background:#f8f9fa;border-radius:8px;margin-bottom:12px">
+      <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+        <div>
+          <div style="font-size:14px;font-weight:700">${applicantName}</div>
+          <div style="font-size:11px;color:var(--muted)">${ymLabel||'本月'}</div>
+        </div>
+        <div style="text-align:right">
+          <div style="font-size:18px;font-weight:800;color:${over?'var(--danger)':'var(--accent)'}">$${total.toLocaleString()} <span style="font-size:11px;color:var(--muted);font-weight:400">/ $${_budget.toLocaleString()}</span></div>
+          <div style="font-size:11px;color:${over?'var(--danger)':remain===0?'var(--success)':'var(--muted)'}">${over?`⚠️ 超出 $${Math.abs(remain).toLocaleString()}`:remain===0?'✅ 剛好達標':`尚差 $${remain.toLocaleString()}`}</div>
+        </div>
+      </div>
+    </div>
+    <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px">📋 發票明細 (共 ${rows.length} 筆)</div>
+    ${rows.length === 0
+      ? '<div class="empty" style="padding:24px"><div class="empty-icon">🍱</div><p>本月尚無發票</p></div>'
+      : `<div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:8px">
+        ${rows.map(r => `<div style="padding:8px 12px;border-bottom:1px solid #f0f0f0;display:flex;align-items:center;gap:10px">
+          <div style="flex:1;min-width:0">
+            <div style="display:flex;align-items:baseline;gap:8px;margin-bottom:2px;flex-wrap:wrap">
+              <span style="font-size:13px;font-weight:600">${r.item_date?.slice(0,10)||'—'}</span>
+              ${r.invoice_no?`<span style="font-size:10px;color:var(--muted);font-family:monospace">#${r.invoice_no}</span>`:''}
+            </div>
+            <div style="font-size:12px;color:var(--muted);overflow:hidden;text-overflow:ellipsis">${r.item_desc||'(無品項說明)'}</div>
+          </div>
+          <div style="text-align:right;flex-shrink:0">
+            <div style="font-size:14px;font-weight:700;color:var(--accent-dark)">$${(r.amount||0).toLocaleString()}</div>
+            ${r.invoice_file_url?`<a href="${r.invoice_file_url}" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none">🧾 看發票</a>`:''}
+          </div>
+        </div>`).join('')}
+      </div>`}
+  `;
+  showModal(`🍱 ${applicantName} 餐費明細`, body, [
+    { label:'關閉', onclick: closeModal },
+  ]);
+};
 
 // 行事曆群組 toggle：全部已勾 → 取消；否則 → 全勾（不動其他人）
 window._calToggleGroup = function(ids) {
