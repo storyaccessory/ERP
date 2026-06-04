@@ -4577,14 +4577,24 @@ async function modalAddAcct(tab, existing) {
           progressEl.style.display = 'block'; progressEl.textContent = '上傳請款單中…';
           const isImg2 = stmtFile.type.startsWith('image/');
           const uploadFile2 = isImg2 ? await compressImage(stmtFile, 100) : stmtFile;
-          const ext2 = (stmtFile.name?.split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g,'') || 'bin';
-          const path2 = `ap/stmt_${ymStr}_${safeName}_${Date.now()}.${ext2}`;
-          const { error: upErr2 } = await db.storage.from('ar-attachments').upload(path2, uploadFile2, { upsert: true });
-          if (!upErr2) {
+          // 完全保留原檔名;重複時 confirm 詢問是否覆蓋
+          const safeOrigName2 = (stmtFile.name || 'file').replace(/[\/\\?#&:<>"|*]/g, '_').slice(0, 200);
+          const path2 = `ap/${safeOrigName2}`;
+          let { error: upErr2 } = await db.storage.from('ar-attachments').upload(path2, uploadFile2, { upsert: false });
+          let _skipStmtUpdate = false;
+          if (upErr2 && /already exists|duplicate|resource already exists/i.test(upErr2.message)) {
+            if (!confirm(`「${stmtFile.name}」已存在,要覆蓋嗎?\n\n(按確定覆蓋舊檔,按取消放棄這次上傳但其他欄位仍會儲存)`)) {
+              upErr2 = null; _skipStmtUpdate = true;  // 取消覆蓋:不更新請款單欄位,其他欄位照常儲存
+              showToast('已保留原本的請款單', 'info');
+            } else {
+              ({ error: upErr2 } = await db.storage.from('ar-attachments').upload(path2, uploadFile2, { upsert: true }));
+            }
+          }
+          if (!upErr2 && !_skipStmtUpdate) {
             const { data: urlData2 } = db.storage.from('ar-attachments').getPublicUrl(path2);
             apPayload.attachment_url = urlData2.publicUrl;
             apPayload.attachment_name = stmtFile.name;
-          } else { showToast('請款單上傳失敗：' + upErr2.message, 'error'); }
+          } else if (upErr2) { showToast('請款單上傳失敗：' + upErr2.message, 'error'); }
         }
 
         // 處理匯款截圖（刪除 / 替換）
@@ -6010,19 +6020,30 @@ async function modalAddAR(existing) {
       const progressEl = document.getElementById('ar-upload-progress');
       const safeCustomer = customer.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) || 'customer';
 
-      // 上傳請款單附件
+      // 上傳請款單附件:完全保留原檔名;重複時詢問是否覆蓋
       const fileInput = document.getElementById('ar-file');
       const file = fileInput?.files?.[0];
       if (file) {
         progressEl.style.display = 'block';
         progressEl.textContent = '上傳請款單中…';
-        const ext = file.name.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g, '') || 'bin';
-        const fileName = `ar/${ym}_${safeCustomer}_${Date.now()}.${ext}`;
-        const { error: upErr } = await db.storage.from('ar-attachments').upload(fileName, file, { upsert: true });
+        const safeOrigName = (file.name || 'file').replace(/[\/\\?#&:<>"|*]/g, '_').slice(0, 200);
+        const fileName = `ar/${safeOrigName}`;
+        let { error: upErr } = await db.storage.from('ar-attachments').upload(fileName, file, { upsert: false });
+        let _skipUpdate = false;
+        if (upErr && /already exists|duplicate|resource already exists/i.test(upErr.message)) {
+          if (!confirm(`「${file.name}」已存在,要覆蓋嗎?\n\n(按確定覆蓋舊檔,按取消放棄這次上傳但其他欄位仍會儲存)`)) {
+            upErr = null; _skipUpdate = true;
+            showToast('已保留原本的請款單', 'info');
+          } else {
+            ({ error: upErr } = await db.storage.from('ar-attachments').upload(fileName, file, { upsert: true }));
+          }
+        }
         if (upErr) { showToast('請款單上傳失敗：' + upErr.message, 'error'); progressEl.style.display='none'; return; }
-        const { data: urlData } = db.storage.from('ar-attachments').getPublicUrl(fileName);
-        payload.attachment_url = urlData.publicUrl;
-        payload.attachment_name = file.name;
+        if (!_skipUpdate) {
+          const { data: urlData } = db.storage.from('ar-attachments').getPublicUrl(fileName);
+          payload.attachment_url = urlData.publicUrl;
+          payload.attachment_name = file.name;
+        }
       }
 
       // 上傳發票圖片（壓縮後）
