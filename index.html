@@ -17939,8 +17939,20 @@ window.modalEditJournal = async function(existingId = null) {
     <div style="font-size:11px;color:var(--muted);text-align:right">建議 3～5 分鐘完成，簡短清楚即可 ✍️</div>
     ${(() => {
       let myItems = (jd.upcoming||[]);
-      if (myItems.length === 0) return '';
       const _ts = _localToday();
+      // 我自己的過期子任務(跨所有事項):未完成、有截止日且 < 今天、指派給我(或無指派但事項屬於我)
+      const _myOverdueSubs = [];
+      (jd.subtaskEvents || []).forEach(ev => {
+        const _isMine = ev.assigned_to === myId || (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(myId));
+        (Array.isArray(ev.subtasks) ? ev.subtasks : []).forEach(s => {
+          if (!s.done && s.text && s.due_date && s.due_date < _ts
+              && (s.assignee_id === myId || (!s.assignee_id && _isMine))) {
+            _myOverdueSubs.push({ ...s, evTitle: ev.title || '', evId: ev.id });
+          }
+        });
+      });
+      _myOverdueSubs.sort((a,b) => (a.due_date||'').localeCompare(b.due_date||''));
+      if (myItems.length === 0 && _myOverdueSubs.length === 0) return '';
       const _tm = (() => { const d = new Date(_ts+'T00:00:00'); d.setDate(d.getDate()+1); return d.toISOString().slice(0,10); })();
       const _t3 = (() => { const d = new Date(_ts+'T00:00:00'); d.setDate(d.getDate()+3); return d.toISOString().slice(0,10); })();
       const _t7 = (() => { const d = new Date(_ts+'T00:00:00'); d.setDate(d.getDate()+7); return d.toISOString().slice(0,10); })();
@@ -17960,8 +17972,20 @@ window.modalEditJournal = async function(existingId = null) {
         if (aOv !== bOv) return aOv ? -1 : 1;
         return (a.start_date||'').localeCompare(b.start_date||'');
       });
+      const _overdueSubsHtml = _myOverdueSubs.length === 0 ? '' : `
+        <div style="margin-bottom:10px;padding:8px 10px;background:#fff5f5;border:1px solid #ffcdd2;border-radius:6px">
+          <div style="font-size:12px;font-weight:700;color:#c62828;margin-bottom:5px">🚨 你的過期子任務(共 ${_myOverdueSubs.length} 項)</div>
+          <div style="display:flex;flex-direction:column;gap:3px">
+          ${_myOverdueSubs.map(s => `
+            <div style="font-size:12px;color:#c62828;line-height:1.5">
+              <span style="font-weight:600">⚠ ${s.text}</span>
+              <span style="color:#888;font-size:11px">（逾期 ${s.due_date.slice(5)}・${s.evTitle}）</span>
+            </div>`).join('')}
+          </div>
+        </div>`;
       return `<div style="margin-top:16px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
-        <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📋 你的近期任務 & 你的過期任務（共 ${myItems.length} 件）</div>
+        ${_overdueSubsHtml}
+        ${myItems.length === 0 ? '' : `<div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📋 你的近期任務 & 你的過期任務（共 ${myItems.length} 件）</div>
         <div style="display:flex;flex-direction:column;gap:4px">
         ${myItems.map(ev => {
           const { bg, color, label } = _urg(ev.start_date);
