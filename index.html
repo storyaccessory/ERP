@@ -883,11 +883,11 @@ async function loadAccounting() {
     console.log('[AP載入] 共', apResult.data?.length, '筆，範例:', apResult.data?.[0]);
   }
   const [meal, advance, vendors, ar, arAll] = await Promise.all([
-    // 餐費/代墊:撈全部月份,由前端「本月/前月/全部」篩選器決定顯示
+    // 餐費/代墊/應收:撈全部月份,由前端「本月/前月/全部」篩選器決定顯示
     db.from('meal_expenses').select('*').order('item_date', { ascending: false }),
     db.from('advance_payments').select('*').order('item_date', { ascending: false }),
     db.from('vendors').select('*').order('sort_order', { ascending: true, nullsFirst: false }).order('name'),
-    db.from('accounts_receivable').select('*').eq('year_month', ym).order('shipment_date'),
+    db.from('accounts_receivable').select('*').order('shipment_date', { ascending: false }),
     db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month').order('billing_month', { ascending: true }),
   ]);
   state.data.accounting = { ap: apResult.data||[], meal: meal.data||[], advance: advance.data||[], ym, vendors: vendors.data||[], ar: ar.data||[], ar_all: arAll.data||[] };
@@ -8027,10 +8027,16 @@ function renderAccounting() {
     const rYm = (r.year_month||'').slice(0,6) || (r.item_date||'').slice(0,7).replace('-','');
     return rYm === selectedYm;
   });
+  // 應收依 selectedYm 篩選(同餐費/代墊邏輯)
+  const arFiltered = (ar||[]).filter(r => {
+    if (!selectedYm) return true;
+    const rYm = (r.year_month||'').slice(0,6) || (r.billing_month||'').slice(0,7).replace('-','') || (r.shipment_date||'').slice(0,7).replace('-','');
+    return rYm === selectedYm;
+  });
   const mealTotal = mealFiltered.reduce((s,r)=>s+(r.amount||0),0);
   const advanceTotal = advanceFiltered.reduce((s,r)=>s+(r.amount||0),0);
-  const arTotal = (ar||[]).reduce((s,r)=>s+(r.amount||0),0);
-  const arReceived = (ar||[]).filter(r=>r.status==='已收款').reduce((s,r)=>s+(r.amount||0),0);
+  const arTotal = arFiltered.reduce((s,r)=>s+(r.amount||0),0);
+  const arReceived = arFiltered.filter(r=>r.status==='已收款').reduce((s,r)=>s+(r.amount||0),0);
   const arPending = arTotal - arReceived;
 
   // 月份選單（最近24個月）
@@ -8434,7 +8440,7 @@ function renderAccounting() {
     })() : ''}
 
     ${activeTab === '應收帳款' ? (() => {
-      const arRows = ar || [];
+      const arRows = arFiltered;
       const SC = { '待開發票':'tag-grey', '已開發票待付款':'tag-blue', '已收款':'tag-green',
                    '未請款':'tag-grey', '已請款':'tag-orange', '已開票':'tag-blue' }; // 舊狀態相容
 
