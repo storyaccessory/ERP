@@ -19627,9 +19627,10 @@ async function loadCalendarEvents() {
     .neq('reply_status', '已結案');
   state.data.calCS = csData || [];
 
-  // 近期事項：今天起未來 14 天（獨立於目前檢視月份，故另外撈一份）
+  // 近期 & 過期事項:今天起未來 14 天 + 全部未完成過期(獨立於目前檢視月份)
   const upFrom = _localToday();
   const upTo = _localDateStr((() => { const d = new Date(upFrom+'T00:00:00'); d.setDate(d.getDate()+14); return d; })());
+  // 近期:14 天內任何狀態事項
   const { data: upRange } = await db.from('calendar_events')
     .select(sel)
     .lte('start_date', upTo)
@@ -19643,7 +19644,15 @@ async function loadCalendarEvents() {
     .is('end_date', null)
     .neq('is_template', true)
     .order('start_date');
-  const upAll = [...(upRange||[]), ...(upSingle||[])];
+  // 過期:end_date 早於今天且未完成
+  const { data: overdueRange } = await db.from('calendar_events')
+    .select(sel)
+    .lt('end_date', upFrom)
+    .is('completed_at', null)
+    .neq('is_template', true)
+    .order('end_date', { ascending: false })
+    .limit(50);
+  const upAll = [...(upRange||[]), ...(upSingle||[]), ...(overdueRange||[])];
   const upSeen = new Set();
   state.data.calUpcoming = upAll.filter(e => { if(upSeen.has(e.id)) return false; upSeen.add(e.id); return true; });
 }
