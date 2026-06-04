@@ -17985,7 +17985,7 @@ window.modalEditJournal = async function(existingId = null) {
         </div>`;
       return `<div style="margin-top:16px;padding:12px 14px;background:var(--surface);border:1px solid var(--border);border-radius:8px">
         ${_overdueSubsHtml}
-        ${myItems.length === 0 ? '' : `<div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📋 你的近期任務 & 你的過期任務（共 ${myItems.length} 件）</div>
+        ${myItems.length > 0 ? `<div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:8px">📋 你的近期任務 & 你的過期任務（共 ${myItems.length} 件）</div>` : ''}
         <div style="display:flex;flex-direction:column;gap:4px">
         ${myItems.map(ev => {
           const { bg, color, label } = _urg(ev.start_date);
