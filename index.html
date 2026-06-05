@@ -19870,7 +19870,11 @@ function renderCalendar() {
           }
         } else if (item._type === 'cs') {
           const c = item.c;
-          const csT = getCalEventTypes().cs || {label:'客服', color:'#0277bd', bg:'#e1f5fe'};
+          // 先找 cs key,沒有就找 label 是「客服」的分類(用 DB 的顏色,跟下方分類列一致),最後才 fallback
+          const _csTypes = getCalEventTypes();
+          const csT = _csTypes.cs
+            || Object.values(_csTypes).find(t => t.label === '客服')
+            || {label:'客服', color:'#0277bd', bg:'#e1f5fe'};
           const csDone = c.reply_status === '已結案';
           const csTitle = c.subject || c.issue_summary || '客服';
           const csDeco = csDone ? 'text-decoration:line-through;opacity:.55;' : '';
