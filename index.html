@@ -1343,43 +1343,65 @@ function renderDashboard() {
             const eventOv = !!(t.end_date && t.end_date < today);
             const overdueSubs = (Array.isArray(t.subtasks) ? t.subtasks : [])
               .filter(s => !s.done && s.text && s.due_date && s.due_date < today);
-            return { t, eventOv, overdueSubs };
+            return { _type:'event', t, eventOv, overdueSubs };
           }).filter(x => x.eventOv || x.overdueSubs.length > 0);
 
-          if (annotated.length === 0) {
+          // 客服納入「團隊過期任務」:未結案、deadline 過期 或 有過期子任務
+          const csAnnotated = (cs||[]).filter(c => c.reply_status !== '已結案').map(c => {
+            const csOv = !!(c.deadline && c.deadline < today);
+            const overdueSubs = (Array.isArray(c.subtasks) ? c.subtasks : [])
+              .filter(s => !s.done && s.text && s.due_date && s.due_date < today);
+            return { _type:'cs', t: c, eventOv: csOv, overdueSubs };
+          }).filter(x => x.eventOv || x.overdueSubs.length > 0);
+
+          const all2 = [...annotated, ...csAnnotated];
+          if (all2.length === 0) {
             return '<div class="empty"><div class="empty-icon">✅</div><p>沒有過期任務</p></div>';
           }
 
           const PRIORITY_ORDER_OV = { '高':0, '中':1, '低':2 };
-          // 過期日期取「事項 end_date」或「最早過期子任務的 due_date」
+          // 過期日期取「事項 end_date(或客服 deadline)」或「最早過期子任務的 due_date」
           const earliestOverdue = x => {
-            const ed = x.eventOv ? x.t.end_date : '';
+            const ed = x.eventOv ? (x._type==='cs' ? x.t.deadline : x.t.end_date) : '';
             const sd = x.overdueSubs.length ? x.overdueSubs.map(s=>s.due_date).sort()[0] : '';
             if (ed && sd) return ed < sd ? ed : sd;
             return ed || sd || '';
           };
-          const sortedOv = [...annotated].sort((a,b) =>
+          const sortedOv = all2.sort((a,b) =>
             (PRIORITY_ORDER_OV[a.t.priority]??1) - (PRIORITY_ORDER_OV[b.t.priority]??1) ||
             (earliestOverdue(a)||'').localeCompare(earliestOverdue(b)||'')
           );
 
-          const rowsOv = sortedOv.slice(0, 8).map(({ t, eventOv, overdueSubs }) => {
+          const rowsOv = sortedOv.slice(0, 8).map(({ _type, t, eventOv, overdueSubs }) => {
+            const isCs = _type === 'cs';
             const pColor = t.priority==='高'?'#e53935':t.priority==='低'?'#43a047':'#f57c00';
-            // 左邊只顯示主任務日期,紅字即代表過期,無需前綴
-            const mainDate = t.end_date || t.start_date || '';
+            // 左邊只顯示主任務日期(客服用 deadline),紅字即代表過期,無需前綴
+            const mainDate = isCs ? (t.deadline || '') : (t.end_date || t.start_date || '');
             const dueLabel = mainDate ? mainDate.slice(5) : '—';
-            const assigneeIds = Array.isArray(t.assignee_ids) ? t.assignee_ids : (t.assigned_to ? [t.assigned_to] : []);
-            const names = assigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean).join('、');
-            // 紅字只用在過期子任務本身;主任務標題與負責人維持一般樣式
+            const title = isCs ? (t.subject || t.issue_summary || '客服') : t.title;
+            // 負責人:行事曆用 assignee_ids,客服用 created_by + 子任務指派人
+            let names = '';
+            if (isCs) {
+              const involved = new Set();
+              if (t.created_by) involved.add(t.created_by);
+              (t.subtasks||[]).forEach(s => { if (s.assignee_id) involved.add(s.assignee_id); });
+              names = [...involved].map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean).join('、');
+            } else {
+              const assigneeIds = Array.isArray(t.assignee_ids) ? t.assignee_ids : (t.assigned_to ? [t.assigned_to] : []);
+              names = assigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean).join('、');
+            }
+            // 紅字只用在過期子任務本身
             const subsHtml = overdueSubs.map(s => {
               const subWho = (state.data.users||[]).find(u=>u.id===s.assignee_id)?.name || '';
               return `<span style="color:#e53935">⚠ ${s.text}（逾期 ${s.due_date.slice(5)}${subWho?` · ${subWho}`:''}）</span>`;
             }).join('　');
-            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
+            const onclick = isCs ? `modalEditCS('${t.id}')` : `calViewEvent('${t.id}')`;
+            const icon = isCs ? '<span style="font-size:11px;flex-shrink:0">💬</span>' : '';
+            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="${onclick}">
               <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
               <span style="font-size:11px;font-weight:700;color:var(--danger);min-width:50px;white-space:nowrap;flex-shrink:0">${dueLabel}</span>
               <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
-                <span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
+                ${icon}<span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${title}</span>
                 ${names ? `<span style="font-size:11px;color:var(--muted)">👤 ${names}</span>` : ''}
                 ${subsHtml ? `<span style="font-size:11px">${subsHtml}</span>` : ''}
               </div>
