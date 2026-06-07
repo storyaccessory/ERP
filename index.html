@@ -1278,8 +1278,26 @@ function renderDashboard() {
             return { color:'#999', label: d.slice(5) };
           };
           const PRIORITY_ORDER = { '高':0, '中':1, '低':2 };
+          // 客服納入「我的待辦」:未結案、且(我建立 或 子任務指派給我)
+          const myCsRaw = (cs||[]).filter(c => {
+            if (c.reply_status === '已結案') return false;
+            if (c.created_by === dashMyId) return true;
+            const subs = Array.isArray(c.subtasks) ? c.subtasks : [];
+            return subs.some(s => s.assignee_id === dashMyId);
+          });
+          const myCsWrapped = myCsRaw.map(c => ({
+            _type: 'cs', _src: c,
+            id: c.id,
+            title: c.subject || c.issue_summary || '客服',
+            priority: '中',
+            start_date: c.deadline || null,
+            end_date: c.deadline || null,
+            subtasks: c.subtasks || [],
+          }));
+          const todosWrapped = (todos||[]).map(t => ({ _type:'event', _src:t, ...t }));
+          const merged = [...todosWrapped, ...myCsWrapped];
           // 排序:逾期事項優先 → 優先級高 → 早到期
-          const sorted = [...todos].sort((a,b) => {
+          const sorted = merged.sort((a,b) => {
             const aOv = (a.end_date||a.start_date||'') < _todayStr;
             const bOv = (b.end_date||b.start_date||'') < _todayStr;
             if (aOv !== bOv) return aOv ? -1 : 1;
@@ -1298,11 +1316,14 @@ function renderDashboard() {
               const dueTxt = s.due_date ? (isOv?`⚠ 逾期 ${s.due_date.slice(5)}`:isTd?`⏰ 今日`:`📅 ${s.due_date.slice(5)}`) : '';
               return `<span style="color:${isOv?'#e53935':isTd?'#e65100':'#aaa'}">${s.text}${dueTxt?`（${dueTxt}）`:''}</span>`;
             }).join('　');
-            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="calViewEvent('${t.id}')">
+            const isCs = t._type === 'cs';
+            const onclick = isCs ? `modalEditCS('${t.id}')` : `calViewEvent('${t.id}')`;
+            const icon = isCs ? '<span style="font-size:11px;flex-shrink:0">💬</span>' : '';
+            return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="${onclick}">
               <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
               <span style="font-size:11px;font-weight:700;color:${color};min-width:60px;white-space:nowrap;flex-shrink:0">${label}</span>
               <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
-                <span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
+                ${icon}<span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t.title}</span>
                 ${mySubs.length ? `<span style="font-size:11px">${subsHtml}</span>` : ''}
               </div>
             </div>`;
