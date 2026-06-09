@@ -5813,6 +5813,28 @@ async function compressImage(file, maxKB = 100) {
   });
 }
 
+// AR 多張發票:動態新增一列(主發票之後的額外發票)
+window._arAddInvoiceRow = function(prefill) {
+  const list = document.getElementById('ar-extra-invoice-list');
+  if (!list) return;
+  const i = '_' + Date.now() + Math.floor(Math.random()*1000);
+  const p = prefill || {};
+  const row = document.createElement('div');
+  row.id = `ar-inv-row-${i}`;
+  row.style.cssText = 'display:flex;gap:6px;align-items:center;padding:5px 8px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
+  row.innerHTML = `
+    <input class="form-control" id="ar-inv-no-${i}" value="${(p.invoice_no||'').replace(/"/g,'&quot;')}" placeholder="發票號碼"
+      style="flex:1;font-size:13px;min-width:120px">
+    <input type="date" id="ar-inv-dt-${i}" value="${p.invoice_date?String(p.invoice_date).slice(0,10):''}" title="發票日期"
+      style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:140px;background:#fff">
+    <input type="number" id="ar-inv-amt-${i}" value="${p.amount||''}" placeholder="金額"
+      class="form-control" style="width:100px;font-size:13px;flex-shrink:0">
+    <button type="button" onclick="this.closest('[id^=\\'ar-inv-row\\']').remove()"
+      style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除">×</button>
+  `;
+  list.appendChild(row);
+};
+
 async function modalAddAR(existing) {
   const { ym, vendors } = state.data.accounting || { ym: '', vendors: [] };
   const allActiveVendors = (vendors||[]).filter(v => v.is_active !== false);
@@ -5870,13 +5892,13 @@ async function modalAddAR(existing) {
           <input class="form-control" id="ar-amount" type="number" placeholder="上傳對帳單後自動帶入" value="${existing?.amount||''}">
         </div>
 
-        <!-- 5: 發票號碼 -->
+        <!-- 5: 發票號碼(主)-->
         <div class="form-group" style="margin:0">
           <label>發票號碼 <span style="font-size:11px;color:var(--muted)">（上傳發票後自動辨識）</span></label>
           <input class="form-control" id="ar-invoice" placeholder="AI 辨識帶入" value="${existing?.invoice_no||''}">
         </div>
 
-        <!-- 6: 發票日期 -->
+        <!-- 6: 發票日期(主)-->
         <div class="form-group" style="margin:0">
           <label>發票日期 <span style="font-size:11px;color:var(--muted)">（AI 辨識，+2月=付款期限）</span></label>
           <input class="form-control" id="ar-invoice-date" type="date" value="${existing?.invoice_date?.slice?.(0,10)||''}"
@@ -5888,6 +5910,14 @@ async function modalAddAR(existing) {
               const due=y+'-'+m+'-'+String(d.getDate()).padStart(2,'0');
               const el=document.getElementById('ar-due-date'); if(el) el.value=due;
             }).call(this,this.value)">
+        </div>
+
+        <!-- 多張發票:同一筆帳款若有 2 張以上發票,從這裡加 -->
+        <div class="form-group" style="margin:0;grid-column:1/-1">
+          <label>更多發票 <span style="font-size:11px;color:var(--muted)">（同筆帳款若分多張發票,在此加列）</span></label>
+          <div id="ar-extra-invoice-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
+          <button type="button" onclick="window._arAddInvoiceRow()"
+            style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增一張發票</button>
         </div>
 
         <!-- 7: 付款日期 -->
@@ -6037,6 +6067,22 @@ async function modalAddAR(existing) {
         subject: document.getElementById('ar-subject').value.trim(),
         invoice_no: document.getElementById('ar-invoice').value.trim(),
         invoice_date: document.getElementById('ar-invoice-date').value || null,
+        invoices: (() => {
+          // 收集「更多發票」列表;主發票放陣列第一個,額外發票接在後面
+          const extras = [];
+          document.querySelectorAll('#ar-extra-invoice-list [id^="ar-inv-row-"]').forEach(row => {
+            const i = row.id.replace('ar-inv-row-','');
+            const no = document.getElementById(`ar-inv-no-${i}`)?.value.trim() || '';
+            const dt = document.getElementById(`ar-inv-dt-${i}`)?.value || '';
+            const amt = parseFloat(document.getElementById(`ar-inv-amt-${i}`)?.value) || 0;
+            if (!no && !dt && !amt) return;
+            extras.push({ invoice_no: no, invoice_date: dt || null, amount: amt });
+          });
+          if (extras.length === 0) return [];   // 只有主發票時不存 array,維持舊資料樣態
+          const mainNo = document.getElementById('ar-invoice').value.trim();
+          const mainDt = document.getElementById('ar-invoice-date').value || null;
+          return [{ invoice_no: mainNo, invoice_date: mainDt, amount: amount }, ...extras];
+        })(),
         note: (() => {
           const shipRaw = document.getElementById('ar-ship-date').value.trim();
           const noteVal = document.getElementById('ar-note').value.trim();
@@ -6148,6 +6194,14 @@ async function modalAddAR(existing) {
     }},
     { label: '取消', onclick: () => { window._arSsPendingFile = null; window._arInvoiceUploaded = false; window._arScreenshotUploaded = false; closeModal(); } },
   ], { confirmClose: true });
+
+  // ── 多張發票:預填既有資料 ────────────────────────────────
+  // 既有的 invoices 陣列第 0 個進入主欄(已透過 input value 填好),其他放入「更多發票」
+  const _existingInvoices = Array.isArray(existing?.invoices) ? existing.invoices : [];
+  if (_existingInvoices.length > 1) {
+    // 跳過第 0 個(已在主欄),從第 1 個開始加列
+    _existingInvoices.slice(1).forEach(inv => window._arAddInvoiceRow(inv));
+  }
 
   // ── 客戶關鍵字搜尋（限已建檔廠商）────────────────────────
   const arInput = document.getElementById('ar-customer');
@@ -8596,7 +8650,14 @@ function renderAccounting() {
                       })()}</td>
                       <td><strong>$${(r.amount||0).toLocaleString()}</strong></td>
                       <td style="font-size:12px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.item_desc||''}">${r.item_desc||'—'}</td>
-                      <td style="font-size:12px;color:var(--muted)">${r.invoice_no||'—'}</td>
+                      <td style="font-size:12px;color:var(--muted)">${(() => {
+                        const arr = Array.isArray(r.invoices) ? r.invoices : [];
+                        if (arr.length > 1) {
+                          const titleTxt = arr.map(i => `${i.invoice_no||'(無號碼)'}・${i.invoice_date||''}・$${(i.amount||0).toLocaleString()}`).join('\n');
+                          return `<span title="${titleTxt.replace(/"/g,'&quot;')}">${arr[0].invoice_no||'—'} <span style="color:var(--accent);font-weight:600">+${arr.length-1}</span></span>`;
+                        }
+                        return r.invoice_no || '—';
+                      })()}</td>
                       <td style="font-size:12px;color:var(--muted)">${r.invoice_date?.slice?.(0,10)||'—'}</td>
                       <td style="text-align:center">
                         ${r.attachment_url
