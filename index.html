@@ -8555,8 +8555,8 @@ function renderAccounting() {
           <!-- AR 篩選列（月份由上方統一控制） -->
           <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
             <div style="position:relative;display:inline-block">
-              <input list="ar-cust-list" id="ar-filter-cust" class="form-control" placeholder="所有客戶"
-                style="width:160px;font-size:12px" value="${savedAR.cust||''}">
+              <input list="ar-cust-list" id="ar-filter-cust" class="form-control" placeholder="🔍 客戶(可打關鍵字)"
+                style="width:200px;font-size:12px" value="${savedAR.cust||''}">
               <datalist id="ar-cust-list">
                 ${arCustOptions.map(c=>`<option value="${c}">`).join('')}
               </datalist>
@@ -8572,13 +8572,13 @@ function renderAccounting() {
             <table>
               <thead><tr>
                 <th>客戶</th><th>請款月份</th><th>出貨日</th><th>含稅金額</th><th>品項說明</th>
-                <th>發票號碼</th><th>發票日期</th><th>請款單</th><th>狀態</th>
+                <th>發票號碼</th><th>發票日期</th><th>請款單</th><th>信件主旨</th><th>狀態</th>
                 <th>付款期限</th><th>匯款日</th><th>匯款截圖</th>
                 ${isAdmin?'<th>操作</th>':''}
               </tr></thead>
               <tbody id="ar-table-body">
               ${arRows.length === 0
-                ? `<tr><td colspan="13"><div class="empty"><div class="empty-icon">📋</div><p>尚無應收帳款資料</p></div></td></tr>`
+                ? `<tr><td colspan="14"><div class="empty"><div class="empty-icon">📋</div><p>尚無應收帳款資料</p></div></td></tr>`
                 : arRows.map(r => {
                     const isOverdue = r.status !== '已收款' && r.payment_due_date && new Date(r.payment_due_date) < new Date();
                     const statusNorm = r.status || '待開發票';
@@ -8603,6 +8603,7 @@ function renderAccounting() {
                           ? `<a href="${r.attachment_url}" target="_blank" title="${r.attachment_name||'請款單'}" style="font-size:16px;color:var(--accent)">📎</a>`
                           : `<span style="color:var(--muted);font-size:11px">—</span>`}
                       </td>
+                      <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.subject||'').replace(/"/g,'&quot;')}">${r.subject||'—'}</td>
                       <td><span class="tag ${SC[statusNorm]||'tag-grey'}">${statusNorm}</span></td>
                       <td style="font-size:12px;${isOverdue?'color:var(--danger);font-weight:600':''}">${r.payment_due_date?.slice?.(0,10)||'—'}${isOverdue?' ⚠️':''}</td>
                       <td style="font-size:12px;color:${r.payment_date?'var(--success)':'var(--muted)'}">
@@ -8618,7 +8619,7 @@ function renderAccounting() {
                         <button class="btn-table" data-action="edit-ar" data-id="${r.id}"
                           style="background:#e3f2fd;color:#1565c0">編輯</button>
                         <button class="btn-table" data-action="ar-payment" data-id="${r.id}"
-                          style="background:#f3e5f5;color:#6a1b9a">💰 收款</button>
+                          style="background:#f3e5f5;color:#6a1b9a">收款</button>
                         <button class="btn-table danger" data-action="del-ar" data-id="${r.id}">刪除</button>
                       </div></td>`:''}
                     </tr>`;
