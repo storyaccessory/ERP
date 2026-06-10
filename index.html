@@ -13780,8 +13780,12 @@ function projGetYearData(year) {
 
   // ── 2026 起：從 AR 應收帳款整合業績 ──
   if (year >= 2026) {
-    // 載入全部 AR（loadAccounting 只讀當月，這裡用快取的全部 AR）
+    // 排除自營平台名稱(蝦皮、PINKOI 等),避免誤計入專案業績
+    const platformBlacklist = new Set(SALES_PLATFORMS);
+    // 載入全部 AR(loadSales 已預載 ar_all)
     const allAR = state.data.accounting?.ar_all || state.data.accounting?.ar || [];
+    // 累計每客戶每月的 AR 金額(避免在迴圈中重複加)
+    const arSum = {};  // { custName: { month0: amount } }
     for (const rec of allAR) {
       // 只取目標年度
       const bm = rec.billing_month || rec.shipment_date?.slice(0,7);
@@ -13790,9 +13794,10 @@ function projGetYearData(year) {
       if (month0 < 0 || month0 > 11) continue;
       const amount = parseFloat(rec.amount) || 0;
       if (!amount) continue;
-      // 客戶名稱：優先用 customer_name，對應廠商 company_name 或 name
-      const custRaw = rec.customer_name || '';
-      // 嘗試從 vendors 找正式名稱（company_name 或 name）
+      // 客戶名稱:優先對應 vendors,然後 customer_name
+      const custRaw = (rec.customer_name || '').trim();
+      if (!custRaw) continue;
+      if (platformBlacklist.has(custRaw)) continue;  // 排除自營平台
       const vendors = state.data.accounting?.vendors || [];
       const vendor = vendors.find(v =>
         v.company_name === custRaw || v.name === custRaw ||
@@ -13800,30 +13805,84 @@ function projGetYearData(year) {
         (v.name && custRaw.includes(v.name))
       );
       const custName = vendor?.name || custRaw;
-      if (!custName) continue;
-
+      if (platformBlacklist.has(custName)) continue;
+      if (!arSum[custName]) arSum[custName] = {};
+      arSum[custName][month0] = (arSum[custName][month0] || 0) + amount;
+    }
+    // 把 AR 累計值套到結果(只在 localStorage 沒有手動覆蓋時)
+    for (const custName in arSum) {
       if (!result[custName]) {
-        // 新客戶：嘗試從 PROJ_RAW 找代號和類型
         const rawEntry = Object.values(base).find(e =>
-          e.code && (custRaw.includes(e.code) || custName === custRaw)
+          e.code && custName.includes(e.code)
         );
         result[custName] = {
           code: rawEntry?.code || '',
           type: rawEntry?.type || 'CSR',
           monthly: Array(12).fill(0),
-          fromAR: true
+          fromAR: true,
         };
       }
-      // 累加到對應月份（AR 金額直接當業績，不覆蓋 localStorage 手動輸入）
-      const manualKey = `proj_${year}_${custName}_${month0}`;
-      if (localStorage.getItem(manualKey) === null) {
-        result[custName].monthly[month0] = (result[custName].monthly[month0] || 0) + amount;
+      for (const m0 in arSum[custName]) {
+        const manualKey = `proj_${year}_${custName}_${m0}`;
+        if (localStorage.getItem(manualKey) === null) {
+          result[custName].monthly[m0] = arSum[custName][m0];
+        }
       }
     }
   }
 
   return result;
 }
+// 取消單一儲格的手動覆蓋,讓它回到從 AR 自動匯入的值
+window.projResetCellToAR = function(year, name, month0) {
+  const k = `proj_${year}_${name}_${month0}`;
+  localStorage.removeItem(k);
+  renderApp();
+};
+// 鎖定某月:把當月所有客戶的「當下值」存成手動覆蓋,之後 AR 再變動也不會影響
+window.projLockMonth = function(year, month0) {
+  if (!confirm(`確定鎖定 ${year} 年 ${month0+1} 月所有客戶的業績?\n\n鎖定後,之後新增/修改的應收帳款不會自動影響此月的數字,直到你逐格還原或全年重置。`)) return;
+  const data = projGetYearData(year);
+  let count = 0;
+  for (const [name, c] of Object.entries(data)) {
+    const v = c.monthly[month0] || 0;
+    if (v === 0) continue;  // 0 的不鎖,避免無意義佔位
+    const k = `proj_${year}_${name}_${month0}`;
+    localStorage.setItem(k, String(v));
+    count++;
+  }
+  showToast(`已鎖定 ${year}/${month0+1} 共 ${count} 筆`);
+  renderApp();
+};
+
+// 解鎖某月:把當月所有手動覆蓋清掉,全部改用 AR 自動計算
+window.projUnlockMonth = function(year, month0) {
+  if (!confirm(`解鎖 ${year} 年 ${month0+1} 月,所有手動覆蓋清掉,改用應收帳款自動計算?`)) return;
+  const prefix = `proj_${year}_`;
+  const suffix = `_${month0}`;
+  const toRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(prefix) && k.endsWith(suffix)) toRemove.push(k);
+  }
+  toRemove.forEach(k => localStorage.removeItem(k));
+  showToast(`已解鎖 ${year}/${month0+1},清除 ${toRemove.length} 筆覆蓋`);
+  renderApp();
+};
+
+// 一鍵把該年度的所有手動覆蓋都清掉,全部回到 AR 來源
+window.projResetYearToAR = function(year) {
+  if (!confirm(`確定要把 ${year} 年所有手動修改的專案業績清掉、全部改用應收帳款的值?\n\n(這只清「手動覆蓋」,應收帳款的紀錄不會動)`)) return;
+  const prefix = `proj_${year}_`;
+  const toRemove = [];
+  for (let i = 0; i < localStorage.length; i++) {
+    const k = localStorage.key(i);
+    if (k && k.startsWith(prefix)) toRemove.push(k);
+  }
+  toRemove.forEach(k => localStorage.removeItem(k));
+  showToast(`已清除 ${toRemove.length} 筆手動覆蓋,將改用應收帳款數值`);
+  renderApp();
+};
 function projGetMonthTotal(year, month0) {
   const data = projGetYearData(year);
   return Object.values(data).reduce((s, c) => s + (c.monthly[month0]||0), 0);
@@ -13886,6 +13945,17 @@ async function loadSales() {
     for (const r of sdRows) {
       state.data.salesCache[`${r.year}_${r.platform}_${r.month1}_${r.day}`] = parseFloat(r.value)||0;
     }
+  }
+  // 載入 AR 全部資料供「專案業績從 AR 自動導入」使用;vendors 用於名稱對應
+  if (!state.data.accounting) state.data.accounting = {};
+  if (!state.data.accounting.ar_all?.length) {
+    const { data: arAll } = await db.from('accounts_receivable')
+      .select('id,billing_month,shipment_date,customer_name,amount,year_month');
+    state.data.accounting.ar_all = arAll || [];
+  }
+  if (!state.data.accounting.vendors?.length) {
+    const { data: vd } = await db.from('vendors').select('id, name, company_name, code, is_active');
+    state.data.accounting.vendors = vd || [];
   }
   // 從 Supabase 載入體驗店付款明細
   const { data: expRows } = await db.from('sales_exp_detail').select('*');
@@ -14260,13 +14330,24 @@ function renderSalesProjectContent() {
         var hasVal = v > 0;
         var bg  = hasVal ? '#fff' : '#f7f7f7';
         var col = hasVal ? '#888' : '#f7f7f7'; // 有值灰字，無值隱形
-        return '<td style="padding:2px 3px;">'
+        // 是否有手動覆蓋(localStorage 有 key 表示使用者改過)
+        var manualKey = 'proj_' + salesActiveYear + '_' + c.name + '_' + mi;
+        var isManual = localStorage.getItem(manualKey) !== null && salesActiveYear >= 2026;
+        // 手動覆蓋的格子用淺橘色底,提示「此格已手動改過,不會自動從 AR 同步」
+        if (isManual) { bg = '#fff8e1'; col = '#bf360c'; }
+        var resetBtn = isManual
+          ? '<button onclick="window.projResetCellToAR(' + salesActiveYear + ',\'' + c.name.replace(/\'/g,'\\\'') + '\',' + mi + ')" '
+            + 'title="改回從應收帳款自動匯入的值" '
+            + 'style="position:absolute;top:0;right:0;width:14px;height:14px;border:none;background:#ff9800;color:#fff;border-radius:50%;cursor:pointer;font-size:9px;line-height:1;padding:0;z-index:1">↺</button>'
+          : '';
+        return '<td style="padding:2px 3px;position:relative;">'
+          + resetBtn
           + '<input type="number" min="0" value="' + (hasVal ? v : '') + '"'
           + ' data-proj-year="' + salesActiveYear + '"'
           + ' data-proj-name="' + c.name + '"'
           + ' data-proj-month="' + mi + '"'
-          + ' style="width:100%;padding:2px 4px;border:1px solid #e0e0e0;border-radius:4px;font-size:11px;text-align:right;box-sizing:border-box;background:' + bg + ';color:' + col + ';"'
-          + ' oninput="projMonthInput(this);(function(inp){inp.style.background=\'#fff\';inp.style.color=\'#888\';})(this)">'
+          + ' style="width:100%;padding:2px 4px;border:1px solid ' + (isManual?'#ffb74d':'#e0e0e0') + ';border-radius:4px;font-size:11px;text-align:right;box-sizing:border-box;background:' + bg + ';color:' + col + ';"'
+          + ' oninput="projMonthInput(this);(function(inp){inp.style.background=\'#fff8e1\';inp.style.color=\'#bf360c\';})(this)">'
           + '</td>';
       }).join('');
       const typeTag = c.type==='CSR'?`<span style="font-size:9px;background:#e0f2f1;color:#00695c;border-radius:3px;padding:1px 4px;margin-left:4px;">CSR</span>`:
@@ -14308,6 +14389,33 @@ function renderSalesProjectContent() {
   };
 
   return `<div style="padding:12px 4px 8px;display:flex;flex-direction:column;gap:4px;">
+    ${salesActiveYear >= 2026 ? `
+    <div style="background:#fff3e0;border:1px solid #ffcc80;border-radius:8px;padding:10px 14px;margin-bottom:8px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <div style="flex:1;min-width:280px">
+        <div style="font-size:13px;color:#bf360c;font-weight:600">ℹ️ ${salesActiveYear} 年起自動從「應收帳款」彙整</div>
+        <div style="font-size:11px;color:#8d6e63;margin-top:3px">
+          🟧 橘色格子 = 手動覆蓋(AR 不會再更新此格;右上 ↺ 還原)　·
+          💡 做完帳建議按「鎖定本月」防止後續 AR 影響
+        </div>
+      </div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        <select id="proj-lock-month-select" style="padding:5px 8px;font-size:12px;border:1px solid #ff9800;border-radius:6px;background:#fff;color:#e65100">
+          ${SALES_MONTHS_LABEL.map((l,mi) => `<option value="${mi}">${l}</option>`).join('')}
+        </select>
+        <button onclick="window.projLockMonth(${salesActiveYear}, parseInt(document.getElementById('proj-lock-month-select').value))"
+          style="padding:5px 10px;font-size:12px;background:#fff;border:1px solid #ff9800;color:#e65100;border-radius:6px;cursor:pointer;font-weight:600;white-space:nowrap" title="鎖定後此月不再受 AR 影響">
+          🔒 鎖定本月
+        </button>
+        <button onclick="window.projUnlockMonth(${salesActiveYear}, parseInt(document.getElementById('proj-lock-month-select').value))"
+          style="padding:5px 10px;font-size:12px;background:#fff;border:1px solid #4caf50;color:#2e7d32;border-radius:6px;cursor:pointer;font-weight:600;white-space:nowrap" title="解鎖後此月改用 AR 自動計算">
+          🔓 解鎖本月
+        </button>
+        <button onclick="window.projResetYearToAR(${salesActiveYear})"
+          style="padding:5px 10px;font-size:12px;background:#fff;border:1px solid #d32f2f;color:#c62828;border-radius:6px;cursor:pointer;font-weight:600;white-space:nowrap" title="把整年所有手動覆蓋清掉,全部重新用 AR 計算">
+          🔄 全年重置
+        </button>
+      </div>
+    </div>` : ''}
     ${renderGroup('📦 經銷客戶（CSR）', csrClients, '#c2d6d6')}
     ${renderGroup('🔧 專案客戶（PRO）', proClients, '#0a0f0f')}
   </div>`;
