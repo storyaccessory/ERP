@@ -724,7 +724,7 @@ async function loadDashboard() {
   const _mealYmStr = _mealYmDate.getFullYear().toString() + String(_mealYmDate.getMonth()+1).padStart(2,'0');
   const _mealYmLabel = `${_mealYmDate.getFullYear()}年 ${_mealYmDate.getMonth()+1} 月`;
   const _thisYmStr = _mealYmStr; // 保留變數名供其他地方參考
-  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis] = await Promise.all([
+  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     db.from('calendar_events')
@@ -747,7 +747,16 @@ async function loadDashboard() {
       .limit(200),
     // 餐費(用於儀表板進度卡片,5號前抓前月、5號後抓當月)
     db.from('meal_expenses').select('applicant_name,amount').eq('year_month', _mealYmStr),
+    // 自營平台業績日報:給首頁的「2026年度業績達成」圖表用,避免拿到過時的舊快取
+    db.from('sales_daily').select('*'),
   ]);
+  // 把最新的 sales_daily 寫進 salesCache,確保首頁業績圖表的數字跟業績儀表板一致
+  if (!state.data.salesCache) state.data.salesCache = {};
+  if (sdRows?.data) {
+    for (const r of sdRows.data) {
+      state.data.salesCache[`${r.year}_${r.platform}_${r.month1}_${r.day}`] = parseFloat(r.value)||0;
+    }
+  }
 
   // 載入人員資料(顯示負責人名字 + 餐費依員編排序)
   if (!state.data.users?.length || !state.data.users.some(u => u.employee_no !== undefined)) {
