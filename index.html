@@ -13804,8 +13804,17 @@ function projGetYearData(year) {
         (v.company_name && custRaw.includes(v.company_name)) ||
         (v.name && custRaw.includes(v.name))
       );
-      const custName = vendor?.name || custRaw;
+      let custName = vendor?.name || custRaw;
       if (platformBlacklist.has(custName)) continue;
+      // 嘗試對應 PROJ_RAW 既有的客戶名(避免「麗嬰」「麗嬰國際」「Cozy」「cozy」變兩列)
+      // 規則:1) 完全相同 2) 大小寫不同 3) 兩字以上、一方是另一方的子字串
+      const projKey = Object.keys(base).find(k => k === custName)
+        || Object.keys(base).find(k => k.toLowerCase() === custName.toLowerCase())
+        || Object.keys(base).find(k =>
+            k.length >= 2 && custName.length >= 2 &&
+            (k.includes(custName) || custName.includes(k))
+          );
+      if (projKey) custName = projKey;
       if (!arSum[custName]) arSum[custName] = {};
       arSum[custName][month0] = (arSum[custName][month0] || 0) + amount;
     }
