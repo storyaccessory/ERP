@@ -1211,47 +1211,25 @@ function renderDashboard() {
       <!-- 月份小柱狀圖 -->
       <div style="display:flex;gap:2px;align-items:flex-end">${monthBars}</div>
     </div>
-    <div class="cards cards-4" style="margin-bottom:16px">
+    <div class="cards cards-4" style="margin-bottom:20px">
+      <div class="card">
+        <div class="card-title">📈 本月自營平台業績</div>
+        <div class="card-value">$${(monthlyData[thisMonth-1]||0).toLocaleString()}</div>
+        <div class="card-sub">${thisMonth} 月實際入帳</div>
+      </div>
       <div class="card">
         <div class="card-title">🔴 今日逾期訂單</div>
         <div class="card-value danger">${overdueOrders.length}</div>
         <div class="card-sub">件需立即處理</div>
       </div>
       <div class="card">
-        <div class="card-title">🟡 3天內到期訂單</div>
-        <div class="card-value warning">${soonOrders.length}</div>
-        <div class="card-sub">件即將到期</div>
-      </div>
-      <div class="card">
-        <div class="card-title">🔄 待覆核補貨單</div>
-        <div class="card-value accent">${restock.length}</div>
-        <div class="card-sub">件等待確認</div>
-      </div>
-      <div class="card">
         <div class="card-title">💬 未回覆客服</div>
         <div class="card-value warning">${cs.length}</div>
         <div class="card-sub">件待回覆</div>
       </div>
-    </div>
-    <div class="cards cards-4" style="margin-bottom:20px">
-      <div class="card">
-        <div class="card-title">✅ 待辦未完成</div>
-        <div class="card-value">${todos.length}</div>
-        <div class="card-sub">${overdueTodos.length ? `<span style="color:var(--danger)">${overdueTodos.length} 件逾期</span>` : '無逾期'}</div>
-      </div>
-      <div class="card">
-        <div class="card-title">🔧 維修進行中</div>
-        <div class="card-value">${repair.length}</div>
-        <div class="card-sub">件處理中</div>
-      </div>
-      <div class="card">
-        <div class="card-title">🛠️ 開發專案</div>
-        <div class="card-value accent">${dev.length}</div>
-        <div class="card-sub">個進行中</div>
-      </div>
       <div class="card" style="cursor:pointer" onclick="nav('booking')">
         <div class="card-title">🗓️ 體驗預約待確認</div>
-        <div class="card-value ${d.bookingPending>0?'warning':''}"">${d.bookingPending||0}</div>
+        <div class="card-value ${d.bookingPending>0?'warning':''}">${d.bookingPending||0}</div>
         <div class="card-sub">${d.bookingPending>0?'筆待確認':'件，無待確認'}</div>
       </div>
     </div>
