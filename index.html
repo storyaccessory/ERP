@@ -724,7 +724,7 @@ async function loadDashboard() {
   const _mealYmStr = _mealYmDate.getFullYear().toString() + String(_mealYmDate.getMonth()+1).padStart(2,'0');
   const _mealYmLabel = `${_mealYmDate.getFullYear()}年 ${_mealYmDate.getMonth()+1} 月`;
   const _thisYmStr = _mealYmStr; // 保留變數名供其他地方參考
-  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows] = await Promise.all([
+  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     db.from('calendar_events')
@@ -749,6 +749,10 @@ async function loadDashboard() {
     db.from('meal_expenses').select('applicant_name,amount').eq('year_month', _mealYmStr),
     // 自營平台業績日報:給首頁的「2026年度業績達成」圖表用,避免拿到過時的舊快取
     db.from('sales_daily').select('*'),
+    // 應收帳款(精簡欄位):算「綜合業績 = 自營 + 專案」用
+    db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month'),
+    // 廠商(客戶名稱對應 PROJ_RAW key 用)
+    db.from('vendors').select('name,company_name'),
   ]);
   // 把最新的 sales_daily 寫進 salesCache,確保首頁業績圖表的數字跟業績儀表板一致
   if (!state.data.salesCache) state.data.salesCache = {};
@@ -757,6 +761,10 @@ async function loadDashboard() {
       state.data.salesCache[`${r.year}_${r.platform}_${r.month1}_${r.day}`] = parseFloat(r.value)||0;
     }
   }
+  // 把 ar_all + vendors 寫進 accounting,讓 projGetMonthTotal 在首頁也能算出專案業績
+  if (!state.data.accounting) state.data.accounting = {};
+  if (arAll?.data) state.data.accounting.ar_all = arAll.data;
+  if (vendors?.data) state.data.accounting.vendors = vendors.data;
 
   // 載入人員資料(顯示負責人名字 + 餐費依員編排序)
   if (!state.data.users?.length || !state.data.users.some(u => u.employee_no !== undefined)) {
@@ -1167,17 +1175,19 @@ function renderDashboard() {
   const thisYear = new Date().getFullYear();
   const thisMonth = new Date().getMonth() + 1; // 1~12
   const yearGoal = typeof salesGetGoal === 'function' ? salesGetGoal(thisYear) : 0;
-  const yearActual = typeof salesGetYearTotal === 'function' ? salesGetYearTotal(thisYear) : 0;
+  const yearActual = (typeof salesGetYearTotal === 'function' ? salesGetYearTotal(thisYear) : 0)
+                   + (typeof projGetYearTotal === 'function' ? projGetYearTotal(thisYear) : 0);
   const achievePct = yearGoal > 0 ? Math.min((yearActual / yearGoal * 100), 100) : 0;
   const achievePctRaw = yearGoal > 0 ? (yearActual / yearGoal * 100) : 0;
   // 預期達成率（以目前月份比例）
   const expectedPct = Math.min((thisMonth / 12) * 100, 100);
   const isAhead = achievePctRaw >= expectedPct;
   const barColor = achievePctRaw >= 100 ? '#00b386' : isAhead ? '#0d96f2' : '#ff8c66';
-  // 今年各月合計（已過月份）
+  // 今年各月合計：自營 + 專案(跟業績儀表板「綜合業績」口徑一致)
   const monthlyData = Array.from({length:12}, (_,m) => {
-    const total = typeof salesGetMonthlyTotal === 'function' ? salesGetMonthlyTotal(thisYear, m+1) : 0;
-    return total;
+    const platform = typeof salesGetMonthlyTotal === 'function' ? salesGetMonthlyTotal(thisYear, m+1) : 0;
+    const project  = typeof projGetMonthTotal === 'function' ? projGetMonthTotal(thisYear, m) : 0;
+    return platform + project;
   });
   const monthLabels = ['1月','2月','3月','4月','5月','6月','7月','8月','9月','10月','11月','12月'];
   const maxMonth = Math.max(...monthlyData, 1);
