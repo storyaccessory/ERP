@@ -734,7 +734,7 @@ async function loadDashboard() {
       .or(`assigned_to.eq.${myId},assignee_ids.cs.["${myId}"]`)
       .order('priority')
       .order('start_date'),
-    db.from('cs_records').select('*').eq('reply_status','未回覆'),
+    db.from('cs_records').select('*').neq('reply_status','已結案'),
     db.from('repair_orders').select('*').not('status','in','("已完成","已寄回","取消")'),
     db.from('dev_projects').select('*').eq('status','進行中'),
     db.from('experience_bookings').select('id').eq('status','待確認').neq('source','人工封鎖'),
@@ -1223,9 +1223,9 @@ function renderDashboard() {
         <div class="card-sub">件需立即處理</div>
       </div>
       <div class="card">
-        <div class="card-title">💬 未回覆客服</div>
+        <div class="card-title">💬 未結案客服</div>
         <div class="card-value warning">${cs.length}</div>
-        <div class="card-sub">件待回覆</div>
+        <div class="card-sub">件待處理</div>
       </div>
       <div class="card" style="cursor:pointer" onclick="nav('booking')">
         <div class="card-title">🗓️ 體驗預約待確認</div>
@@ -1390,10 +1390,10 @@ function renderDashboard() {
         })()}
       </div>
 
-      <!-- 客服未回覆 -->
+      <!-- 客服未結案 -->
       <div class="card">
-        <div class="section-title">💬 未回覆客服</div>
-        ${cs.length === 0 ? '<div class="empty"><div class="empty-icon">💬</div><p>沒有未回覆的客服</p></div>' :
+        <div class="section-title">💬 未結案客服</div>
+        ${cs.length === 0 ? '<div class="empty"><div class="empty-icon">💬</div><p>沒有未結案的客服</p></div>' :
           cs.slice(0,5).map(c => {
             const subs = Array.isArray(c.subtasks) ? c.subtasks : [];
             const doneCount = subs.filter(s=>s.done).length;
