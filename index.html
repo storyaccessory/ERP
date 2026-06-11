@@ -2809,11 +2809,14 @@ async function modalEditCasting(id) {
       const newMoldFee   = parseFloat(document.getElementById('cs-mold-fee').value)||null;
 
       // 新加的成本欄位(從同事系統匯入用) — 5 個 payload 都要塞
-      const costFields = {
+      // 非主管(沒看到成本區)儲存時,不要把成本欄位覆蓋掉(只寫 is_discontinued)
+      const costFields = _canSeeCost ? {
         silver_weight: parseFloat(document.getElementById('cs-silver-weight')?.value)||null,
         mold_flat_fee: parseFloat(document.getElementById('cs-mold-flat-fee')?.value)||null,
         cast_labor:    parseFloat(document.getElementById('cs-cast-labor')?.value)||null,
         master_3d_fee: parseFloat(document.getElementById('cs-master-3d-fee')?.value)||null,
+        is_discontinued: !!document.getElementById('cs-discontinued')?.checked,
+      } : {
         is_discontinued: !!document.getElementById('cs-discontinued')?.checked,
       };
 
