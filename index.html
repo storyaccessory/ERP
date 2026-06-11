@@ -21484,15 +21484,11 @@ async function modalAddCS() {
     <div class="form-group">
       <label>問題摘要 *</label>
       <textarea class="form-control" id="m-summary" rows="3" placeholder="說明客服內容、問題描述…"></textarea>
-      <!-- 附件區:沒上傳就只顯示一個小小的「+ 加附件圖片」連結;點才展開上傳按鈕 -->
-      <button type="button" id="cs-issue-expand"
-        onclick="document.getElementById('cs-issue-attach').style.display='flex';this.style.display='none'"
-        style="margin-top:4px;font-size:11px;color:var(--accent);background:none;border:none;padding:2px 0;cursor:pointer">+ 加附件圖片</button>
-      <div id="cs-issue-attach" style="display:none;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
-        <input type="file" id="cs-issue-file" accept="image/*" style="display:none" onchange="window._csUploadIssueImage()">
-        <button type="button" onclick="document.getElementById('cs-issue-file').click()"
-          style="font-size:12px;padding:5px 10px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;cursor:pointer">📷 加圖片(自動壓到 100KB)</button>
+      <input type="file" id="cs-issue-file" accept="image/*" style="display:none" onchange="window._csUploadIssueImage()">
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">
         <div id="cs-issue-images" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        <button type="button" onclick="document.getElementById('cs-issue-file').click()"
+          style="font-size:11px;color:var(--accent);background:none;border:none;padding:2px 4px;cursor:pointer">+ 加附件圖片</button>
       </div>
     </div>
     <div class="form-group">
@@ -21612,11 +21608,11 @@ async function modalEditCS(id) {
     <div class="form-group">
       <label>問題摘要 * <span style="font-size:11px;color:var(--muted);font-weight:400">（點擊內容可編輯）</span></label>
       <textarea class="form-control cs-soft-edit" id="m-summary" rows="3" style="white-space:pre-wrap;line-height:1.6">${escHtml(record.issue_summary)}</textarea>
-      <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
-        <input type="file" id="cs-issue-file" accept="image/*" style="display:none" onchange="window._csUploadIssueImage()">
-        <button type="button" onclick="document.getElementById('cs-issue-file').click()"
-          style="font-size:12px;padding:5px 10px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;cursor:pointer">📷 加圖片(自動壓到 100KB)</button>
+      <input type="file" id="cs-issue-file" accept="image/*" style="display:none" onchange="window._csUploadIssueImage()">
+      <div style="display:flex;gap:6px;align-items:center;margin-top:4px;flex-wrap:wrap">
         <div id="cs-issue-images" style="display:flex;gap:6px;flex-wrap:wrap"></div>
+        <button type="button" onclick="document.getElementById('cs-issue-file').click()"
+          style="font-size:11px;color:var(--accent);background:none;border:none;padding:2px 4px;cursor:pointer">+ 加附件圖片</button>
       </div>
     </div>
     <div class="form-group">
@@ -21729,6 +21725,10 @@ window._csAddStep = function(prefill) {
         style="font-size:12px;padding:5px 6px;border-radius:6px;width:170px;color:var(--text)" title="日期 + 時間">
       <span style="font-size:12px;color:var(--muted);padding:5px 6px" title="填寫人(系統依登入者自動填入,不可變更)">${lockedRecorderName}</span>
       <input type="hidden" id="cs-step-who-${i}" value="${lockedRecorderId}">
+      <!-- 沒附件時,「+ 加連結/圖片」放在填寫人後面;有附件就藏起來,改在下方整列展示 -->
+      <button type="button" id="cs-step-expand-${i}"
+        onclick="(function(b){var w=document.getElementById('cs-step-extra-${i}');w.style.display='flex';b.style.display='none'})(this)"
+        style="display:${(p.link||imgUrl)?'none':'inline-block'};font-size:11px;color:var(--accent);background:none;border:none;padding:2px 6px;cursor:pointer">+ 加連結/圖片</button>
       <div style="flex:1"></div>
       <button type="button" onclick="this.closest('[id^=\\'cs-step-row\\']').remove()"
         style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除此階段">×</button>
@@ -21736,10 +21736,6 @@ window._csAddStep = function(prefill) {
     <textarea class="form-control cs-soft-edit" id="cs-step-desc-${i}" placeholder="處理內容,例:通知客戶寄回商品" rows="1"
       oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"
       style="width:100%;font-size:13px;line-height:1.6;resize:none;overflow:hidden;min-height:32px">${(p.description||'').replace(/</g,'&lt;')}</textarea>
-    <!-- 連結 + 圖片區:有內容才顯示;沒內容預設藏起來,點「+ 連結/圖片」才展開 -->
-    <button type="button" id="cs-step-expand-${i}"
-      onclick="(function(b){var w=document.getElementById('cs-step-extra-${i}');w.style.display='flex';b.style.display='none'})(this)"
-      style="display:${(p.link||imgUrl)?'none':'inline-block'};align-self:flex-start;font-size:11px;color:var(--accent);background:none;border:none;padding:2px 0;cursor:pointer">+ 加連結/圖片</button>
     <div id="cs-step-extra-${i}" style="display:${(p.link||imgUrl)?'flex':'none'};gap:6px;align-items:center">
       <input class="form-control cs-soft-edit" id="cs-step-link-${i}" value="${(p.link||'').replace(/"/g,'&quot;')}" placeholder="🔗 連結(選填,例:訂單頁、對話截圖網址)"
         style="flex:1;font-size:12px;padding:4px 8px">
