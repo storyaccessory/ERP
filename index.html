@@ -2736,7 +2736,7 @@ async function modalEditCasting(id) {
       <div class="form-group">
         <label>品類</label>
         <select class="form-control" id="cs-type">
-          ${['鑄件','改蠟'].map(t=>`<option ${(c?.casting_type||'鑄件')===t?'selected':''}>${t}</option>`).join('')}
+          ${['鑄件','雷刻','改蠟'].map(t=>`<option ${(c?.casting_type||'鑄件')===t?'selected':''}>${t}</option>`).join('')}
         </select>
       </div>
       <div class="form-group">
