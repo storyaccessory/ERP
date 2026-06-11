@@ -17163,15 +17163,16 @@ async function loadJournal() {
       .gte('start_date', today)
       .lte('start_date', in14)
       .order('start_date'),
-    // 全員子任務：有未完成子任務的行事曆事項（供日誌各人顯示）
+    // 全員子任務：有未完成子任務的行事曆事項;為了讓「子任務指派給我但主任務不是」的事項也能被撈出,
+    // 範圍放寬:不限主任務 assignee,也不限 start_date 必須未來。前端再依日期/指派人篩選顯示。
     db.from('calendar_events')
-      .select('id, title, start_date, assignee_ids, assigned_to, subtasks')
+      .select('id, title, start_date, end_date, event_type, priority, assignee_ids, assigned_to, subtasks')
       .is('completed_at', null)
       .neq('is_template', true)
       .not('subtasks', 'eq', '[]')
       .not('subtasks', 'is', null)
-      .gte('start_date', today)
-      .order('start_date'),
+      .order('start_date')
+      .limit(300),
   ]);
   if (todayRes.error)   console.error('[journal] today query:', todayRes.error.message);
   if (histRes.error)    console.error('[journal] history query:', histRes.error.message);
@@ -18262,32 +18263,53 @@ function renderJournal() {
           ${isOv?'⚠ 逾期':isTd?'⏰ 今日':'📅'} ${s.due_date.slice(5)}</span>`:''}
       </div>`;
     };
-    // ── 近期任務：以行事曆事項為單位，底下列屬於我的子任務 ──
+    // ── 近期任務:把「子任務指派給我」的事項也撈進來 ──
     const jdMyId = effectiveUserId();
-    // 建立 eventId → 我的未完成子任務 的對照表
+    const subtaskEvents = jd.subtaskEvents || [];
+    // 找出「子任務指派給我但主任務沒指派給我」的事項,合進 upcoming
+    const upcomingIds = new Set(upcoming.map(e => e.id));
+    const subAssignedEvents = subtaskEvents.filter(ev => {
+      if (upcomingIds.has(ev.id)) return false;
+      const subs = Array.isArray(ev.subtasks) ? ev.subtasks : [];
+      return subs.some(s => !s.done && s.text && s.assignee_id === jdMyId);
+    });
+    const mergedUpcoming = [...upcoming, ...subAssignedEvents];
+
+    // 建立 eventId → 我的未完成子任務(放寬:對所有合進來的事項都取出我的子任務)
     const mySubMap = {};
-    (jd.subtaskEvents || []).forEach(ev => {
-      const isAssigned = ev.assigned_to === jdMyId || (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(jdMyId));
-      if (!isAssigned) return;
+    mergedUpcoming.forEach(ev => {
       const mySubs = (Array.isArray(ev.subtasks) ? ev.subtasks : []).filter(s =>
         !s.done && s.text && (s.assignee_id === jdMyId || !s.assignee_id)
       );
       if (mySubs.length > 0) mySubMap[ev.id] = mySubs;
     });
 
-    // 逾期事項排前面
-    const _upcomingSorted = [...upcoming].sort((a,b) => {
-      const aOv = (a.end_date||a.start_date||'') < todayStr;
-      const bOv = (b.end_date||b.start_date||'') < todayStr;
+    // 「我這列的最早 due」:主任務日期 vs 我的子任務 due_date,取較早者
+    const earliestForMeJ = (ev) => {
+      const candidates = [];
+      const mainDt = ev.end_date || ev.start_date || '';
+      if (mainDt) candidates.push(mainDt);
+      (mySubMap[ev.id] || []).forEach(s => { if (s.due_date) candidates.push(s.due_date); });
+      return candidates.sort()[0] || '';
+    };
+
+    // 排序:逾期排前 → 早到期
+    const _upcomingSorted = mergedUpcoming.sort((a,b) => {
+      const aDt = earliestForMeJ(a);
+      const bDt = earliestForMeJ(b);
+      const aOv = aDt && aDt < todayStr;
+      const bOv = bDt && bDt < todayStr;
       if (aOv !== bOv) return aOv ? -1 : 1;
-      return (a.start_date||'').localeCompare(b.start_date||'');
+      return (aDt||'').localeCompare(bDt||'');
     });
     const upcomingHtml = _upcomingSorted.length === 0 ? '' : `
       <div class="card" style="margin-bottom:16px;border-left:4px solid #f57c00">
         <div style="font-size:13px;font-weight:700;margin-bottom:10px;color:#e65100">📋 你的近期任務 & 你的過期任務</div>
         <div style="display:flex;flex-direction:column;gap:4px">
           ${_upcomingSorted.map(ev => {
-            const { bg, color, label } = _urgencyStyle(ev.start_date);
+            // 標籤用 earliestForMeJ,讓子任務日期近的事項顯示「今天/明天」紅黃字
+            const labelDt = earliestForMeJ(ev) || ev.start_date;
+            const { bg, color, label } = _urgencyStyle(labelDt);
             const subs = mySubMap[ev.id] || [];
             const subsHtml = subs.map(s => {
               const isOv = s.due_date && s.due_date < todayStr;
