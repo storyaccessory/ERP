@@ -5983,11 +5983,32 @@ window._arAddInvoiceRow = function(prefill) {
       style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:140px;background:#fff"
       oninput="window._arSyncFirstInvoiceDate()">
     <input type="number" id="ar-inv-amt-${i}" value="${p.amount||''}" placeholder="金額"
-      class="form-control" style="width:110px;font-size:13px;flex-shrink:0">
-    <button type="button" onclick="this.closest('[id^=\\'ar-inv-row\\']').remove();window._arSyncFirstInvoiceDate()"
+      class="form-control" style="width:110px;font-size:13px;flex-shrink:0"
+      oninput="window._arRecalcInvoices&&window._arRecalcInvoices()">
+    <button type="button" onclick="this.closest('[id^=\\'ar-inv-row\\']').remove();window._arSyncFirstInvoiceDate();window._arRecalcInvoices&&window._arRecalcInvoices()"
       style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除這張發票">×</button>
   `;
   list.appendChild(row);
+};
+
+// 計算發票金額加總,跟含稅金額比對。不符就顯示黃字提醒(但不擋存)
+window._arRecalcInvoices = function() {
+  const warn = document.getElementById('ar-invoices-warn');
+  const amountEl = document.getElementById('ar-amount');
+  if (!warn || !amountEl) return;
+  const target = parseFloat(amountEl.value) || 0;
+  let sum = 0;
+  document.querySelectorAll('#ar-invoice-rows [id^="ar-inv-row-"]').forEach(row => {
+    const i = row.id.replace('ar-inv-row-','');
+    sum += parseFloat(document.getElementById(`ar-inv-amt-${i}`)?.value) || 0;
+  });
+  if (sum === 0 || target === 0) { warn.style.display = 'none'; return; }
+  if (Math.abs(sum - target) > 0.5) {
+    warn.style.display = 'block';
+    warn.innerHTML = `⚠️ 發票金額加總 <b>${sum.toLocaleString()}</b> 跟含稅金額 <b>${target.toLocaleString()}</b> 不一致(差 ${(target-sum).toLocaleString()})。`;
+  } else {
+    warn.style.display = 'none';
+  }
 };
 
 // 把第一列的發票號碼/日期 同步寫進舊版隱藏欄位(向後相容,給付款期限/AI 比對邏輯用)
@@ -6252,7 +6273,8 @@ async function modalAddAR(existing) {
         <!-- 4: 含稅金額 -->
         <div class="form-group" style="margin:0">
           <label>含稅金額（本期應收）* <span style="font-size:11px;color:var(--muted)">（對帳單解析帶入）</span></label>
-          <input class="form-control" id="ar-amount" type="number" placeholder="上傳對帳單後自動帶入" value="${existing?.amount||''}">
+          <input class="form-control" id="ar-amount" type="number" placeholder="上傳對帳單後自動帶入" value="${existing?.amount||''}"
+            oninput="window._arRecalcInvoices&&window._arRecalcInvoices();window._arRecalcPayments&&window._arRecalcPayments()">
         </div>
 
         <!-- 🧾 發票:每張發票一列(檔案 + 號碼 + 日期 + 金額);上傳檔案會自動 AI 辨識同列的號碼/日期/金額 -->
@@ -6263,6 +6285,7 @@ async function modalAddAR(existing) {
           <input type="hidden" id="ar-invoice-date" value="${existing?.invoice_date?.slice?.(0,10)||''}">
           <div id="ar-invoice-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
           <div style="font-size:11px;color:var(--muted);text-align:center;padding:4px 0">↑ 上傳發票檔案後,AI 會自動把號碼/日期/金額帶到上面</div>
+          <div id="ar-invoices-warn" style="display:none;margin-top:6px;padding:6px 10px;background:#fff8e1;border:1px solid #ffd54f;border-radius:6px;font-size:12px;color:#a36600"></div>
         </div>
 
         <!-- 多筆收款:訂金 + 尾款這種情況用,加總跟含稅金額比對 -->
@@ -6397,6 +6420,18 @@ async function modalAddAR(existing) {
       // 統一存公司全名（customer_name 欄位），方便顯示；查詢時 arVendorMap 同時以 name/company_name 為 key
       const customer = vendorMatch.company_name || vendorMatch.name;
       if (!amount) { showToast('請輸入金額', 'error'); return; }
+
+      // 發票加總跟含稅金額對不上 → 跳 confirm 二次確認(訂金/尾款/退稅等場景可繼續)
+      let _invSum = 0;
+      document.querySelectorAll('#ar-invoice-rows [id^="ar-inv-row-"]').forEach(row => {
+        const ii = row.id.replace('ar-inv-row-','');
+        _invSum += parseFloat(document.getElementById(`ar-inv-amt-${ii}`)?.value) || 0;
+      });
+      if (_invSum > 0 && Math.abs(_invSum - amount) > 0.5) {
+        const diff = amount - _invSum;
+        const ok = confirm(`⚠️ 發票金額加總 ${_invSum.toLocaleString()} 跟含稅金額 ${amount.toLocaleString()} 不一致(差 ${diff.toLocaleString()})\n\n要繼續儲存嗎?\n(訂金/尾款/退稅等場景可以按「確定」繼續)`);
+        if (!ok) return;
+      }
 
       const payload = {
         customer_name: customer,
@@ -6560,7 +6595,10 @@ async function modalAddAR(existing) {
     // 全新單:預設一個空列
     window._arAddInvoiceRow({});
   }
-  setTimeout(() => window._arSyncFirstInvoiceDate && window._arSyncFirstInvoiceDate(), 30);
+  setTimeout(() => {
+    window._arSyncFirstInvoiceDate && window._arSyncFirstInvoiceDate();
+    window._arRecalcInvoices && window._arRecalcInvoices();
+  }, 30);
 
   // 檔案清單:從 invoice_files(新) + 舊版單檔 invoice_file_url 合併
   const _oldFiles = Array.isArray(existing?.invoice_files) ? existing.invoice_files : [];
