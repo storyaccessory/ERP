@@ -1726,7 +1726,10 @@ function renderProducts() {
                   return `<span style="display:inline-block;font-size:11px;font-weight:700;background:${color||'#90a4ae'};color:#fff;padding:2px 7px;border-radius:4px;white-space:nowrap">${code}</span>`;
                 })()}</td>
                 <td style="font-size:12px;color:var(--accent-dark);white-space:nowrap">${p.series?.name||'—'}</td>
-                <td><strong>${p.name}</strong></td>
+                <td>
+                  <strong>${p.name}</strong>
+                  ${p.shop_url ? `<a href="${p.shop_url}" target="_blank" onclick="event.stopPropagation()" title="開啟官網" style="margin-left:6px;font-size:12px;color:var(--accent-dark);text-decoration:none">🔗</a>` : ''}
+                </td>
                 <td>${p.categories?.name ? `<span class="tag tag-blue">${p.categories.name}</span>` : '—'}</td>
                 <td style="font-size:12px">${p.color||'—'}</td>
                 <td style="font-size:12px">${castingHtml}</td>
