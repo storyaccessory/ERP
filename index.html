@@ -2703,6 +2703,13 @@ async function modalEditCasting(id) {
   const castings = state.data.castings || [];
   const c = id ? castings.find(x=>x.id===id) : null;
 
+  // 成本資訊只給 admin/manager 看(一般員工不可見)
+  const _meCast = effectiveProfile() || {};
+  const _canSeeCost = ['admin','manager','management'].includes(_meCast.role)
+    || _meCast.email === 'cailing0516@gmail.com'
+    || state.user?.email === 'cailing0516@gmail.com'
+    || _meCast.name === '蔡采玲';
+
   await loadIPTree();
 
   showModal(c ? '編輯鑄件' : '新增鑄件', `
@@ -2755,6 +2762,37 @@ async function modalEditCasting(id) {
         <input class="form-control" id="cs-mold-yield" type="number" min="1" value="${c?.mold_yield||1}">
       </div>
     </div>
+
+    <!-- 成本資訊:只有 admin/manager 看得到 -->
+    ${_canSeeCost ? `
+    <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)">💰 成本資訊 <span style="font-size:11px;color:var(--muted);font-weight:400">(僅主管以上可見;用於鑄造廠帳款)</span></div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
+      <div class="form-group">
+        <label>銀重 <span style="font-size:11px;color:var(--muted);font-weight:400">(克)</span></label>
+        <input class="form-control" id="cs-silver-weight" type="number" min="0" step="0.001" value="${c?.silver_weight||''}">
+      </div>
+      <div class="form-group">
+        <label>模具費 <span style="font-size:11px;color:var(--muted);font-weight:400">(一次性)</span></label>
+        <input class="form-control" id="cs-mold-flat-fee" type="number" min="0" step="0.01" value="${c?.mold_flat_fee||''}">
+      </div>
+      <div class="form-group">
+        <label>鑄工 <span style="font-size:11px;color:var(--muted);font-weight:400">(每件)</span></label>
+        <input class="form-control" id="cs-cast-labor" type="number" min="0" step="0.01" value="${c?.cast_labor||''}">
+      </div>
+      <div class="form-group">
+        <label>3D母版費</label>
+        <input class="form-control" id="cs-master-3d-fee" type="number" min="0" step="0.01" value="${c?.master_3d_fee||''}">
+      </div>
+    </div>` : ''}
+
+    <div class="form-group">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer">
+        <input type="checkbox" id="cs-discontinued" ${c?.is_discontinued?'checked':''} style="width:16px;height:16px;cursor:pointer;accent-color:var(--accent)">
+        <span>已下架</span>
+        <span style="font-size:11px;color:var(--muted);font-weight:400">(打勾代表已停產,列表會分開顯示)</span>
+      </label>
+    </div>
+
     <div class="form-group">
       <label>備註</label>
       <textarea class="form-control" id="cs-notes" rows="2">${c?.notes||''}</textarea>
@@ -2770,6 +2808,15 @@ async function modalEditCasting(id) {
       const newUnitPrice = parseFloat(document.getElementById('cs-price').value)||null;
       const newMoldFee   = parseFloat(document.getElementById('cs-mold-fee').value)||null;
 
+      // 新加的成本欄位(從同事系統匯入用) — 5 個 payload 都要塞
+      const costFields = {
+        silver_weight: parseFloat(document.getElementById('cs-silver-weight')?.value)||null,
+        mold_flat_fee: parseFloat(document.getElementById('cs-mold-flat-fee')?.value)||null,
+        cast_labor:    parseFloat(document.getElementById('cs-cast-labor')?.value)||null,
+        master_3d_fee: parseFloat(document.getElementById('cs-master-3d-fee')?.value)||null,
+        is_discontinued: !!document.getElementById('cs-discontinued')?.checked,
+      };
+
       // ── 編輯模式：偵測價格變動，需送審 ──
       if (id) {
         const priceChanged = (newUnitPrice !== (c?.unit_price||null)) || (newMoldFee !== (c?.mold_fee||null));
@@ -2784,6 +2831,7 @@ async function modalEditCasting(id) {
             safety_stock: parseInt(document.getElementById('cs-safety').value)||0,
             mold_yield:   parseInt(document.getElementById('cs-mold-yield').value)||1,
             notes:        document.getElementById('cs-notes').value.trim()||null,
+            ...costFields,
           };
           const {error: e1} = await db.from('castings').update(nonPricePayload).eq('id',id);
           if (e1) { showToast('儲存失敗：'+e1.message,'error'); return; }
@@ -2817,6 +2865,7 @@ async function modalEditCasting(id) {
           mold_fee:     newMoldFee,
           mold_yield:   parseInt(document.getElementById('cs-mold-yield').value)||1,
           notes:        document.getElementById('cs-notes').value.trim()||null,
+          ...costFields,
         };
         const {error:err} = await db.from('castings').update(payload).eq('id',id);
         if (err) { showToast('儲存失敗：'+err.message,'error'); return; }
@@ -2833,6 +2882,7 @@ async function modalEditCasting(id) {
           mold_fee:     newMoldFee,
           mold_yield:   parseInt(document.getElementById('cs-mold-yield').value)||1,
           notes:        document.getElementById('cs-notes').value.trim()||null,
+          ...costFields,
         };
         const {error:err} = await db.from('castings').insert(payload);
         if (err) { showToast('儲存失敗：'+err.message,'error'); return; }
