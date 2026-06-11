@@ -6071,11 +6071,14 @@ window._arUploadInvoiceFiles = async function(fileInputEl) {
       const url = urlData?.publicUrl || '';
       // 1) 加進下方檔案清單
       window._arAddInvoiceFileItem({ url, name: file.name });
-      // 2) AI 辨識 → 帶到上方發票區(新增一列)
-      if (isImg && typeof getClaudeApiKey === 'function' && getClaudeApiKey()) {
+      // 2) AI 辨識 → 帶到上方發票區(圖片跟 PDF 都試)
+      const canParse = typeof getClaudeApiKey === 'function' && getClaudeApiKey();
+      if (canParse) {
         showStat(`🤖 AI 辨識中…(${idx+1}/${files.length})`);
         try {
-          const parsed = await parseInvoiceWithClaude(compressed);
+          // 圖片要用壓縮過的;PDF 用原檔(壓縮會把它當二進位破壞)
+          const parseSource = isImg ? compressed : file;
+          const parsed = await parseInvoiceWithClaude(parseSource);
           // 嘗試先把資料填到既有的空白列;沒空白列才新增
           let targetRow = null;
           document.querySelectorAll('#ar-invoice-rows [id^="ar-inv-row-"]').forEach(row => {
@@ -6108,14 +6111,15 @@ window._arUploadInvoiceFiles = async function(fileInputEl) {
           }
           window._arSyncFirstInvoiceDate();
         } catch(e) {
-          // AI 失敗就只是少帶資料,不影響上傳
+          // AI 失敗就只是少帶資料,不影響上傳;在狀態條短暫提示
+          showStat(`⚠️ ${file.name} AI 辨識失敗:${e.message||e}`, '#fff8e1', '#f57c00');
         }
       }
     } catch(e) {
       showStat('處理失敗:'+(e.message||e), '#ffebee', '#c62828');
     }
   }
-  showStat(`✅ 已處理 ${files.length} 個檔案`, '#e8f5e9', '#2e7d32');
+  showStat(canParse ? `✅ 已處理 ${files.length} 個檔案(AI 已嘗試辨識)` : `✅ 已上傳 ${files.length} 個檔案(未設 API Key,跳過 AI)`, '#e8f5e9', '#2e7d32');
   fileInputEl.value = '';  // 清空,讓同檔可重選
 };
 
@@ -7066,7 +7070,11 @@ async function callClaudeVision(file, prompt) {
     reader.readAsDataURL(file);
   });
 
-  const mediaType = (file.type && file.type.startsWith('image/')) ? file.type : 'image/jpeg';
+  // 依檔案類型決定 content block 形態:PDF 用 document、圖片用 image
+  const isPdfFile = file.type === 'application/pdf' || /\.pdf$/i.test(file.name || '');
+  const contentBlock = isPdfFile
+    ? { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } }
+    : { type: 'image', source: { type: 'base64', media_type: (file.type && file.type.startsWith('image/')) ? file.type : 'image/jpeg', data: base64 } };
   const resp = await fetch('https://api.anthropic.com/v1/messages', {
     method: 'POST',
     headers: {
@@ -7081,7 +7089,7 @@ async function callClaudeVision(file, prompt) {
       messages: [{
         role: 'user',
         content: [
-          { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+          contentBlock,
           { type: 'text', text: prompt }
         ]
       }]
