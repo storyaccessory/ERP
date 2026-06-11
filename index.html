@@ -21704,8 +21704,9 @@ window._csAddStep = function(prefill) {
     <div style="display:flex;gap:6px;align-items:center">
       <input type="datetime-local" id="cs-step-time-${i}" value="${defaultDt}" class="cs-soft-edit"
         style="font-size:12px;padding:5px 6px;border-radius:6px;width:170px;color:var(--text)">
-      <input class="form-control cs-soft-edit" id="cs-step-desc-${i}" value="${(p.description||'').replace(/"/g,'&quot;')}" placeholder="處理內容,例:通知客戶寄回商品"
-        style="flex:1;font-size:13px">
+      <textarea class="form-control cs-soft-edit" id="cs-step-desc-${i}" placeholder="處理內容,例:通知客戶寄回商品" rows="1"
+        oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"
+        style="flex:1;font-size:13px;line-height:1.6;resize:none;overflow:hidden;min-height:32px">${(p.description||'').replace(/</g,'&lt;')}</textarea>
       <button type="button" onclick="this.closest('[id^=\\'cs-step-row\\']').remove()"
         style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除此階段">×</button>
     </div>
@@ -21724,6 +21725,9 @@ window._csAddStep = function(prefill) {
     </div>
   `;
   list.appendChild(row);
+  // 預填的處理內容若超過一行,自動撐高 textarea 把全部內容顯示出來
+  const _desc = document.getElementById(`cs-step-desc-${i}`);
+  if (_desc) { _desc.style.height = 'auto'; _desc.style.height = _desc.scrollHeight + 'px'; }
 };
 
 // 上傳並壓縮圖片到 ≤100KB,存到 Supabase Storage 後把網址寫回隱藏欄位
