@@ -18352,7 +18352,7 @@ function renderJournal() {
     };
     // ── 近期任務:把「子任務指派給我」的事項也撈進來 ──
     const jdMyId = effectiveUserId();
-    const subtaskEvents = jd.subtaskEvents || [];
+    // subtaskEvents 已在上面宣告(line ~18328),這裡直接用
     // 找出「子任務指派給我但主任務沒指派給我」的事項,合進 upcoming
     const upcomingIds = new Set(upcoming.map(e => e.id));
     const subAssignedEvents = subtaskEvents.filter(ev => {
