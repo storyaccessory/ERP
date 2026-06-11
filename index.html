@@ -21697,10 +21697,16 @@ window._csAddStep = function(prefill) {
     const n = new Date();
     defaultDt = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}T${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
   }
-  // 填寫人:固定取登入者(不可改);舊資料有存的就用舊的,沒存的就用當前登入者
-  const defaultRecorderId = (prefill && p.recorder_id) ? p.recorder_id : (state.user?.id || '');
-  const _recorderUser = users.find(u => u.id === defaultRecorderId);
-  const recorderName = _recorderUser?.name || (state.profile?.name || state.user?.email || '—');
+  // 填寫人:
+  //  - 新增階段 → 自動帶登入者
+  //  - 舊資料有 recorder_id → 顯示原本那位
+  //  - 舊資料沒有 recorder_id → 顯示空白,可下拉手動補正(避免被誤認為當前登入者)
+  let defaultRecorderId;
+  if (prefill) {
+    defaultRecorderId = p.recorder_id || '';
+  } else {
+    defaultRecorderId = state.user?.id || '';
+  }
   const row = document.createElement('div');
   row.id = `cs-step-row-${i}`;
   row.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:6px 8px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
@@ -21710,8 +21716,11 @@ window._csAddStep = function(prefill) {
     <div style="display:flex;gap:6px;align-items:center">
       <input type="datetime-local" id="cs-step-time-${i}" value="${defaultDt}" class="cs-soft-edit"
         style="font-size:12px;padding:5px 6px;border-radius:6px;width:170px;color:var(--text)" title="日期 + 時間">
-      <span style="font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;padding:5px 8px;background:#fff;border:1px solid var(--border);border-radius:6px" title="填寫人(系統自動依登入者填入)">👤 ${recorderName}</span>
-      <input type="hidden" id="cs-step-who-${i}" value="${defaultRecorderId}">
+      <select id="cs-step-who-${i}" class="cs-soft-edit"
+        style="font-size:12px;padding:5px 6px;border-radius:6px;min-width:90px;color:var(--text);appearance:none;-webkit-appearance:none" title="填寫人">
+        <option value="">— 填寫人 —</option>
+        ${users.map(u=>`<option value="${u.id}" ${defaultRecorderId===u.id?'selected':''}>${u.name}</option>`).join('')}
+      </select>
       <div style="flex:1"></div>
       <button type="button" onclick="this.closest('[id^=\\'cs-step-row\\']').remove()"
         style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除此階段">×</button>
