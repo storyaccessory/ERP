@@ -5826,6 +5826,13 @@ async function compressImage(file, maxKB = 100) {
   });
 }
 
+// 補 download 查詢字串,確保下載時用回原中文檔名(給舊資料的 URL 使用)
+window._arWithDownload = function(url, name) {
+  if (!url || !name) return url;
+  if (/[?&]download=/.test(url)) return url;
+  return url + (url.includes('?') ? '&' : '?') + 'download=' + encodeURIComponent(name);
+};
+
 // AR 多筆收款:動態新增一列(訂金/尾款各一列)
 window._arAddPaymentRow = function(prefill) {
   const list = document.getElementById('ar-payments-list');
@@ -5935,26 +5942,163 @@ window._arRecalcPayments = function() {
   }
 };
 
-// AR 多張發票:動態新增一列(主發票之後的額外發票)
+// AR 發票多列(每張一列):號碼+日期+金額+檔案+移除
 window._arAddInvoiceRow = function(prefill) {
-  const list = document.getElementById('ar-extra-invoice-list');
+  const list = document.getElementById('ar-invoice-rows');
   if (!list) return;
   const i = '_' + Date.now() + Math.floor(Math.random()*1000);
   const p = prefill || {};
+  // 補 download 參數讓舊資料下載時保留原檔名
+  const fileUrlRaw = p.file_url || '';
+  const fileName = p.file_name || '';
+  const fileHref = window._arWithDownload ? window._arWithDownload(fileUrlRaw, fileName) : fileUrlRaw;
   const row = document.createElement('div');
   row.id = `ar-inv-row-${i}`;
-  row.style.cssText = 'display:flex;gap:6px;align-items:center;padding:5px 8px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
+  row.style.cssText = 'display:flex;flex-direction:column;gap:6px;padding:8px;border-radius:8px;background:#fafafa;border:1px solid var(--border)';
   row.innerHTML = `
-    <input class="form-control" id="ar-inv-no-${i}" value="${(p.invoice_no||'').replace(/"/g,'&quot;')}" placeholder="發票號碼"
-      style="flex:1;font-size:13px;min-width:120px">
-    <input type="date" id="ar-inv-dt-${i}" value="${p.invoice_date?String(p.invoice_date).slice(0,10):''}" title="發票日期"
-      style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:140px;background:#fff">
-    <input type="number" id="ar-inv-amt-${i}" value="${p.amount||''}" placeholder="金額"
-      class="form-control" style="width:100px;font-size:13px;flex-shrink:0">
-    <button type="button" onclick="this.closest('[id^=\\'ar-inv-row\\']').remove()"
-      style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除">×</button>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <input class="form-control" id="ar-inv-no-${i}" value="${(p.invoice_no||'').replace(/"/g,'&quot;')}" placeholder="發票號碼"
+        style="flex:1 1 130px;font-size:13px;min-width:120px">
+      <input type="date" id="ar-inv-dt-${i}" value="${p.invoice_date?String(p.invoice_date).slice(0,10):''}" title="發票日期"
+        style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:140px;background:#fff"
+        oninput="window._arSyncFirstInvoiceDate()">
+      <input type="number" id="ar-inv-amt-${i}" value="${p.amount||''}" placeholder="金額"
+        class="form-control" style="width:110px;font-size:13px;flex-shrink:0">
+      <button type="button" onclick="this.closest('[id^=\\'ar-inv-row\\']').remove();window._arSyncFirstInvoiceDate()"
+        style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除這張發票">×</button>
+    </div>
+    <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+      <!-- 已上傳檔案:有檔就顯示縮網址連結 + 替換鈕,沒檔就顯示「上傳檔案」按鈕 -->
+      <div id="ar-inv-file-display-${i}" style="display:${fileUrlRaw?'flex':'none'};align-items:center;gap:6px;flex:1;background:#f0fafa;padding:6px 8px;border-radius:6px;border:1px solid var(--border)">
+        <span style="font-size:14px">📎</span>
+        <a id="ar-inv-file-link-${i}" href="${fileHref}" target="_blank"
+          style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${fileName||'已上傳'}</a>
+        <label style="cursor:pointer;font-size:11px;color:#fff;background:var(--accent-dark);padding:3px 8px;border-radius:4px;white-space:nowrap">
+          🔄 替換<input type="file" accept="image/*,.pdf" style="display:none" onchange="window._arUploadInvoiceForRow('${i}', this)">
+        </label>
+        <button type="button" onclick="window._arRemoveInvoiceFile('${i}')"
+          style="background:none;border:none;cursor:pointer;color:#aaa;font-size:14px" title="移除檔案">🗑</button>
+      </div>
+      <label id="ar-inv-file-upload-${i}" style="display:${fileUrlRaw?'none':'inline-flex'};cursor:pointer;font-size:12px;padding:6px 12px;border:1px dashed var(--accent);background:#fff;color:var(--accent);border-radius:6px;flex:1;justify-content:center">
+        📎 上傳發票檔案(會自動 AI 辨識)
+        <input type="file" accept="image/*,.pdf" style="display:none" onchange="window._arUploadInvoiceForRow('${i}', this)">
+      </label>
+      <input type="hidden" id="ar-inv-url-${i}" value="${fileUrlRaw}">
+      <input type="hidden" id="ar-inv-fname-${i}" value="${fileName.replace(/"/g,'&quot;')}">
+    </div>
   `;
   list.appendChild(row);
+};
+
+// 把第一列的發票號碼/日期 同步寫進舊版隱藏欄位(向後相容,給付款期限/AI 比對邏輯用)
+window._arSyncFirstInvoiceDate = function() {
+  const firstRow = document.querySelector('#ar-invoice-rows [id^="ar-inv-row-"]');
+  const hiddenNo = document.getElementById('ar-invoice');
+  const hiddenDt = document.getElementById('ar-invoice-date');
+  if (!firstRow) {
+    if (hiddenNo) hiddenNo.value = '';
+    if (hiddenDt) hiddenDt.value = '';
+    return;
+  }
+  const i = firstRow.id.replace('ar-inv-row-','');
+  const no = document.getElementById(`ar-inv-no-${i}`)?.value || '';
+  const dt = document.getElementById(`ar-inv-dt-${i}`)?.value || '';
+  if (hiddenNo) hiddenNo.value = no;
+  if (hiddenDt) hiddenDt.value = dt;
+  // 同步:第一列日期變動 → 重算付款期限
+  if (dt) {
+    const d = new Date(dt);
+    if (!isNaN(d)) {
+      const y = d.getMonth() >= 10 ? d.getFullYear()+1 : d.getFullYear();
+      const m = String(((d.getMonth()+2)%12)+1).padStart(2,'0');
+      const due = y+'-'+m+'-'+String(d.getDate()).padStart(2,'0');
+      const dueEl = document.getElementById('ar-due-date');
+      if (dueEl) dueEl.value = due;
+    }
+  }
+};
+
+// 移除某列的發票檔案(留下號碼/日期/金額)
+window._arRemoveInvoiceFile = function(i) {
+  document.getElementById(`ar-inv-url-${i}`).value = '';
+  document.getElementById(`ar-inv-fname-${i}`).value = '';
+  document.getElementById(`ar-inv-file-display-${i}`).style.display = 'none';
+  document.getElementById(`ar-inv-file-upload-${i}`).style.display = 'inline-flex';
+};
+
+// 某列上傳發票檔案 → 壓縮 → Storage → AI 辨識 → 自動帶入該列的號碼/日期/金額
+window._arUploadInvoiceForRow = async function(i, fileInputEl) {
+  const file = fileInputEl?.files?.[0];
+  if (!file) return;
+  const statusEl = document.getElementById('ar-invoice-parse-status');
+  const showStat = (msg, bg='#e3f2fd', col='#1565c0') => {
+    if (statusEl) { statusEl.style.display='block'; statusEl.style.background=bg; statusEl.style.color=col; statusEl.textContent=msg; }
+  };
+  try {
+    showStat('⏳ 壓縮中…');
+    const isImg = file.type.startsWith('image/');
+    const compressed = isImg ? await compressImage(file, 100) : file;
+    // 上傳到 Storage
+    showStat('☁️ 上傳中…');
+    const ext = file.name.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
+    const safeCust = (document.getElementById('ar-customer')?.value || 'cust').replace(/[^a-zA-Z0-9]/g,'').slice(0,20) || 'cust';
+    const ym = document.getElementById('ar-billing-month')?.value?.replace('-','') || 'NA';
+    const path = `ar/inv_${ym}_${safeCust}_${Date.now()}_${i.replace(/\W/g,'')}.${ext}`;
+    const { error: upErr } = await db.storage.from('ar-attachments').upload(path, compressed, { upsert: true });
+    if (upErr) { showStat('上傳失敗:'+upErr.message, '#ffebee', '#c62828'); return; }
+    const { data: urlData } = db.storage.from('ar-attachments').getPublicUrl(path, { download: file.name });
+    const url = urlData?.publicUrl || '';
+    // 更新隱藏欄位
+    document.getElementById(`ar-inv-url-${i}`).value = url;
+    document.getElementById(`ar-inv-fname-${i}`).value = file.name;
+    // 切換顯示(已上傳)
+    const disp = document.getElementById(`ar-inv-file-display-${i}`);
+    const upBtn = document.getElementById(`ar-inv-file-upload-${i}`);
+    disp.style.display = 'flex';
+    upBtn.style.display = 'none';
+    document.getElementById(`ar-inv-file-link-${i}`).href = url;
+    document.getElementById(`ar-inv-file-link-${i}`).textContent = file.name;
+    // AI 辨識(只有圖片才跑;PDF 略過)
+    if (isImg && typeof getClaudeApiKey === 'function' && getClaudeApiKey()) {
+      showStat('🤖 AI 辨識中…');
+      try {
+        const parsed = await parseInvoiceWithClaude(compressed);
+        const filled = [];
+        if (parsed?.invoice_no) {
+          const el = document.getElementById(`ar-inv-no-${i}`);
+          if (el && !el.value) { el.value = parsed.invoice_no; filled.push(`號碼 ${parsed.invoice_no}`); }
+        }
+        if (parsed?.invoice_date) {
+          const el = document.getElementById(`ar-inv-dt-${i}`);
+          if (el && !el.value) { el.value = parsed.invoice_date; filled.push(`日期 ${parsed.invoice_date}`); }
+        }
+        if (parsed?.amount) {
+          const el = document.getElementById(`ar-inv-amt-${i}`);
+          if (el && !el.value) { el.value = parsed.amount; filled.push(`金額 $${Number(parsed.amount).toLocaleString()}`); }
+          // 第一列且含稅金額還沒填 → 帶入
+          const firstRow = document.querySelector('#ar-invoice-rows [id^="ar-inv-row-"]');
+          if (firstRow && firstRow.id === `ar-inv-row-${i}`) {
+            const amtEl = document.getElementById('ar-amount');
+            if (amtEl && !amtEl.value) amtEl.value = parsed.amount;
+          }
+        }
+        if (parsed?.item_desc) {
+          const dEl = document.getElementById('ar-desc');
+          if (dEl && !dEl.value) dEl.value = parsed.item_desc;
+        }
+        window._arSyncFirstInvoiceDate();
+        showStat(filled.length ? `✅ AI 已帶入:${filled.join('、')}` : '✅ 上傳完成(AI 沒辨識到新資料)', '#e8f5e9', '#2e7d32');
+      } catch(e) {
+        showStat('上傳成功,但 AI 辨識失敗:'+(e.message||e), '#fff8e1', '#f57c00');
+      }
+    } else {
+      window._arSyncFirstInvoiceDate();
+      showStat('✅ 已上傳' + (isImg ? '(未設 API Key,跳過 AI)' : '(PDF 跳過 AI 辨識)'), '#e8f5e9', '#2e7d32');
+    }
+    fileInputEl.value = ''; // 清掉,讓同檔可重選
+  } catch(e) {
+    showStat('上傳失敗:'+(e.message||e), '#ffebee', '#c62828');
+  }
 };
 
 async function modalAddAR(existing) {
@@ -6014,32 +6158,15 @@ async function modalAddAR(existing) {
           <input class="form-control" id="ar-amount" type="number" placeholder="上傳對帳單後自動帶入" value="${existing?.amount||''}">
         </div>
 
-        <!-- 5: 發票號碼(主)-->
-        <div class="form-group" style="margin:0">
-          <label>發票號碼 <span style="font-size:11px;color:var(--muted)">（上傳發票後自動辨識）</span></label>
-          <input class="form-control" id="ar-invoice" placeholder="AI 辨識帶入" value="${existing?.invoice_no||''}">
-        </div>
-
-        <!-- 6: 發票日期(主)-->
-        <div class="form-group" style="margin:0">
-          <label>發票日期 <span style="font-size:11px;color:var(--muted)">（AI 辨識，+2月=付款期限）</span></label>
-          <input class="form-control" id="ar-invoice-date" type="date" value="${existing?.invoice_date?.slice?.(0,10)||''}"
-            oninput="(function(v){
-              if(!v) return;
-              const d=new Date(v); if(isNaN(d)) return;
-              const y=d.getMonth()>=10?d.getFullYear()+1:d.getFullYear();
-              const m=String(((d.getMonth()+2)%12)+1).padStart(2,'0');
-              const due=y+'-'+m+'-'+String(d.getDate()).padStart(2,'0');
-              const el=document.getElementById('ar-due-date'); if(el) el.value=due;
-            }).call(this,this.value)">
-        </div>
-
-        <!-- 多張發票:同一筆帳款若有 2 張以上發票,從這裡加 -->
+        <!-- 🧾 發票:每張發票一列(檔案 + 號碼 + 日期 + 金額);上傳檔案會自動 AI 辨識同列的號碼/日期/金額 -->
         <div class="form-group" style="margin:0;grid-column:1/-1">
-          <label>更多發票 <span style="font-size:11px;color:var(--muted)">（同筆帳款若分多張發票,在此加列）</span></label>
-          <div id="ar-extra-invoice-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
+          <label>🧾 發票 <span style="font-size:11px;color:var(--muted)">（每張發票一列;上傳檔案後 AI 自動辨識號碼/日期/金額。第一張的金額會帶入含稅金額/付款期限）</span></label>
+          <!-- 隱藏舊欄位:保持向後相容,AI 辨識/付款期限計算邏輯不用全改 -->
+          <input type="hidden" id="ar-invoice" value="${existing?.invoice_no||''}">
+          <input type="hidden" id="ar-invoice-date" value="${existing?.invoice_date?.slice?.(0,10)||''}">
+          <div id="ar-invoice-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
           <button type="button" onclick="window._arAddInvoiceRow()"
-            style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增一張發票</button>
+            style="width:100%;padding:6px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增一張發票</button>
         </div>
 
         <!-- 多筆收款:訂金 + 尾款這種情況用,加總跟含稅金額比對 -->
@@ -6100,34 +6227,8 @@ async function modalAddAR(existing) {
         <div id="ar-parse-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
       </div>
 
-      <!-- 上傳發票(可多張)— AI 辨識仍以第一張為準 -->
-      <div class="form-group">
-        <label>🧾 上傳發票（可一次選多個檔案；AI 自動辨識會以第一張為準）</label>
-        <!-- 既有發票清單(包括舊版單檔 invoice_file_url + 新版 invoice_files 陣列) -->
-        <div id="ar-invoice-files-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">
-          ${(() => {
-            const files = [];
-            if (existing?.invoice_file_url) files.push({ url: existing.invoice_file_url, name: existing.invoice_file_name || '發票' });
-            (Array.isArray(existing?.invoice_files) ? existing.invoice_files : []).forEach(f => {
-              if (f?.url) files.push({ url: f.url, name: f.name || '發票' });
-            });
-            return files.map((f, idx) => `
-              <div data-existing-url="${f.url.replace(/"/g,'&quot;')}" data-existing-name="${(f.name||'').replace(/"/g,'&quot;')}"
-                style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
-                <span style="font-size:16px">🧾</span>
-                <a href="${f.url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.name}</a>
-                <button type="button" onclick="this.closest('[data-existing-url]').remove()"
-                  style="background:none;border:none;cursor:pointer;color:#aaa;font-size:14px" title="移除這張發票">🗑</button>
-              </div>`).join('');
-          })()}
-        </div>
-        <input class="form-control" id="ar-invoice-file" type="file" accept="image/*,.pdf" multiple style="padding:6px">
-        <div id="ar-invoice-parse-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
-        <div id="ar-invoice-preview" style="display:none;margin-top:8px">
-          <img id="ar-invoice-img" style="max-width:100%;max-height:200px;border-radius:6px;border:1px solid var(--border)">
-          <div id="ar-invoice-size" style="font-size:11px;color:var(--muted);margin-top:4px"></div>
-        </div>
-      </div>
+      <!-- 統一 AI 辨識狀態列(給 _arParseInvoiceFile 用) -->
+      <div id="ar-invoice-parse-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
 
       <!-- 上傳匯款截圖（付款確認） -->
       <div class="form-group">
@@ -6214,20 +6315,29 @@ async function modalAddAR(existing) {
         invoice_no: document.getElementById('ar-invoice').value.trim(),
         invoice_date: document.getElementById('ar-invoice-date').value || null,
         invoices: (() => {
-          // 收集「更多發票」列表;主發票放陣列第一個,額外發票接在後面
-          const extras = [];
-          document.querySelectorAll('#ar-extra-invoice-list [id^="ar-inv-row-"]').forEach(row => {
+          // 從新的多列 UI 收集每張發票的號碼/日期/金額(只記 metadata,檔案另外收)
+          const arr = [];
+          document.querySelectorAll('#ar-invoice-rows [id^="ar-inv-row-"]').forEach(row => {
             const i = row.id.replace('ar-inv-row-','');
             const no = document.getElementById(`ar-inv-no-${i}`)?.value.trim() || '';
             const dt = document.getElementById(`ar-inv-dt-${i}`)?.value || '';
             const amt = parseFloat(document.getElementById(`ar-inv-amt-${i}`)?.value) || 0;
-            if (!no && !dt && !amt) return;
-            extras.push({ invoice_no: no, invoice_date: dt || null, amount: amt });
+            const fUrl = document.getElementById(`ar-inv-url-${i}`)?.value || '';
+            if (!no && !dt && !amt && !fUrl) return;
+            arr.push({ invoice_no: no, invoice_date: dt || null, amount: amt });
           });
-          if (extras.length === 0) return [];   // 只有主發票時不存 array,維持舊資料樣態
-          const mainNo = document.getElementById('ar-invoice').value.trim();
-          const mainDt = document.getElementById('ar-invoice-date').value || null;
-          return [{ invoice_no: mainNo, invoice_date: mainDt, amount: amount }, ...extras];
+          return arr;
+        })(),
+        // 同步收集每列的檔案 → invoice_files,並把第一張寫進舊欄位做向後相容
+        invoice_files: (() => {
+          const files = [];
+          document.querySelectorAll('#ar-invoice-rows [id^="ar-inv-row-"]').forEach(row => {
+            const i = row.id.replace('ar-inv-row-','');
+            const fUrl = document.getElementById(`ar-inv-url-${i}`)?.value || '';
+            const fName = document.getElementById(`ar-inv-fname-${i}`)?.value || '';
+            if (fUrl) files.push({ url: fUrl, name: fName || '發票' });
+          });
+          return files;
         })(),
         // 多筆收款陣列(訂金+尾款場景)
         payments: paymentsArr,
@@ -6293,34 +6403,10 @@ async function modalAddAR(existing) {
         }
       }
 
-      // 上傳發票:支援多檔。先收集畫面上「保留的舊發票」,再上傳新選的檔案,最後合併存入 invoice_files
-      const keptInvoices = [];
-      document.querySelectorAll('#ar-invoice-files-list [data-existing-url]').forEach(el => {
-        keptInvoices.push({ url: el.dataset.existingUrl, name: el.dataset.existingName });
-      });
-      const invFileInput = document.getElementById('ar-invoice-file');
-      const newInvFiles = invFileInput?.files ? Array.from(invFileInput.files) : [];
-      const uploadedInvoices = [];
-      for (let idx = 0; idx < newInvFiles.length; idx++) {
-        const invFile = newInvFiles[idx];
-        progressEl.style.display = 'block';
-        progressEl.textContent = `壓縮並上傳發票中…(${idx+1}/${newInvFiles.length})`;
-        const isImg = invFile.type.startsWith('image/');
-        const uploadFile = isImg ? await compressImage(invFile, 100) : invFile;
-        const ext = uploadFile.name.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
-        const fileName = `ar/inv_${ym}_${safeCustomer}_${Date.now()}_${idx}.${ext}`;
-        const { error: invErr } = await db.storage.from('ar-attachments').upload(fileName, uploadFile, { upsert: true });
-        if (invErr) { showToast('發票上傳失敗：' + invErr.message, 'error'); progressEl.style.display='none'; return; }
-        // 下載時保留原始檔名(含中文)
-        const { data: invUrl } = db.storage.from('ar-attachments').getPublicUrl(fileName, { download: invFile.name });
-        uploadedInvoices.push({ url: invUrl.publicUrl, name: invFile.name });
-      }
-      const allInvoices = [...keptInvoices, ...uploadedInvoices];
-      payload.invoice_files = allInvoices;
-      // 向後相容:第一張當作主檔案存入舊欄位
-      if (allInvoices.length > 0) {
-        payload.invoice_file_url = allInvoices[0].url;
-        payload.invoice_file_name = allInvoices[0].name;
+      // 發票檔案已經在每列的上傳時就直接 upload + 存隱藏欄位,這裡只要把第一張同步到舊欄位做向後相容
+      if (payload.invoice_files && payload.invoice_files.length > 0) {
+        payload.invoice_file_url = payload.invoice_files[0].url;
+        payload.invoice_file_name = payload.invoice_files[0].name;
       } else {
         payload.invoice_file_url = null;
         payload.invoice_file_name = null;
@@ -6359,11 +6445,39 @@ async function modalAddAR(existing) {
     { label: '取消', onclick: () => { window._arSsPendingFile = null; window._arInvoiceUploaded = false; window._arScreenshotUploaded = false; closeModal(); } },
   ], { confirmClose: true });
 
-  // ── 多張發票:預填既有資料 ────────────────────────────────
-  const _existingInvoices = Array.isArray(existing?.invoices) ? existing.invoices : [];
-  if (_existingInvoices.length > 1) {
-    _existingInvoices.slice(1).forEach(inv => window._arAddInvoiceRow(inv));
+  // ── 發票多列:把既有的 invoices/invoice_files/invoice_file_url 三套資料合併成多列 ──
+  const _oldInvoices = Array.isArray(existing?.invoices) ? existing.invoices : [];
+  const _oldFiles = Array.isArray(existing?.invoice_files) ? existing.invoice_files : [];
+  const _oldMain = {
+    invoice_no: existing?.invoice_no || '',
+    invoice_date: existing?.invoice_date?.slice?.(0,10) || '',
+    amount: existing?.amount || '',
+    file_url: existing?.invoice_file_url || '',
+    file_name: existing?.invoice_file_name || '',
+  };
+  const _rowsToPrefill = [];
+  if (_oldInvoices.length === 0 && _oldFiles.length === 0) {
+    // 舊單筆 or 全新單
+    if (_oldMain.invoice_no || _oldMain.file_url) _rowsToPrefill.push(_oldMain);
+  } else {
+    // 有多筆資料 → 按 index 對齊;首列若 metadata 缺,用 _oldMain 補
+    const maxLen = Math.max(_oldInvoices.length, _oldFiles.length);
+    for (let k = 0; k < maxLen; k++) {
+      const meta = _oldInvoices[k] || {};
+      const f = _oldFiles[k] || {};
+      _rowsToPrefill.push({
+        invoice_no: meta.invoice_no || (k === 0 ? _oldMain.invoice_no : ''),
+        invoice_date: meta.invoice_date || (k === 0 ? _oldMain.invoice_date : ''),
+        amount: meta.amount || (k === 0 ? _oldMain.amount : ''),
+        file_url: f.url || (k === 0 ? _oldMain.file_url : ''),
+        file_name: f.name || (k === 0 ? _oldMain.file_name : ''),
+      });
+    }
   }
+  // 新單(完全沒資料):預設加一個空列方便填寫
+  if (_rowsToPrefill.length === 0) _rowsToPrefill.push({});
+  _rowsToPrefill.forEach(r => window._arAddInvoiceRow(r));
+  setTimeout(() => window._arSyncFirstInvoiceDate && window._arSyncFirstInvoiceDate(), 30);
 
   // ── 多筆收款:預填既有資料 ────────────────────────────────
   const _existingPayments = Array.isArray(existing?.payments) ? existing.payments : [];
@@ -8483,7 +8597,7 @@ function renderAccounting() {
                 <td style="font-size:12px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.item_desc||''}">${r.item_desc||'—'}</td>
                 <td style="font-size:12px;color:var(--muted)">${r.invoice_no||'—'}</td>
                 <td style="text-align:center">${r.invoice_file_url
-                  ? `<a href="${r.invoice_file_url}" target="_blank" title="${r.invoice_file_name||'發票'}" style="font-size:16px;color:var(--accent);text-decoration:none">📎</a>`
+                  ? `<a href="${window._arWithDownload?window._arWithDownload(r.invoice_file_url,r.invoice_file_name):r.invoice_file_url}" target="_blank" title="${r.invoice_file_name||'發票'}" style="font-size:16px;color:var(--accent);text-decoration:none">📎</a>`
                   : `<span style="color:var(--muted);font-size:11px">—</span>`}</td>
                 <td style="font-size:11px;color:var(--muted);max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.subject||'').replace(/"/g,'&quot;')}">${r.subject||'—'}</td>
                 <td style="font-size:11px;color:var(--muted);max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.remarks||'').replace(/"/g,'&quot;')}">${r.remarks||'—'}</td>
@@ -8546,7 +8660,7 @@ function renderAccounting() {
                 <td><strong>$${(r.amount||0).toLocaleString()}</strong></td>
                 <td style="font-size:12px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.item_desc||''}">${r.item_desc||'—'}</td>
                 <td style="font-size:12px;color:var(--muted)">${r.invoice_no||'—'}</td>
-                <td style="text-align:center">${r.invoice_file_url?`<a href="${r.invoice_file_url}" target="_blank" style="font-size:16px;color:var(--accent);text-decoration:none" title="查看發票">🧾</a>`:'<span style="color:var(--muted);font-size:11px">—</span>'}</td>
+                <td style="text-align:center">${r.invoice_file_url?`<a href="${window._arWithDownload?window._arWithDownload(r.invoice_file_url,r.invoice_file_name):r.invoice_file_url}" target="_blank" style="font-size:16px;color:var(--accent);text-decoration:none" title="查看發票">🧾</a>`:'<span style="color:var(--muted);font-size:11px">—</span>'}</td>
                 <td><div class="action-btns">
                   ${canEdit ? `<button class="btn-table" data-action="edit-meal" data-id="${r.id}" style="background:#e3f2fd;color:#1565c0">編輯</button>` : ''}
                   ${canEdit ? `<button class="btn-table danger" data-action="del-acct" data-id="${r.id}" data-type="餐費發票">刪除</button>` : ''}
@@ -8628,7 +8742,7 @@ function renderAccounting() {
                 <td><strong>$${(r.amount||0).toLocaleString()}</strong></td>
                 <td style="font-size:12px;max-width:100px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${r.item_desc||''}">${r.item_desc||'—'}</td>
                 <td style="font-size:12px;color:var(--muted)">${r.invoice_no||'—'}</td>
-                <td style="text-align:center">${r.invoice_file_url?`<a href="${r.invoice_file_url}" target="_blank" style="font-size:16px;color:var(--accent);text-decoration:none" title="查看發票">🧾</a>`:'<span style="color:var(--muted);font-size:11px">—</span>'}</td>
+                <td style="text-align:center">${r.invoice_file_url?`<a href="${window._arWithDownload?window._arWithDownload(r.invoice_file_url,r.invoice_file_name):r.invoice_file_url}" target="_blank" style="font-size:16px;color:var(--accent);text-decoration:none" title="查看發票">🧾</a>`:'<span style="color:var(--muted);font-size:11px">—</span>'}</td>
                 <td><div class="action-btns">
                   ${canEdit ? `<button class="btn-table" data-action="edit-advance" data-id="${r.id}" style="background:#e3f2fd;color:#1565c0">編輯</button>` : ''}
                   ${canEdit ? `<button class="btn-table danger" data-action="del-acct" data-id="${r.id}" data-type="代墊金額">刪除</button>` : ''}
@@ -21043,7 +21157,7 @@ window.modalMealDetail = async function(applicantName, ymStr, ymLabel) {
           </div>
           <div style="text-align:right;flex-shrink:0">
             <div style="font-size:14px;font-weight:700;color:var(--accent-dark)">$${(r.amount||0).toLocaleString()}</div>
-            ${r.invoice_file_url?`<a href="${r.invoice_file_url}" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none">🧾 看發票</a>`:''}
+            ${r.invoice_file_url?`<a href="${window._arWithDownload?window._arWithDownload(r.invoice_file_url,r.invoice_file_name):r.invoice_file_url}" target="_blank" style="font-size:11px;color:var(--accent);text-decoration:none">🧾 看發票</a>`:''}
           </div>
         </div>`).join('')}
       </div>`}
