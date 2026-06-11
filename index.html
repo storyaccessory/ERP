@@ -1307,20 +1307,45 @@ function renderDashboard() {
             end_date: c.deadline || null,
             subtasks: c.subtasks || [],
           }));
-          const todosWrapped = (todos||[]).map(t => ({ _type:'event', _src:t, ...t }));
+          // 我自己的事項:來自 calTodos(主任務指派給我);同時也撈「子任務指派給我」的事項
+          const todosFromMain = (todos||[]);
+          const todoIds = new Set(todosFromMain.map(t => t.id));
+          const overdueAllForMe = d.overdue || [];
+          const todosFromSubs = overdueAllForMe.filter(t => {
+            if (todoIds.has(t.id)) return false;  // 已經在主任務待辦裡了,跳過避免重複
+            const subs = Array.isArray(t.subtasks) ? t.subtasks : [];
+            return subs.some(s => !s.done && s.assignee_id === dashMyId);
+          });
+          const todosWrapped = [...todosFromMain, ...todosFromSubs].map(t => ({ _type:'event', _src:t, ...t }));
           const merged = [...todosWrapped, ...myCsWrapped];
-          // 排序:逾期事項優先 → 優先級高 → 早到期
+          // 取得「實際排序日期」:主任務日期 vs 我的子任務最早 due_date,取較早者
+          const earliestForMe = (x) => {
+            const candidates = [];
+            const mainDt = x.end_date || x.start_date || '';
+            if (mainDt) candidates.push(mainDt);
+            const subs = Array.isArray(x.subtasks) ? x.subtasks : [];
+            subs.forEach(s => {
+              if (s.done || !s.text || !s.due_date) return;
+              if (s.assignee_id === dashMyId || !s.assignee_id) candidates.push(s.due_date);
+            });
+            return candidates.sort()[0] || '';
+          };
+          // 排序:用 earliestForMe(逾期/今天/明天會排前),優先級高 → 早到期
           const sorted = merged.sort((a,b) => {
-            const aOv = (a.end_date||a.start_date||'') < _todayStr;
-            const bOv = (b.end_date||b.start_date||'') < _todayStr;
+            const aDt = earliestForMe(a);
+            const bDt = earliestForMe(b);
+            const aOv = aDt && aDt < _todayStr;
+            const bOv = bDt && bDt < _todayStr;
             if (aOv !== bOv) return aOv ? -1 : 1;
             const pr = (PRIORITY_ORDER[a.priority]??1) - (PRIORITY_ORDER[b.priority]??1);
             if (pr !== 0) return pr;
-            return (a.start_date||'').localeCompare(b.start_date||'');
+            return (aDt||'').localeCompare(bDt||'');
           });
           if (sorted.length === 0) return '<div class="empty"><div class="empty-icon">✅</div><p>沒有待辦事項</p></div>';
           const rows = sorted.slice(0, 8).map(t => {
-            const { color, label } = _urg(t.start_date);
+            // 標籤日期改用「我的最近 due」(主任務 vs 我的未完成子任務,取較早者),確保子任務時間近會跑到前面+標紅
+            const labelDt = earliestForMe(t) || t.start_date;
+            const { color, label } = _urg(labelDt);
             const pColor = t.priority==='高'?'#e53935':t.priority==='低'?'#43a047':'#f57c00';
             const mySubs = (Array.isArray(t.subtasks)?t.subtasks:[]).filter(s => !s.done && s.text && (s.assignee_id === dashMyId || !s.assignee_id));
             const subsHtml = mySubs.map(s => {
