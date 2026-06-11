@@ -8132,7 +8132,10 @@ function renderDev() {
 
 // ── Accounting ──
 function renderAccounting() {
-  const { ap, meal, advance, ym, vendors, ar } = state.data.accounting || { ap:[], meal:[], advance:[], ym:'', vendors:[], ar:[] };
+  // 用解構預設值保底:即使 state.data.accounting 存在但缺欄位(例如 loadDashboard 只塞了 ar_all/vendors),
+  // 也不會讓 ap/meal/advance 變 undefined 害下面的 .filter 炸掉
+  const _acct = state.data.accounting || {};
+  const { ap = [], meal = [], advance = [], ym = '', vendors = [], ar = [] } = _acct;
   const tab = state.data.acctTab || '應付帳款';
 
   // AP 總計：依月份快捷（本月/前月/全部）或下拉選單 + 廠商/狀態 篩選
