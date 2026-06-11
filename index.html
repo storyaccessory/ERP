@@ -6045,6 +6045,8 @@ async function modalAddAR(existing) {
         <!-- 多筆收款:訂金 + 尾款這種情況用,加總跟含稅金額比對 -->
         <div class="form-group" style="margin:0;grid-column:1/-1">
           <label>💰 收款紀錄 <span style="font-size:11px;color:var(--muted)">（可加多筆,例如訂金/尾款。加總需等於含稅金額）</span></label>
+          <!-- 給舊版 AI 辨識/匯款截圖 自動填日期用的隱藏 input(避免動到既有邏輯) -->
+          <input type="hidden" id="ar-paid-date" value="${existing?.payment_date?.slice?.(0,10)||''}">
           <div id="ar-payments-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
           <button type="button" onclick="window._arAddPaymentRow()"
             style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增一筆收款</button>
@@ -6160,8 +6162,23 @@ async function modalAddAR(existing) {
       const customerRaw = document.getElementById('ar-customer').value.trim();
       const amount = parseFloat(document.getElementById('ar-amount').value) || 0;
       const billingMonth = document.getElementById('ar-billing-month').value || null;
-      const paidDateRaw = document.getElementById('ar-paid-date').value;
-      const paidDate = paidDateRaw || null;
+      // 收集多筆收款;主 payment_date 取最晚一筆做向後相容,加總 >= 含稅金額 即視為已收款
+      const paymentsArr = [];
+      let paySumTotal = 0;
+      let latestPayDate = '';
+      document.querySelectorAll('#ar-payments-list [id^="ar-pay-row-"]').forEach(row => {
+        const ii = row.id.replace('ar-pay-row-','');
+        const dt = document.getElementById(`ar-pay-dt-${ii}`)?.value || '';
+        const amt = parseFloat(document.getElementById(`ar-pay-amt-${ii}`)?.value) || 0;
+        const ssUrl = document.getElementById(`ar-pay-ss-url-${ii}`)?.value || '';
+        const ssName = document.getElementById(`ar-pay-ss-name-${ii}`)?.value || '';
+        if (!dt && !amt) return;
+        paymentsArr.push({ date: dt || null, amount: amt, screenshot_url: ssUrl || null, screenshot_name: ssName || null });
+        paySumTotal += amt;
+        if (dt && dt > latestPayDate) latestPayDate = dt;
+      });
+      // 向後相容欄位:沒收款列就抓舊的 ar-paid-date(AI 自動填的),否則用最晚一筆
+      const paidDate = latestPayDate || document.getElementById('ar-paid-date').value || null;
 
       // 強制必須是已建檔客戶（接受簡稱或完整名稱）
       const allV = state.data.accounting?.vendors || [];
@@ -6212,6 +6229,8 @@ async function modalAddAR(existing) {
           const mainDt = document.getElementById('ar-invoice-date').value || null;
           return [{ invoice_no: mainNo, invoice_date: mainDt, amount: amount }, ...extras];
         })(),
+        // 多筆收款陣列(訂金+尾款場景)
+        payments: paymentsArr,
         note: (() => {
           const shipRaw = document.getElementById('ar-ship-date').value.trim();
           const noteVal = document.getElementById('ar-note').value.trim();
