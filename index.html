@@ -6262,8 +6262,7 @@ async function modalAddAR(existing) {
           <input type="hidden" id="ar-invoice" value="${existing?.invoice_no||''}">
           <input type="hidden" id="ar-invoice-date" value="${existing?.invoice_date?.slice?.(0,10)||''}">
           <div id="ar-invoice-rows" style="display:flex;flex-direction:column;gap:8px;margin-bottom:6px"></div>
-          <button type="button" onclick="window._arAddInvoiceRow()"
-            style="width:100%;padding:6px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增一張發票</button>
+          <div style="font-size:11px;color:var(--muted);text-align:center;padding:4px 0">↑ 上傳發票檔案後,AI 會自動把號碼/日期/金額帶到上面</div>
         </div>
 
         <!-- 多筆收款:訂金 + 尾款這種情況用,加總跟含稅金額比對 -->
@@ -6272,8 +6271,7 @@ async function modalAddAR(existing) {
           <!-- 給舊版 AI 辨識/匯款截圖 自動填日期用的隱藏 input(避免動到既有邏輯) -->
           <input type="hidden" id="ar-paid-date" value="${existing?.payment_date?.slice?.(0,10)||''}">
           <div id="ar-payments-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
-          <button type="button" onclick="window._arAddPaymentRow()"
-            style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增一筆收款</button>
+          <div style="font-size:11px;color:var(--muted);text-align:center;padding:4px 0">↑ 下方上傳匯款截圖後,AI 會自動把日期/金額帶到上面</div>
           <div id="ar-payments-warn" style="display:none;margin-top:6px;padding:6px 10px;background:#fff8e1;border:1px solid #ffd54f;border-radius:6px;font-size:12px;color:#a36600"></div>
         </div>
 
@@ -6902,45 +6900,56 @@ async function modalAddAR(existing) {
       const parsed = await parsePaymentScreenshotWithClaude(compressed);
       const filled = [];
 
-      // 自動填入付款日期
-      if (parsed?.payment_date) {
-        const dateStr = parsed.payment_date;
-        const paidDateInput = document.getElementById('ar-paid-date');
-        if (paidDateInput && dateStr) {
-          paidDateInput.value = dateStr;
-          filled.push(`付款日期 ${dateStr}`);
+      // 立即上傳截圖到 Storage,拿到 URL 才能放進收款列
+      let ssUrl = '', ssName = file.name || 'screenshot.png';
+      try {
+        const ext = (compressed.type && compressed.type.split('/')[1]) || 'png';
+        const safeCust2 = (document.getElementById('ar-customer')?.value || 'cust').replace(/[^a-zA-Z0-9]/g,'').slice(0,20) || 'cust';
+        const ym2 = document.getElementById('ar-billing-month')?.value?.replace('-','') || 'NA';
+        const path = `ar/pay_ss_${ym2}_${safeCust2}_${Date.now()}.${ext}`;
+        const { error: upE } = await db.storage.from('ar-attachments').upload(path, compressed, { upsert: true });
+        if (!upE) {
+          const { data: urlD } = db.storage.from('ar-attachments').getPublicUrl(path);
+          ssUrl = urlD?.publicUrl || '';
         }
-      }
-      // 截圖上傳 → 自動更新付款狀態為「已收款」
-      const ssStatusDisp = document.getElementById('ar-paid-status');
-      if (ssStatusDisp) {
-        const dateVal = document.getElementById('ar-paid-date')?.value || '';
-        ssStatusDisp.innerHTML = dateVal
-          ? `<span style="color:var(--success);font-weight:600">✅ 已收款　${dateVal}</span>`
-          : `<span style="color:var(--success);font-weight:600">✅ 已收款</span>`;
+      } catch(e) { /* 截圖傳不上去就算了,還是嘗試把資料寫到收款列 */ }
+
+      // 把這次的截圖 + AI 辨識結果 加成一筆收款列
+      const ssDate = parsed?.payment_date || '';
+      const ssAmount = parsed?.amount ? Number(parsed.amount) : '';
+      if (typeof window._arAddPaymentRow === 'function') {
+        window._arAddPaymentRow({
+          date: ssDate,
+          amount: ssAmount,
+          screenshot_url: ssUrl,
+          screenshot_name: ssName,
+        });
+        if (ssDate) filled.push(`日期 ${ssDate}`);
+        if (ssAmount) filled.push(`金額 $${Number(ssAmount).toLocaleString()}`);
+        if (ssUrl) filled.push('截圖');
+        // 重新計算加總/付款狀態
+        if (typeof window._arRecalcPayments === 'function') window._arRecalcPayments();
       }
       window._arScreenshotUploaded = true;
 
-      // 比對轉帳金額 vs 含稅金額
+      // 比對轉帳金額 vs 含稅金額(只是提示,不擋)
       if (parsed?.amount) {
         const expectedAmt = parseFloat(document.getElementById('ar-amount')?.value) || 0;
         const ssAmt = Number(parsed.amount);
         if (expectedAmt && ssAmt && Math.abs(expectedAmt - ssAmt) > 1) {
           statusEl.style.background = '#fff3e0'; statusEl.style.color = '#e65100';
-          statusEl.textContent = `⚠️ 截圖金額 $${ssAmt.toLocaleString()} 與應收金額 $${expectedAmt.toLocaleString()} 不符，請確認！` +
-            (filled.length ? `（已帶入：${filled.join('、')}）` : '');
+          statusEl.textContent = `⚠️ 截圖金額 $${ssAmt.toLocaleString()} 跟含稅金額 $${expectedAmt.toLocaleString()} 不符(訂金/尾款場景可忽略)` +
+            (filled.length ? `;已新增收款列:${filled.join('、')}` : '');
           return;
-        } else {
-          filled.push(`金額 $${ssAmt.toLocaleString()} ✓`);
         }
       }
 
       if (filled.length) {
         statusEl.style.background = '#e8f5e9'; statusEl.style.color = '#2e7d32';
-        statusEl.textContent = `✅ AI 辨識完成：${filled.join('、')}`;
+        statusEl.textContent = `✅ 已新增一筆收款:${filled.join('、')}`;
       } else {
         statusEl.style.background = '#fff8e1'; statusEl.style.color = '#e65100';
-        statusEl.textContent = '📋 截圖已選擇，請手動確認付款日期';
+        statusEl.textContent = '📋 截圖已選擇,但 AI 沒辨識到日期/金額,請手動補上';
       }
     } catch(err) {
       statusEl.style.background = '#ffebee'; statusEl.style.color = '#c62828';
