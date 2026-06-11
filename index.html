@@ -5826,6 +5826,115 @@ async function compressImage(file, maxKB = 100) {
   });
 }
 
+// AR 多筆收款:動態新增一列(訂金/尾款各一列)
+window._arAddPaymentRow = function(prefill) {
+  const list = document.getElementById('ar-payments-list');
+  if (!list) return;
+  const i = '_' + Date.now() + Math.floor(Math.random()*1000);
+  const p = prefill || {};
+  const dt = p.date ? String(p.date).slice(0,10) : '';
+  const amt = p.amount || '';
+  const ssUrl = p.screenshot_url || '';
+  const ssName = p.screenshot_name || '';
+  const row = document.createElement('div');
+  row.id = `ar-pay-row-${i}`;
+  row.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:6px 8px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
+  row.innerHTML = `
+    <div style="display:flex;gap:6px;align-items:center">
+      <input type="date" id="ar-pay-dt-${i}" value="${dt}" title="收款日期"
+        style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:140px;background:#fff">
+      <input type="number" id="ar-pay-amt-${i}" value="${amt}" placeholder="收款金額"
+        class="form-control" style="width:120px;font-size:13px;flex-shrink:0"
+        oninput="window._arRecalcPayments()">
+      <input type="file" id="ar-pay-ss-file-${i}" accept="image/*" style="display:none"
+        onchange="window._arUploadPaymentSs('${i}')">
+      <button type="button" onclick="document.getElementById('ar-pay-ss-file-${i}').click()"
+        style="flex-shrink:0;font-size:11px;padding:4px 8px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;cursor:pointer;white-space:nowrap">📷 截圖</button>
+      <div id="ar-pay-ss-preview-${i}" style="display:${ssUrl?'flex':'none'};align-items:center;gap:4px;flex-shrink:0">
+        ${ssUrl ? `<a href="${ssUrl}" target="_blank"><img src="${ssUrl}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid var(--border)"></a>
+        <button type="button" onclick="document.getElementById('ar-pay-ss-url-${i}').value='';document.getElementById('ar-pay-ss-preview-${i}').style.display='none'" style="background:none;border:none;cursor:pointer;color:#aaa;font-size:13px">🗑</button>` : ''}
+      </div>
+      <input type="hidden" id="ar-pay-ss-url-${i}" value="${ssUrl}">
+      <input type="hidden" id="ar-pay-ss-name-${i}" value="${ssName.replace(/"/g,'&quot;')}">
+      <div style="flex:1"></div>
+      <button type="button" onclick="this.closest('[id^=\\'ar-pay-row\\']').remove();window._arRecalcPayments()"
+        style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除">×</button>
+    </div>
+  `;
+  list.appendChild(row);
+};
+
+// 上傳收款截圖(自動壓縮)
+window._arUploadPaymentSs = async function(id) {
+  const fileInput = document.getElementById(`ar-pay-ss-file-${id}`);
+  const file = fileInput?.files?.[0];
+  if (!file) return;
+  if (!/^image\//.test(file.type)) { showToast('請選擇圖片檔', 'error'); return; }
+  try {
+    showToast('壓縮上傳中…');
+    const compressed = await compressImage(file, 100);
+    const ext = (compressed.type && compressed.type.split('/')[1]) || (file.name.split('.').pop() || 'jpg').toLowerCase();
+    const path = `ar/pay_ss_${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
+    const { error: upErr } = await db.storage.from('ar-attachments').upload(path, compressed, { upsert: true });
+    if (upErr) { showToast('上傳失敗:'+upErr.message, 'error'); return; }
+    const { data: urlData } = db.storage.from('ar-attachments').getPublicUrl(path);
+    const url = urlData?.publicUrl || '';
+    if (!url) { showToast('無法取得截圖網址', 'error'); return; }
+    document.getElementById(`ar-pay-ss-url-${id}`).value = url;
+    document.getElementById(`ar-pay-ss-name-${id}`).value = file.name;
+    const prev = document.getElementById(`ar-pay-ss-preview-${id}`);
+    if (prev) {
+      prev.style.display = 'flex';
+      prev.innerHTML = `<a href="${url}" target="_blank"><img src="${url}" style="width:28px;height:28px;object-fit:cover;border-radius:4px;border:1px solid var(--border)"></a>
+        <button type="button" onclick="document.getElementById('ar-pay-ss-url-${id}').value='';document.getElementById('ar-pay-ss-preview-${id}').style.display='none'" style="background:none;border:none;cursor:pointer;color:#aaa;font-size:13px">🗑</button>`;
+    }
+    fileInput.value = '';
+    showToast('截圖已上傳');
+  } catch(e) {
+    showToast('上傳失敗:'+(e.message||e), 'error');
+  }
+};
+
+// 重新計算收款加總,跟含稅金額比對;不符就顯示黃字警告(但允許存)
+window._arRecalcPayments = function() {
+  const warn = document.getElementById('ar-payments-warn');
+  const amountEl = document.getElementById('ar-amount');
+  if (!warn || !amountEl) return;
+  const target = parseFloat(amountEl.value) || 0;
+  let sum = 0;
+  document.querySelectorAll('#ar-payments-list [id^="ar-pay-row-"]').forEach(row => {
+    const i = row.id.replace('ar-pay-row-','');
+    sum += parseFloat(document.getElementById(`ar-pay-amt-${i}`)?.value) || 0;
+  });
+  const statusEl = document.getElementById('ar-paid-status');
+  if (sum === 0) {
+    warn.style.display = 'none';
+    if (statusEl) statusEl.innerHTML = '<span style="color:var(--muted)">尚未收款</span>';
+    return;
+  }
+  if (target && Math.abs(sum - target) > 0.5) {
+    warn.style.display = 'block';
+    warn.innerHTML = `⚠️ 目前收款加總 <b>${sum.toLocaleString()}</b> 跟含稅金額 <b>${target.toLocaleString()}</b> 不一致(差 ${(target-sum).toLocaleString()})。可繼續儲存,但請確認是否有訂金/尾款/退款/手續費等狀況。`;
+  } else {
+    warn.style.display = 'none';
+  }
+  // 同步付款狀態:加總 >= 含稅金額 → 已收款
+  if (statusEl) {
+    if (sum >= target && target > 0) {
+      // 取最新一筆當作收款日(顯示用)
+      let latestDate = '';
+      document.querySelectorAll('#ar-payments-list [id^="ar-pay-row-"]').forEach(row => {
+        const i = row.id.replace('ar-pay-row-','');
+        const d = document.getElementById(`ar-pay-dt-${i}`)?.value || '';
+        if (d > latestDate) latestDate = d;
+      });
+      statusEl.innerHTML = `<span style="color:var(--success)">✅ 已收款　${latestDate||''}</span>`;
+    } else {
+      statusEl.innerHTML = `<span style="color:#e69500">⏳ 部分收款　${sum.toLocaleString()} / ${target.toLocaleString()}</span>`;
+    }
+  }
+};
+
 // AR 多張發票:動態新增一列(主發票之後的額外發票)
 window._arAddInvoiceRow = function(prefill) {
   const list = document.getElementById('ar-extra-invoice-list');
@@ -5933,20 +6042,17 @@ async function modalAddAR(existing) {
             style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增一張發票</button>
         </div>
 
-        <!-- 7: 付款日期 -->
-        <div class="form-group" style="margin:0">
-          <label>付款日期 <span style="font-size:11px;color:var(--muted)">（填入後自動標為已收款）</span></label>
-          <input class="form-control" id="ar-paid-date" type="date" value="${existing?.payment_date?.slice?.(0,10)||''}"
-            oninput="(function(v){
-              const el=document.getElementById('ar-paid-status');
-              if(el) el.innerHTML = v
-                ? '<span style=\\'color:var(--success)\\'>✅ 已收款　'+v+'</span>'
-                : '<span style=\\'color:var(--muted)\\'>尚未收款</span>';
-            }).call(this,this.value)">
+        <!-- 多筆收款:訂金 + 尾款這種情況用,加總跟含稅金額比對 -->
+        <div class="form-group" style="margin:0;grid-column:1/-1">
+          <label>💰 收款紀錄 <span style="font-size:11px;color:var(--muted)">（可加多筆,例如訂金/尾款。加總需等於含稅金額）</span></label>
+          <div id="ar-payments-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px"></div>
+          <button type="button" onclick="window._arAddPaymentRow()"
+            style="width:100%;padding:5px 0;font-size:12px;color:var(--accent);background:none;border:1px dashed var(--accent);border-radius:6px;cursor:pointer">＋ 新增一筆收款</button>
+          <div id="ar-payments-warn" style="display:none;margin-top:6px;padding:6px 10px;background:#fff8e1;border:1px solid #ffd54f;border-radius:6px;font-size:12px;color:#a36600"></div>
         </div>
 
-        <!-- 8: 付款狀態 -->
-        <div class="form-group" style="margin:0">
+        <!-- 付款狀態(顯示用,系統自動依收款紀錄判斷) -->
+        <div class="form-group" style="margin:0;grid-column:1/-1">
           <label>付款狀態</label>
           <div id="ar-paid-status" style="height:36px;display:flex;align-items:center;font-size:13px;padding:0 10px;border:1px solid var(--border);border-radius:6px;background:#f9f9f9">
             ${existing?.payment_date
@@ -5992,18 +6098,28 @@ async function modalAddAR(existing) {
         <div id="ar-parse-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
       </div>
 
-      <!-- 上傳發票（AI 辨識） -->
+      <!-- 上傳發票(可多張)— AI 辨識仍以第一張為準 -->
       <div class="form-group">
-        <label>🧾 上傳發票（電子發票證明聯 / 手開發票，AI 自動辨識）</label>
-        ${existing?.invoice_file_url ? `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
-          <span style="font-size:18px">🧾</span>
-          <a href="${existing.invoice_file_url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1">${existing.invoice_file_name||'目前發票'}</a>
-          <label style="cursor:pointer;font-size:11px;color:#fff;background:var(--accent-dark);padding:3px 8px;border-radius:4px;white-space:nowrap">
-            🔄 替換<input type="file" accept="image/*,.pdf" style="display:none" onchange="document.getElementById('ar-invoice-file').files=this.files;document.getElementById('ar-invoice-file').dispatchEvent(new Event('change'))">
-          </label>
-        </div>` : ''}
-        <input class="form-control" id="ar-invoice-file" type="file" accept="image/*,.pdf" style="padding:6px${existing?.invoice_file_url?';display:none':''}">
+        <label>🧾 上傳發票（可一次選多個檔案；AI 自動辨識會以第一張為準）</label>
+        <!-- 既有發票清單(包括舊版單檔 invoice_file_url + 新版 invoice_files 陣列) -->
+        <div id="ar-invoice-files-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">
+          ${(() => {
+            const files = [];
+            if (existing?.invoice_file_url) files.push({ url: existing.invoice_file_url, name: existing.invoice_file_name || '發票' });
+            (Array.isArray(existing?.invoice_files) ? existing.invoice_files : []).forEach(f => {
+              if (f?.url) files.push({ url: f.url, name: f.name || '發票' });
+            });
+            return files.map((f, idx) => `
+              <div data-existing-url="${f.url.replace(/"/g,'&quot;')}" data-existing-name="${(f.name||'').replace(/"/g,'&quot;')}"
+                style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
+                <span style="font-size:16px">🧾</span>
+                <a href="${f.url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.name}</a>
+                <button type="button" onclick="this.closest('[data-existing-url]').remove()"
+                  style="background:none;border:none;cursor:pointer;color:#aaa;font-size:14px" title="移除這張發票">🗑</button>
+              </div>`).join('');
+          })()}
+        </div>
+        <input class="form-control" id="ar-invoice-file" type="file" accept="image/*,.pdf" multiple style="padding:6px">
         <div id="ar-invoice-parse-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
         <div id="ar-invoice-preview" style="display:none;margin-top:8px">
           <img id="ar-invoice-img" style="max-width:100%;max-height:200px;border-radius:6px;border:1px solid var(--border)">
@@ -6158,21 +6274,37 @@ async function modalAddAR(existing) {
         }
       }
 
-      // 上傳發票圖片（壓縮後）
+      // 上傳發票:支援多檔。先收集畫面上「保留的舊發票」,再上傳新選的檔案,最後合併存入 invoice_files
+      const keptInvoices = [];
+      document.querySelectorAll('#ar-invoice-files-list [data-existing-url]').forEach(el => {
+        keptInvoices.push({ url: el.dataset.existingUrl, name: el.dataset.existingName });
+      });
       const invFileInput = document.getElementById('ar-invoice-file');
-      const invFile = invFileInput?.files?.[0];
-      if (invFile) {
+      const newInvFiles = invFileInput?.files ? Array.from(invFileInput.files) : [];
+      const uploadedInvoices = [];
+      for (let idx = 0; idx < newInvFiles.length; idx++) {
+        const invFile = newInvFiles[idx];
         progressEl.style.display = 'block';
-        progressEl.textContent = '壓縮並上傳發票中…';
+        progressEl.textContent = `壓縮並上傳發票中…(${idx+1}/${newInvFiles.length})`;
         const isImg = invFile.type.startsWith('image/');
         const uploadFile = isImg ? await compressImage(invFile, 100) : invFile;
         const ext = uploadFile.name.split('.').pop().toLowerCase().replace(/[^a-z0-9]/g,'') || 'jpg';
-        const fileName = `ar/inv_${ym}_${safeCustomer}_${Date.now()}.${ext}`;
+        const fileName = `ar/inv_${ym}_${safeCustomer}_${Date.now()}_${idx}.${ext}`;
         const { error: invErr } = await db.storage.from('ar-attachments').upload(fileName, uploadFile, { upsert: true });
         if (invErr) { showToast('發票上傳失敗：' + invErr.message, 'error'); progressEl.style.display='none'; return; }
-        const { data: invUrl } = db.storage.from('ar-attachments').getPublicUrl(fileName);
-        payload.invoice_file_url = invUrl.publicUrl;
-        payload.invoice_file_name = invFile.name;
+        // 下載時保留原始檔名(含中文)
+        const { data: invUrl } = db.storage.from('ar-attachments').getPublicUrl(fileName, { download: invFile.name });
+        uploadedInvoices.push({ url: invUrl.publicUrl, name: invFile.name });
+      }
+      const allInvoices = [...keptInvoices, ...uploadedInvoices];
+      payload.invoice_files = allInvoices;
+      // 向後相容:第一張當作主檔案存入舊欄位
+      if (allInvoices.length > 0) {
+        payload.invoice_file_url = allInvoices[0].url;
+        payload.invoice_file_name = allInvoices[0].name;
+      } else {
+        payload.invoice_file_url = null;
+        payload.invoice_file_name = null;
       }
 
       // 上傳匯款截圖
@@ -6209,12 +6341,26 @@ async function modalAddAR(existing) {
   ], { confirmClose: true });
 
   // ── 多張發票:預填既有資料 ────────────────────────────────
-  // 既有的 invoices 陣列第 0 個進入主欄(已透過 input value 填好),其他放入「更多發票」
   const _existingInvoices = Array.isArray(existing?.invoices) ? existing.invoices : [];
   if (_existingInvoices.length > 1) {
-    // 跳過第 0 個(已在主欄),從第 1 個開始加列
     _existingInvoices.slice(1).forEach(inv => window._arAddInvoiceRow(inv));
   }
+
+  // ── 多筆收款:預填既有資料 ────────────────────────────────
+  const _existingPayments = Array.isArray(existing?.payments) ? existing.payments : [];
+  if (_existingPayments.length) {
+    _existingPayments.forEach(pay => window._arAddPaymentRow(pay));
+  } else if (existing?.payment_date) {
+    // 向後相容:舊資料只有單筆 payment_date + payment_screenshot_url,轉成一列收款
+    window._arAddPaymentRow({
+      date: existing.payment_date,
+      amount: existing.amount,
+      screenshot_url: existing.payment_screenshot_url || '',
+      screenshot_name: existing.payment_screenshot_name || '',
+    });
+  }
+  // 進來時跑一次計算,確保警告/狀態正確
+  setTimeout(() => window._arRecalcPayments && window._arRecalcPayments(), 50);
 
   // ── 客戶關鍵字搜尋（限已建檔廠商）────────────────────────
   const arInput = document.getElementById('ar-customer');
