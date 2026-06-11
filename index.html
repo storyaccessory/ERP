@@ -297,6 +297,19 @@ tbody tr:last-child td { border-bottom: none; }
   border-radius: 6px; font-size: 13px; outline: none; transition: border .15s;
 }
 .form-control:focus { border-color: var(--accent); }
+/* 軟編輯:預設長得像純文字,hover/focus 才浮出可編輯感 */
+.cs-soft-edit {
+  border: 1px solid transparent !important;
+  background: transparent !important;
+  cursor: pointer;
+  transition: background .15s, border-color .15s;
+}
+.cs-soft-edit:hover:not(:focus) { background: #f7f7f7 !important; }
+.cs-soft-edit:focus {
+  border-color: var(--accent) !important;
+  background: #fff !important;
+  cursor: text;
+}
 .form-row { display: grid; gap: 12px; }
 .form-row-2 { grid-template-columns: 1fr 1fr; }
 .form-row-3 { grid-template-columns: 1fr 1fr 1fr; }
@@ -762,7 +775,10 @@ async function loadDashboard() {
     }
   }
   // 把 ar_all + vendors 寫進 accounting,讓 projGetMonthTotal 在首頁也能算出專案業績
-  if (!state.data.accounting) state.data.accounting = {};
+  // 注意:預設要把其他欄位也補齊,不然 renderAccounting 解構 ap/meal/advance/ar 會拿到 undefined → ap.filter 炸掉 → 點會計月結沒反應
+  if (!state.data.accounting) {
+    state.data.accounting = { ap:[], meal:[], advance:[], ym:'', vendors:[], ar:[], ar_all:[] };
+  }
   if (arAll?.data) state.data.accounting.ar_all = arAll.data;
   if (vendors?.data) state.data.accounting.vendors = vendors.data;
 
@@ -21472,7 +21488,6 @@ async function modalAddCS() {
         <div id="cs-issue-images" style="display:flex;gap:6px;flex-wrap:wrap"></div>
       </div>
     </div>
-    <div class="form-group"><label>標籤（用逗號分隔）</label><input class="form-control" id="m-tags" placeholder="例：退換貨, 尺寸詢問, 庫存"></div>
     <div class="form-group">
       <label>子任務 <span style="font-size:11px;color:var(--muted);font-weight:400">（可指派負責人和截止日，建立後也可在「詳細」內調整）</span></label>
       <div id="cs-subtask-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:8px"></div>
@@ -21493,7 +21508,6 @@ async function modalAddCS() {
   document.getElementById('save-cs-btn').onclick = async () => {
     const summary = document.getElementById('m-summary').value.trim();
     if (!summary) { showToast('請填寫問題摘要', 'error'); return; }
-    const tags = document.getElementById('m-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
     const type = document.getElementById('m-cs-type').value;
     const customer = document.getElementById('m-customer').value;
     // 收集子任務(依畫面順序)
@@ -21523,7 +21537,6 @@ async function modalAddCS() {
       dealer_name: type === '經銷商問題' ? customer : null,
       issue_summary: summary,
       issue_images,
-      issue_tags: tags.length ? tags : null,
       deadline: document.getElementById('m-deadline').value || null,
       subtasks: subtasks.length ? subtasks : [],
       handling_steps,
@@ -21590,17 +21603,14 @@ async function modalEditCS(id) {
       </div>
     </div>
     <div class="form-group">
-      <label>問題摘要 *</label>
-      <textarea class="form-control" id="m-summary" rows="3">${escHtml(record.issue_summary)}</textarea>
+      <label>問題摘要 * <span style="font-size:11px;color:var(--muted);font-weight:400">（點擊內容可編輯）</span></label>
+      <textarea class="form-control cs-soft-edit" id="m-summary" rows="3" style="white-space:pre-wrap;line-height:1.6">${escHtml(record.issue_summary)}</textarea>
       <div style="display:flex;align-items:center;gap:8px;margin-top:6px;flex-wrap:wrap">
         <input type="file" id="cs-issue-file" accept="image/*" style="display:none" onchange="window._csUploadIssueImage()">
         <button type="button" onclick="document.getElementById('cs-issue-file').click()"
           style="font-size:12px;padding:5px 10px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;cursor:pointer">📷 加圖片(自動壓到 100KB)</button>
         <div id="cs-issue-images" style="display:flex;gap:6px;flex-wrap:wrap"></div>
       </div>
-    </div>
-    <div class="form-group"><label>標籤（用逗號分隔）</label>
-      <input class="form-control" id="m-tags" value="${(Array.isArray(record.issue_tags)?record.issue_tags.join(', '):'').replace(/"/g,'&quot;')}" placeholder="例：退換貨, 尺寸詢問, 庫存">
     </div>
     <div class="form-group">
       <label>子任務 <span style="font-size:11px;color:var(--muted);font-weight:400">（${subs.filter(s=>s.done).length}/${subs.length} 完成；可指派負責人與截止日）</span></label>
@@ -21627,7 +21637,6 @@ async function modalEditCS(id) {
   document.getElementById('save-cs-edit-btn').onclick = async () => {
     const summary = document.getElementById('m-summary').value.trim();
     if (!summary) { showToast('請填寫問題摘要', 'error'); return; }
-    const tags = document.getElementById('m-tags').value.split(',').map(t=>t.trim()).filter(Boolean);
     const type = document.getElementById('m-cs-type').value;
     const customer = document.getElementById('m-customer').value;
     const subtasks = [];
@@ -21656,7 +21665,6 @@ async function modalEditCS(id) {
       dealer_name: type === '經銷商問題' ? customer : null,
       issue_summary: summary,
       issue_images,
-      issue_tags: tags.length ? tags : null,
       deadline: document.getElementById('m-deadline').value || null,
       subtasks,
       handling_steps,
@@ -21688,17 +21696,18 @@ window._csAddStep = function(prefill) {
   row.id = `cs-step-row-${i}`;
   row.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:6px 8px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
   const imgUrl = p.image_url || '';
+  // 軟編輯:時間/處理內容/連結 預設長得像純文字,點擊才浮出可編輯邊框
   row.innerHTML = `
     <div style="display:flex;gap:6px;align-items:center">
-      <input type="datetime-local" id="cs-step-time-${i}" value="${defaultDt}"
-        style="font-size:12px;padding:5px 6px;border:1px solid var(--border);border-radius:6px;width:170px;background:#fff;color:var(--text)">
-      <input class="form-control" id="cs-step-desc-${i}" value="${(p.description||'').replace(/"/g,'&quot;')}" placeholder="處理內容,例:通知客戶寄回商品"
+      <input type="datetime-local" id="cs-step-time-${i}" value="${defaultDt}" class="cs-soft-edit"
+        style="font-size:12px;padding:5px 6px;border-radius:6px;width:170px;color:var(--text)">
+      <input class="form-control cs-soft-edit" id="cs-step-desc-${i}" value="${(p.description||'').replace(/"/g,'&quot;')}" placeholder="處理內容,例:通知客戶寄回商品"
         style="flex:1;font-size:13px">
       <button type="button" onclick="this.closest('[id^=\\'cs-step-row\\']').remove()"
         style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除此階段">×</button>
     </div>
     <div style="display:flex;gap:6px;align-items:center">
-      <input class="form-control" id="cs-step-link-${i}" value="${(p.link||'').replace(/"/g,'&quot;')}" placeholder="🔗 連結(選填,例:訂單頁、對話截圖網址)"
+      <input class="form-control cs-soft-edit" id="cs-step-link-${i}" value="${(p.link||'').replace(/"/g,'&quot;')}" placeholder="🔗 連結(選填,例:訂單頁、對話截圖網址)"
         style="flex:1;font-size:12px;padding:4px 8px">
       <input type="file" id="cs-step-file-${i}" accept="image/*" style="display:none"
         onchange="window._csUploadStepImage('${i}')">
