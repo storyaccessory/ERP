@@ -21680,12 +21680,14 @@ async function modalEditCS(id) {
 }
 window.modalEditCS = modalEditCS;
 
-// 處理階段列共用渲染(modalAddCS / modalEditCS 共用):每階段有日期時間 + 處理內容 + 連結 + 圖片
+// 處理階段列共用渲染(modalAddCS / modalEditCS 共用)
+// 排版:第1列 = 日期時間 + 填寫人 + 移除鈕;第2列 = 處理內容(可換行);第3列 = 連結 + 圖片
 window._csAddStep = function(prefill) {
   const list = document.getElementById('cs-step-list');
   if (!list) return;
   const i = '_' + Date.now() + Math.floor(Math.random()*1000);
   const p = prefill || {};
+  const users = state.data.users || [];
   // 預設帶當下時間(YYYY-MM-DDTHH:MM,給 datetime-local 用)
   let defaultDt;
   if (p.datetime) {
@@ -21695,28 +21697,35 @@ window._csAddStep = function(prefill) {
     const n = new Date();
     defaultDt = `${n.getFullYear()}-${String(n.getMonth()+1).padStart(2,'0')}-${String(n.getDate()).padStart(2,'0')}T${String(n.getHours()).padStart(2,'0')}:${String(n.getMinutes()).padStart(2,'0')}`;
   }
+  // 填寫人:固定取登入者(不可改);舊資料有存的就用舊的,沒存的就用當前登入者
+  const defaultRecorderId = (prefill && p.recorder_id) ? p.recorder_id : (state.user?.id || '');
+  const _recorderUser = users.find(u => u.id === defaultRecorderId);
+  const recorderName = _recorderUser?.name || (state.profile?.name || state.user?.email || '—');
   const row = document.createElement('div');
   row.id = `cs-step-row-${i}`;
   row.style.cssText = 'display:flex;flex-direction:column;gap:4px;padding:6px 8px;border-radius:6px;background:#fafafa;border:1px solid var(--border)';
   const imgUrl = p.image_url || '';
-  // 軟編輯:時間/處理內容/連結 預設長得像純文字,點擊才浮出可編輯邊框
+  // 軟編輯:時間/填寫人/處理內容/連結 預設長得像純文字,點擊才浮出可編輯邊框
   row.innerHTML = `
     <div style="display:flex;gap:6px;align-items:center">
       <input type="datetime-local" id="cs-step-time-${i}" value="${defaultDt}" class="cs-soft-edit"
-        style="font-size:12px;padding:5px 6px;border-radius:6px;width:170px;color:var(--text)">
-      <textarea class="form-control cs-soft-edit" id="cs-step-desc-${i}" placeholder="處理內容,例:通知客戶寄回商品" rows="1"
-        oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"
-        style="flex:1;font-size:13px;line-height:1.6;resize:none;overflow:hidden;min-height:32px">${(p.description||'').replace(/</g,'&lt;')}</textarea>
+        style="font-size:12px;padding:5px 6px;border-radius:6px;width:170px;color:var(--text)" title="日期 + 時間">
+      <span style="font-size:12px;color:var(--muted);display:inline-flex;align-items:center;gap:4px;padding:5px 8px;background:#fff;border:1px solid var(--border);border-radius:6px" title="填寫人(系統自動依登入者填入)">👤 ${recorderName}</span>
+      <input type="hidden" id="cs-step-who-${i}" value="${defaultRecorderId}">
+      <div style="flex:1"></div>
       <button type="button" onclick="this.closest('[id^=\\'cs-step-row\\']').remove()"
         style="flex-shrink:0;background:none;border:none;cursor:pointer;color:#ccc;font-size:18px;padding:0 4px;line-height:1" title="移除此階段">×</button>
     </div>
+    <textarea class="form-control cs-soft-edit" id="cs-step-desc-${i}" placeholder="處理內容,例:通知客戶寄回商品" rows="1"
+      oninput="this.style.height='auto';this.style.height=this.scrollHeight+'px'"
+      style="width:100%;font-size:13px;line-height:1.6;resize:none;overflow:hidden;min-height:32px">${(p.description||'').replace(/</g,'&lt;')}</textarea>
     <div style="display:flex;gap:6px;align-items:center">
       <input class="form-control cs-soft-edit" id="cs-step-link-${i}" value="${(p.link||'').replace(/"/g,'&quot;')}" placeholder="🔗 連結(選填,例:訂單頁、對話截圖網址)"
         style="flex:1;font-size:12px;padding:4px 8px">
       <input type="file" id="cs-step-file-${i}" accept="image/*" style="display:none"
         onchange="window._csUploadStepImage('${i}')">
       <button type="button" onclick="document.getElementById('cs-step-file-${i}').click()"
-        style="flex-shrink:0;font-size:12px;padding:5px 10px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;cursor:pointer;white-space:nowrap">📷 圖片</button>
+        style="flex-shrink:0;font-size:12px;padding:5px 10px;border:1px solid var(--accent);background:#fff;color:var(--accent);border-radius:6px;cursor:pointer;white-space:nowrap">📷 圖片(自動壓 100KB)</button>
       <div id="cs-step-img-${i}" style="display:${imgUrl?'flex':'none'};align-items:center;gap:4px;flex-shrink:0">
         ${imgUrl ? `<a href="${imgUrl}" target="_blank"><img src="${imgUrl}" style="width:32px;height:32px;object-fit:cover;border-radius:4px;border:1px solid var(--border)"></a>
         <button type="button" onclick="window._csRemoveStepImage('${i}')" style="background:none;border:none;cursor:pointer;color:#aaa;font-size:14px" title="移除圖片">🗑</button>` : ''}
@@ -21779,6 +21788,7 @@ window._csCollectSteps = function() {
     steps.push({
       id: 'step_'+Math.random().toString(36).slice(2,10),
       datetime: dtVal ? new Date(dtVal).toISOString() : new Date().toISOString(),
+      recorder_id: document.getElementById(`cs-step-who-${i}`)?.value || null,
       description: desc,
       link: document.getElementById(`cs-step-link-${i}`)?.value.trim() || '',
       image_url: document.getElementById(`cs-step-imgurl-${i}`)?.value || '',
