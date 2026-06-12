@@ -20973,7 +20973,12 @@ async function modalCalEvent(existing=null) {
       </div>
     </div>
 
-    ${id ? `
+    ${id && !(() => {
+      // 請假事項不顯示「已完成」勾選(以分類 label 判斷)
+      const tmap = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
+      if ((existing?.event_type||'').toLowerCase() === 'leave') return true;
+      return (tmap[existing?.event_type]?.label||'').includes('請假');
+    })() ? `
     <div class="form-group">
       <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:${existing?.completed_at?'#e8f5e9':'#fafafa'}">
         <input type="checkbox" id="cal-completed" ${existing?.completed_at?'checked':''} style="width:18px;height:18px;cursor:pointer"
