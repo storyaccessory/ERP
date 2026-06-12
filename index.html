@@ -20608,11 +20608,18 @@ function renderCalendar() {
     const cellBg = isToday?'#FFFAFA':isOffDay?'#FFFAFA':'#fff';
     const cellBorder = isToday?'#e53935':isOffDay?'#fde2e1':'var(--border)';
     const dayNumColor = isToday?'#c62828':isHoliday?'#c62828':isWeekend?'#c98a8a':'var(--text)';
-    // 請假 chips:抓出當天 event_type='leave' 的事項,顯示在數字右邊;同時從下方事項清單排除
+    // 請假 chips:依「分類 label === 請假」判斷(不卡 ID),拿出當天事項顯示在數字右邊
+    const _calTypesAll = getCalEventTypes() || {};
+    const _isLeave = ev => {
+      const t = (ev?.event_type || '').toLowerCase();
+      if (t === 'leave') return true;
+      const cat = _calTypesAll[ev?.event_type];
+      return (cat?.label || '').includes('請假');
+    };
     const leaveItems = [];
     const nonLeaveItems = shown.filter(item => {
       if (item._type !== 'event') return true;
-      if (item.ev.event_type !== 'leave') return true;
+      if (!_isLeave(item.ev)) return true;
       leaveItems.push(item);
       return false;
     });
