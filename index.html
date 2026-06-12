@@ -20637,7 +20637,15 @@ function renderCalendar() {
       if (full.length <= 2) return full;
       return full.slice(1, 3);   // 名(去掉姓,取 2 字)
     };
-    const _leaveChipBg = { full:'#ef6c00', am:'linear-gradient(90deg,#ef6c00 50%,#ffd6a6 50%)', pm:'linear-gradient(90deg,#ffd6a6 50%,#ef6c00 50%)' };
+    // 顏色從「請假」分類設定讀;沒設定就用預設橘色。半天用漸層(主色 50% + 淡色 50%)
+    const _leaveCat = Object.values(_calTypesAll).find(t => (t?.label||'').includes('請假'));
+    const _leaveMain = _leaveCat?.color || '#ef6c00';
+    const _leaveSoft = _leaveCat?.bg || '#ffd6a6';
+    const _leaveChipBg = {
+      full: _leaveMain,
+      am:   `linear-gradient(90deg,${_leaveMain} 50%,${_leaveSoft} 50%)`,
+      pm:   `linear-gradient(90deg,${_leaveSoft} 50%,${_leaveMain} 50%)`,
+    };
     const _leaveTitle = { full:'全天', am:'上午', pm:'下午' };
     const leaveChips = (() => {
       if (!leaveItems.length) return '';
@@ -20646,11 +20654,18 @@ function renderCalendar() {
         const ev = item.ev;
         const ids = Array.isArray(ev.assignee_ids) && ev.assignee_ids.length ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
         const slot = _leaveSlot(ev);
-        ids.forEach(uid => {
-          const name = _userName(uid);
-          if (!name) return;
-          personChips.push({ name, slot, evId: ev.id });
-        });
+        if (ids.length) {
+          // 有指派人:每個人一個 chip
+          ids.forEach(uid => {
+            const name = _userName(uid);
+            if (!name) return;
+            personChips.push({ name, slot, evId: ev.id });
+          });
+        } else {
+          // 沒指派人:用事項標題當 chip 文字;標題也空就顯示「請假」
+          const fallback = (ev.title || '請假').trim();
+          personChips.push({ name: fallback, slot, evId: ev.id });
+        }
       });
       const MAX = 2;
       const show = personChips.slice(0, MAX);
