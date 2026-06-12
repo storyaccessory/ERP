@@ -20623,46 +20623,37 @@ function renderCalendar() {
       leaveItems.push(item);
       return false;
     });
-    // 解析時段:start_time 起始小時 < 12 → 上午;>= 12 → 下午;沒 start_time → 全天
-    const _leaveSlot = ev => {
-      const t = ev.start_time || '';
-      if (!t) return 'full';
-      const h = parseInt(t.slice(0,2)) || 0;
-      return h < 12 ? 'am' : 'pm';
+    // 解析時段:沒填 start_time → 全天;有填 → 顯示 "(起-迄)" 時段
+    const _leaveSlotText = ev => {
+      const s = ev.start_time || '';
+      const e = ev.end_time || '';
+      if (!s) return '全';
+      const sh = parseInt(s.slice(0,2));
+      const eh = e ? parseInt(e.slice(0,2)) : null;
+      if (!isNaN(sh) && eh != null && !isNaN(eh)) return `${sh}-${eh}`;
+      if (!isNaN(sh)) return `${sh}+`;
+      return '全';
     };
     // 取名字:assignee_ids[0] / assigned_to → users 表 → 名(去掉姓,2 字)
     const _userName = id => (state.data.users||[]).find(u=>u.id===id)?.name || '';
-    const _firstName = full => {
-      if (!full) return '?';
-      if (full.length <= 2) return full;
-      return full.slice(1, 3);   // 名(去掉姓,取 2 字)
-    };
-    // 顏色從「請假」分類設定讀;沒設定就用預設橘色。半天用漸層(主色 50% + 淡色 50%)
+    const _firstName = full => full || '?';   // 全名顯示
+    // 顏色從「請假」分類設定讀;沒設定就用預設橘色
     const _leaveCat = Object.values(_calTypesAll).find(t => (t?.label||'').includes('請假'));
     const _leaveMain = _leaveCat?.color || '#ef6c00';
-    const _leaveSoft = _leaveCat?.bg || '#ffd6a6';
-    const _leaveChipBg = {
-      full: _leaveMain,
-      am:   `linear-gradient(90deg,${_leaveMain} 50%,${_leaveSoft} 50%)`,
-      pm:   `linear-gradient(90deg,${_leaveSoft} 50%,${_leaveMain} 50%)`,
-    };
-    const _leaveTitle = { full:'全天', am:'上午', pm:'下午' };
     const leaveChips = (() => {
       if (!leaveItems.length) return '';
       const personChips = [];
       leaveItems.forEach(item => {
         const ev = item.ev;
         const ids = Array.isArray(ev.assignee_ids) && ev.assignee_ids.length ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
-        const slot = _leaveSlot(ev);
+        const slot = _leaveSlotText(ev);
         if (ids.length) {
-          // 有指派人:每個人一個 chip
           ids.forEach(uid => {
             const name = _userName(uid);
             if (!name) return;
             personChips.push({ name, slot, evId: ev.id });
           });
         } else {
-          // 沒指派人:用事項標題當 chip 文字;標題也空就顯示「請假」
           const fallback = (ev.title || '請假').trim();
           personChips.push({ name: fallback, slot, evId: ev.id });
         }
@@ -20671,11 +20662,11 @@ function renderCalendar() {
       const show = personChips.slice(0, MAX);
       const more = personChips.length > MAX ? personChips.length - MAX : 0;
       const html = show.map(p =>
-        `<span title="${p.name} 請假 ${_leaveTitle[p.slot]}" onclick="event.stopPropagation();calViewEvent('${p.evId}')"
-          style="display:inline-flex;align-items:center;justify-content:center;min-width:24px;height:18px;padding:0 5px;border-radius:9px;background:${_leaveChipBg[p.slot]};color:#fff;font-size:10px;font-weight:700;line-height:1;cursor:pointer;box-shadow:0 1px 2px rgba(239,108,0,.3)">${_firstName(p.name)}</span>`
+        `<span title="${p.name} 請假 (${p.slot})" onclick="event.stopPropagation();calViewEvent('${p.evId}')"
+          style="display:inline-flex;align-items:center;justify-content:center;height:18px;padding:0 7px;border-radius:9px;background:${_leaveMain};color:#fff;font-size:10px;font-weight:700;line-height:1;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap">${_firstName(p.name)}(${p.slot})</span>`
       ).join('');
       const moreHtml = more > 0
-        ? `<span title="${personChips.slice(MAX).map(p=>p.name).join('、')} 也請假" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;height:18px;padding:0 5px;border-radius:9px;background:#ef6c00;color:#fff;font-size:10px;font-weight:700;line-height:1">+${more}</span>`
+        ? `<span title="${personChips.slice(MAX).map(p=>p.name+'('+p.slot+')').join('、')} 也請假" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;height:18px;padding:0 5px;border-radius:9px;background:${_leaveMain};color:#fff;font-size:10px;font-weight:700;line-height:1">+${more}</span>`
         : '';
       return html + moreHtml;
     })();
