@@ -1307,10 +1307,18 @@ function renderDashboard() {
             end_date: c.deadline || null,
             subtasks: c.subtasks || [],
           }));
+          // 判斷是否為「請假」分類(不列入待辦也不列入過期)
+          const _calTypesDash = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
+          const _isLeaveEv = ev => {
+            if (!ev) return false;
+            if ((ev.event_type||'').toLowerCase() === 'leave') return true;
+            return (_calTypesDash[ev.event_type]?.label||'').includes('請假');
+          };
           // 我自己的事項:來自 calTodos(主任務指派給我);同時也撈「子任務指派給我」的事項
-          const todosFromMain = (todos||[]);
+          // 過濾請假事項,不計入待辦
+          const todosFromMain = (todos||[]).filter(t => !_isLeaveEv(t));
           const todoIds = new Set(todosFromMain.map(t => t.id));
-          const overdueAllForMe = d.overdue || [];
+          const overdueAllForMe = (d.overdue || []).filter(t => !_isLeaveEv(t));
           const todosFromSubs = overdueAllForMe.filter(t => {
             if (todoIds.has(t.id)) return false;  // 已經在主任務待辦裡了,跳過避免重複
             const subs = Array.isArray(t.subtasks) ? t.subtasks : [];
@@ -1375,7 +1383,14 @@ function renderDashboard() {
       <div class="card">
         <div class="section-title">🔴 團隊過期任務</div>
         ${(()=>{
-          const all = d.overdue || [];
+          const _calTypesT = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
+          const _isLeaveT = ev => {
+            if (!ev) return false;
+            if ((ev.event_type||'').toLowerCase() === 'leave') return true;
+            return (_calTypesT[ev.event_type]?.label||'').includes('請假');
+          };
+          // 請假不算過期任務,排除
+          const all = (d.overdue || []).filter(t => !_isLeaveT(t));
           // 為每筆事項標記「事項過期」與「過期子任務」
           const annotated = all.map(t => {
             const eventOv = !!(t.end_date && t.end_date < today);
