@@ -18478,15 +18478,24 @@ function renderJournal() {
     };
     // ── 近期任務:把「子任務指派給我」的事項也撈進來 ──
     const jdMyId = effectiveUserId();
+    // 請假分類判斷,工作日誌也不顯示請假
+    const _calTypesJ = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
+    const _isLeaveJ = ev => {
+      if (!ev) return false;
+      if ((ev.event_type||'').toLowerCase() === 'leave') return true;
+      return (_calTypesJ[ev.event_type]?.label||'').includes('請假');
+    };
     // subtaskEvents 已在上面宣告(line ~18328),這裡直接用
     // 找出「子任務指派給我但主任務沒指派給我」的事項,合進 upcoming
-    const upcomingIds = new Set(upcoming.map(e => e.id));
+    const upcomingFiltered = upcoming.filter(e => !_isLeaveJ(e));
+    const upcomingIds = new Set(upcomingFiltered.map(e => e.id));
     const subAssignedEvents = subtaskEvents.filter(ev => {
       if (upcomingIds.has(ev.id)) return false;
+      if (_isLeaveJ(ev)) return false;
       const subs = Array.isArray(ev.subtasks) ? ev.subtasks : [];
       return subs.some(s => !s.done && s.text && s.assignee_id === jdMyId);
     });
-    const mergedUpcoming = [...upcoming, ...subAssignedEvents];
+    const mergedUpcoming = [...upcomingFiltered, ...subAssignedEvents];
 
     // 建立 eventId → 我的未完成子任務(放寬:對所有合進來的事項都取出我的子任務)
     const mySubMap = {};
@@ -18759,7 +18768,14 @@ window.modalEditJournal = async function(existingId = null) {
     </div>`).join('')}
     <div style="font-size:11px;color:var(--muted);text-align:right">建議 3～5 分鐘完成，簡短清楚即可 ✍️</div>
     ${(() => {
-      let myItems = (jd.upcoming||[]);
+      // 請假分類判斷,工作日誌「你的近期任務」也排除
+      const _calTypesJ2 = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
+      const _isLeaveJ2 = ev => {
+        if (!ev) return false;
+        if ((ev.event_type||'').toLowerCase() === 'leave') return true;
+        return (_calTypesJ2[ev.event_type]?.label||'').includes('請假');
+      };
+      let myItems = (jd.upcoming||[]).filter(e => !_isLeaveJ2(e));
       const _ts = _localToday();
       // 我自己的過期子任務(跨所有事項):未完成、有截止日且 < 今天、指派給我(或無指派但事項屬於我)
       const _myOverdueSubs = [];
