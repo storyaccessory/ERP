@@ -20727,8 +20727,8 @@ function renderCalendar() {
       return html + moreHtml;
     })();
 
-    cells.push(`<div class="cal-cell" data-date="${ds}" style="border:1px solid ${cellBorder};border-radius:6px;padding:4px 5px;cursor:pointer;background:${cellBg};${isToday?'outline:2px solid #e53935;':''}">
-      <div style="font-size:12px;font-weight:${isToday?800:400};color:${dayNumColor};margin-bottom:3px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">${isToday?`<span style="display:inline-flex;align-items:center;justify-content:center;background:#e53935;color:#fff;width:21px;height:21px;border-radius:50%;font-size:11px">${d}</span>`:d}${leaveChips}${isHoliday?`<span style="font-size:10px;color:#c62828;font-weight:600;background:#fde2e1;border-radius:3px;padding:1px 5px">🏖 ${holidayName}</span>`:''}</div>
+    return `<div class="cal-cell" data-date="${ds}" style="border:1px solid ${cellBorder};border-radius:6px;padding:4px 5px;cursor:pointer;background:${cellBg};${isToday?'outline:2px solid #e53935;':''}${previewStyle}">
+      <div style="font-size:12px;font-weight:${isToday?800:400};color:${dayNumColor};margin-bottom:3px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">${isToday?`<span style="display:inline-flex;align-items:center;justify-content:center;background:#e53935;color:#fff;width:21px;height:21px;border-radius:50%;font-size:11px">${cD}</span>`:cD}${leaveChips}${isHoliday?`<span style="font-size:10px;color:#c62828;font-weight:600;background:#fde2e1;border-radius:3px;padding:1px 5px">🏖 ${holidayName}</span>`:''}</div>
       ${nonLeaveItems.map(item => {
         const baseDiv = (content, style, onclick) =>
           `<div style="font-size:11px;line-height:1.4;margin-bottom:1px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;cursor:pointer;${style}" ${onclick}><span style="font-size:9px">●</span> ${content}</div>`;
@@ -20788,22 +20788,31 @@ function renderCalendar() {
           }
         }
       }).join('')}
-    </div>`);
-  }
+    </div>`;
+  };  // end _buildCalCell
 
-  // 月底補「下月月初」的灰色預覽格,讓最後一週不要空白
+  // ① 前導:上月月底補格,一樣顯示日期 + 事項(半透明虛線)
+  if (firstDay > 0) {
+    const prevM = m === 0 ? 11 : m - 1;
+    const prevY = m === 0 ? y - 1 : y;
+    const prevMonthDays = new Date(prevY, prevM + 1, 0).getDate();
+    for (let i = firstDay - 1; i >= 0; i--) {
+      const pd = prevMonthDays - i;
+      cells.push(_buildCalCell(prevY, prevM, pd, true));
+    }
+  }
+  // ② 當月
+  for (let d = 1; d <= daysInMonth; d++) {
+    cells.push(_buildCalCell(y, m, d, false));
+  }
+  // ③ 尾隨:下月月初補格
   const remainder = cells.length % 7;
   if (remainder !== 0) {
     const fillCount = 7 - remainder;
     const nextM = (m + 1) % 12;
     const nextY = m === 11 ? y + 1 : y;
-    for (let d = 1; d <= fillCount; d++) {
-      const ds = `${nextY}-${String(nextM+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-      const isNextWeekend = new Date(nextY, nextM, d).getDay() === 0 || new Date(nextY, nextM, d).getDay() === 6;
-      const holidayName = getTwHoliday(ds);
-      cells.push(`<div class="cal-cell" style="border:1px dashed var(--border);border-radius:6px;padding:4px 5px;background:#fafafa;opacity:.5">
-        <div style="font-size:12px;color:${isNextWeekend?'#c98a8a':'var(--muted)'};margin-bottom:3px;display:flex;align-items:center;gap:4px;flex-wrap:wrap">${d}${holidayName?`<span style="font-size:10px;color:#c62828;background:#fde2e1;border-radius:3px;padding:1px 5px">🏖 ${holidayName}</span>`:''}</div>
-      </div>`);
+    for (let nd = 1; nd <= fillCount; nd++) {
+      cells.push(_buildCalCell(nextY, nextM, nd, true));
     }
   }
 
