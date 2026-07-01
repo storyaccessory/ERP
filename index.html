@@ -20645,7 +20645,7 @@ function renderCalendar() {
 
   const storeT = getCalEventTypes().store || {label:'門市',color:'#00897b',bg:'#e0f2f1'};
 
-  // Build calendar grid
+  // Build calendar grid — 前導(上月月底) + 當月 + 尾隨(下月月初) 三段拼起來,補格也顯示事項
   const cells = [];
 
   // 把 cell 渲染包成函式,方便前導/當月/尾隨 三個 loop 共用
