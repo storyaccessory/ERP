@@ -17358,7 +17358,7 @@ async function loadJournal() {
   const [todayRes, histRes, profilesRes, upcomingRes, teamEvRes, subtaskEvRes] = await Promise.all([
     db.from('work_journals').select('*').eq('date', today).order('created_at'),
     db.from('work_journals').select('*').order('date', { ascending: false }).limit(300),
-    db.from('profiles').select('id, name, role, job_title, journal_template, journal_required').order('name'),
+    db.from('profiles').select('id, name, email, role, job_title, journal_template, journal_required').order('name'),
     // 個人近期事項 + 過期事項(指派給自己):未完成且 start_date <= today+1個月 (拿掉 gte today 的限制,讓過期事項一起進來)
     db.from('calendar_events')
       .select('id, title, start_date, end_date, event_type, priority, assigned_to, assignee_ids, completed_at, subtasks')
@@ -18379,12 +18379,19 @@ function renderJournal() {
   const myTpl = _getMyTemplate(jd);
   const today3d = new Date(Date.now()+3*86400000).toISOString().slice(0,10);
 
-  // ── 本月補填統計 ──（建檔日 > 日誌日 視為補填；統計本月份的次數，依使用者）
+  // ── 本月補填統計 ──（建檔日 > 日誌日 視為補填；統計本月份的次數，依使用者)
+  // 老闆(admin / 蔡采玲 / cailing0516@gmail.com)不計算次數
   const _ym = today.slice(0,7);
+  const _isBossUid = uid => {
+    const p = (profiles||[]).find(x => x.id === uid);
+    if (!p) return false;
+    return p.role === 'admin' || p.email === 'cailing0516@gmail.com' || p.name === '蔡采玲';
+  };
   const _monthlyBackfill = {};
   (history || []).forEach(l => {
     if (!l.date || !l.created_at) return;
     if (!l.date.startsWith(_ym)) return;
+    if (_isBossUid(l.user_id)) return;   // 老闆不計數
     if (l.created_at.slice(0,10) > l.date) {
       _monthlyBackfill[l.user_id] = (_monthlyBackfill[l.user_id]||0) + 1;
     }
@@ -20427,18 +20434,21 @@ async function loadCalendarEvents() {
   const cal = state.data.calNav || (() => { const n=new Date(); return {y:n.getFullYear(),m:n.getMonth()}; })();
   const firstOfMonth = `${cal.y}-${String(cal.m+1).padStart(2,'0')}-01`;
   const lastOfMonth  = `${cal.y}-${String(cal.m+1).padStart(2,'0')}-${new Date(cal.y,cal.m+1,0).getDate()}`;
+  // 擴大範圍:前 7 天(顯示上月月底) + 後 7 天(顯示下月月初),讓補格也能顯示事項
+  const rangeFrom = (() => { const d = new Date(firstOfMonth+'T00:00:00'); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10); })();
+  const rangeTo   = (() => { const d = new Date(lastOfMonth+'T00:00:00');  d.setDate(d.getDate()+7); return d.toISOString().slice(0,10); })();
   const sel = '*';
   const { data, error: e1 } = await db.from('calendar_events')
     .select(sel)
-    .lte('start_date', lastOfMonth)
-    .gte('end_date', firstOfMonth)
+    .lte('start_date', rangeTo)
+    .gte('end_date', rangeFrom)
     .neq('is_template', true)
     .order('start_date');
   if (e1) console.error('calEvents query1 error:', e1.message);
   const { data: singleDay, error: e2 } = await db.from('calendar_events')
     .select(sel)
-    .gte('start_date', firstOfMonth)
-    .lte('start_date', lastOfMonth)
+    .gte('start_date', rangeFrom)
+    .lte('start_date', rangeTo)
     .is('end_date', null)
     .neq('is_template', true);
   if (e2) console.error('calEvents query2 error:', e2.message);
@@ -20449,18 +20459,18 @@ async function loadCalendarEvents() {
   // Also load confirmed bookings for this month
   const { data: bkData } = await db.from('experience_bookings')
     .select('id,booking_date,time_slot,customer_name,source,status,attendees,staff_id')
-    .gte('booking_date', firstOfMonth)
-    .lte('booking_date', lastOfMonth)
+    .gte('booking_date', rangeFrom)
+    .lte('booking_date', rangeTo)
     .in('status', ['已確認','已完成'])
     .neq('source', '人工封鎖')
     .neq('source', '公休日');
   state.data.calBookings = bkData || [];
 
-  // 客服:本月有 deadline 的未結案記錄(疊加到行事曆)
+  // 客服:範圍內 deadline 的未結案記錄(疊加到行事曆)
   const { data: csData } = await db.from('cs_records')
     .select('id,subject,issue_summary,platform,deadline,reply_status,customer_name,dealer_name,created_by,subtasks')
-    .gte('deadline', firstOfMonth)
-    .lte('deadline', lastOfMonth)
+    .gte('deadline', rangeFrom)
+    .lte('deadline', rangeTo)
     .neq('reply_status', '已結案');
   state.data.calCS = csData || [];
 
@@ -20637,22 +20647,24 @@ function renderCalendar() {
 
   // Build calendar grid
   const cells = [];
-  for (let i=0; i<firstDay; i++) cells.push(`<div class="cal-cell-empty"></div>`);
-  for (let d=1; d<=daysInMonth; d++) {
-    const ds = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+
+  // 把 cell 渲染包成函式,方便前導/當月/尾隨 三個 loop 共用
+  // isPreview: 相鄰月份的補格 → 半透明 + 虛線邊
+  const _buildCalCell = (cY, cM, cD, isPreview) => {
+    const ds = `${cY}-${String(cM+1).padStart(2,'0')}-${String(cD).padStart(2,'0')}`;
     const isToday = ds === todayStr;
     const dayItems = eventMap[ds] || [];
     const shown = dayItems;
-    const isWeekend = new Date(y,m,d).getDay() === 0 || new Date(y,m,d).getDay() === 6;
+    const isWeekend = new Date(cY,cM,cD).getDay() === 0 || new Date(cY,cM,cD).getDay() === 6;
 
     const holidayName = getTwHoliday(ds);
     const isHoliday = !!holidayName;
-    // 國定假日與週末統一用淡粉色底(非上班日標記)
     const isOffDay = isHoliday || isWeekend;
-    const cellBg = isToday?'#FFFAFA':isOffDay?'#FFFAFA':'#fff';
+    const cellBg = isToday?'#FFFAFA':isOffDay?'#FFFAFA':(isPreview?'#fafafa':'#fff');
     const cellBorder = isToday?'#e53935':isOffDay?'#fde2e1':'var(--border)';
-    const dayNumColor = isToday?'#c62828':isHoliday?'#c62828':isWeekend?'#c98a8a':'var(--text)';
-    // 請假 chips:依「分類 label === 請假」判斷(不卡 ID),拿出當天事項顯示在數字右邊
+    const dayNumColor = isToday?'#c62828':isHoliday?'#c62828':isWeekend?'#c98a8a':(isPreview?'var(--muted)':'var(--text)');
+    const previewStyle = isPreview ? 'opacity:.55;border-style:dashed;' : '';
+    // 請假 chips:依「分類 label === 請假」判斷
     const _calTypesAll = getCalEventTypes() || {};
     const _isLeave = ev => {
       const t = (ev?.event_type || '').toLowerCase();
