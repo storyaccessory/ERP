@@ -20564,9 +20564,14 @@ function renderCalendar() {
   const calTypeFilter = state.data.calTypeFilter || null;    // null | event_type key
   const myId = state.user?.id;
   let allEvents = state.data.calEvents || [];
-  // Apply 我的/全公司 filter
+  // Apply 我的/全公司 filter — 主任務指派給我 或 任一未完成子任務指派給我 都算「我的」
   let events = calFilter === 'mine'
-    ? allEvents.filter(ev => ev.assigned_to === myId || (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(myId)))
+    ? allEvents.filter(ev => {
+        if (ev.assigned_to === myId) return true;
+        if (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(myId)) return true;
+        const subs = Array.isArray(ev.subtasks) ? ev.subtasks : [];
+        return subs.some(s => !s.done && s.text && s.assignee_id === myId);
+      })
     : allEvents;
   // Apply 分類 filter
   if (calTypeFilter) events = events.filter(ev => ev.event_type === calTypeFilter);
@@ -20826,7 +20831,12 @@ function renderCalendar() {
     return (_calTypesU[ev?.event_type]?.label||'').includes('請假');
   };
   upSrc = upSrc.filter(e => !_isLeaveU(e));
-  if (calFilter === 'mine') upSrc = upSrc.filter(ev => ev.assigned_to === myId || (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(myId)));
+  if (calFilter === 'mine') upSrc = upSrc.filter(ev => {
+    if (ev.assigned_to === myId) return true;
+    if (Array.isArray(ev.assignee_ids) && ev.assignee_ids.includes(myId)) return true;
+    const subs = Array.isArray(ev.subtasks) ? ev.subtasks : [];
+    return subs.some(s => !s.done && s.text && s.assignee_id === myId);
+  });
   if (calTypeFilter) upSrc = upSrc.filter(ev => ev.event_type === calTypeFilter);
   // 「實際排序日期」:主任務 vs 任一未完成子任務 due,取較早
   const _earliestU = ev => {
