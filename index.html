@@ -20578,6 +20578,8 @@ function renderCalendar() {
   let calBookings = state.data.calBookings || [];
   // 體驗預約：切「我的」時，只顯示負責人（接待人員 staff_id）為自己的預約
   if (calFilter === 'mine') calBookings = calBookings.filter(b => b.staff_id === myId);
+  // 分類篩選:選了其他分類(非 store/門市) → 體驗預約清空
+  if (calTypeFilter && calTypeFilter !== 'store') calBookings = [];
 
   // 客服疊加層:套「我的」(建立者或子任務負責人) 與分類篩選(只在 cs/未指定 時顯示)
   let calCS = state.data.calCS || [];
