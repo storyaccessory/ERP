@@ -578,6 +578,7 @@ const PAGES = {
   journal:    { label: '工作日誌',     icon: '📝', section: '業務追蹤' },
   booking:    { label: '體驗預約',     icon: '🗓️', section: '行政客服' },
   cs:         { label: '客服記錄',     icon: '💬', section: '行政客服' },
+  inquiries:  { label: '合作洽詢',     icon: '📥', section: '行政客服' },
   shipments:  { label: '每日出貨',     icon: '📦', section: '行政客服' },
   postage:    { label: '郵資支出',     icon: '💰', section: '行政客服' },
   // 商品管理
@@ -703,6 +704,7 @@ async function loadPageData(page) {
     journal:    loadJournal,
     booking:    loadBooking,
     cs:         loadCS,
+    inquiries:  loadInquiries,
     repair:     loadRepair,
     dev:        loadDev,
     accounting: loadAccounting,
@@ -889,6 +891,313 @@ async function loadCS() {
   const { data } = await db.from('cs_records').select('*').order('created_at', { ascending: false });
   state.data.cs = data || [];
 }
+
+async function loadInquiries() {
+  const { data, error } = await db.from('collaboration_inquiries').select('*').order('created_at', { ascending: false });
+  if (error) { console.error('[loadInquiries]', error); state.data.inquiries = []; return; }
+  state.data.inquiries = data || [];
+}
+
+// ═══════════════════════════════════════════
+// 合作洽詢(collaboration_inquiries)
+// ═══════════════════════════════════════════
+const INQ_CATEGORY = { product_dev:'🎨 商品開發', channel:'🏪 通路合作' };
+const INQ_SUBTYPE = {
+  // A 類:商品開發
+  licensing:      { cat:'product_dev', label:'授權商品開發' },
+  codev:          { cat:'product_dev', label:'共同開發 Co-dev' },
+  odm:            { cat:'product_dev', label:'ODM / OEM 委託' },
+  crossover:      { cat:'product_dev', label:'異業聯名' },
+  // B 類:通路合作
+  select_store:   { cat:'channel', label:'品牌選物店' },
+  gift_store:     { cat:'channel', label:'禮品文創通路' },
+  popup_exhibit:  { cat:'channel', label:'IP 主題展覽 / 快閃' },
+  oversea_dist:   { cat:'channel', label:'海外代理 / 經銷' },
+  ecommerce:      { cat:'channel', label:'電商平台' },
+  other_channel:  { cat:'channel', label:'其他通路' },
+};
+const INQ_STATUS = ['未處理','已回覆','洽談中','成交','取消'];
+const INQ_STATUS_COLOR = {
+  '未處理':{ bg:'#ffebee', color:'#c62828' },
+  '已回覆':{ bg:'#e3f2fd', color:'#1565c0' },
+  '洽談中':{ bg:'#fff3e0', color:'#ef6c00' },
+  '成交':  { bg:'#e8f5e9', color:'#2e7d32' },
+  '取消':  { bg:'#eceff1', color:'#607d8b' },
+};
+
+function renderInquiries() {
+  const list = state.data.inquiries || [];
+  const tabCat = state.data.inqTabCat || 'all';       // 'all' | 'product_dev' | 'channel'
+  const tabStatus = state.data.inqTabStatus || 'all'; // 'all' | status
+  const filtered = list.filter(r => {
+    if (tabCat !== 'all' && r.category !== tabCat) return false;
+    if (tabStatus !== 'all' && r.status !== tabStatus) return false;
+    return true;
+  });
+
+  const cntByStatus = {};
+  INQ_STATUS.forEach(s => { cntByStatus[s] = list.filter(r => r.status === s).length; });
+
+  const catTabs = [['all','全部'], ['product_dev','🎨 商品開發'], ['channel','🏪 通路合作']];
+  const statusTabs = [['all','全部'], ...INQ_STATUS.map(s => [s, `${s} (${cntByStatus[s]||0})`])];
+
+  const rows = filtered.map(r => {
+    const stCol = INQ_STATUS_COLOR[r.status] || { bg:'#f5f5f5', color:'#666' };
+    const sub = INQ_SUBTYPE[r.subtype];
+    const catLabel = sub ? sub.label : (INQ_CATEGORY[r.category] || r.category);
+    const fd = r.form_data || {};
+    // 摘要:抓 form_data 幾個關鍵欄位顯示
+    const summary = [
+      fd.ip_name && `IP: ${fd.ip_name}`,
+      fd.brand_name && `品牌: ${fd.brand_name}`,
+      fd.channel_name && `通路: ${fd.channel_name}`,
+      fd.products && `商品: ${(Array.isArray(fd.products)?fd.products.slice(0,3).join('、'):fd.products)}${Array.isArray(fd.products)&&fd.products.length>3?`+${fd.products.length-3}`:''}`,
+      fd.quantity && `數量: ${fd.quantity}`,
+      fd.budget && `預算: ${fd.budget}`,
+    ].filter(Boolean).join(' · ');
+    const contact = `${r.contact_name || '—'}${r.company?` (${r.company})`:''}`;
+    const created = r.created_at ? new Date(r.created_at).toLocaleString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'}) : '—';
+    return `
+      <tr style="cursor:pointer" onclick="window.modalViewInquiry('${r.id}')">
+        <td style="white-space:nowrap;font-size:11px;color:var(--muted)">${created}</td>
+        <td><span class="tag" style="background:${r.category==='product_dev'?'#fff3e0':'#e3f2fd'};color:${r.category==='product_dev'?'#ef6c00':'#1565c0'};font-size:10px;font-weight:700">${catLabel}</span></td>
+        <td><strong>${contact}</strong></td>
+        <td style="font-size:12px;color:var(--muted);max-width:340px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${summary || '—'}</td>
+        <td><span class="tag" style="background:${stCol.bg};color:${stCol.color};font-weight:600">${r.status}</span></td>
+        <td onclick="event.stopPropagation()">
+          <div class="action-btns">
+            <button class="btn-table" style="background:#e3f2fd;color:#1565c0" onclick="window.modalViewInquiry('${r.id}')">詳細</button>
+            ${r.status==='未處理'?`<button class="btn-table" style="background:#e0f2f1;color:#2e7d32" onclick="window._inqQuickStatus('${r.id}','已回覆')">✉ 已回覆</button>`:''}
+            ${!r.cs_record_id?`<button class="btn-table" style="background:#f3e5f5;color:#7b1fa2" onclick="window._inqCreateCS('${r.id}')">🔗 開客服單</button>`:`<button class="btn-table" style="background:#f5f5f5;color:#666" onclick="window.modalEditCS('${r.cs_record_id}')">→ 客服單</button>`}
+          </div>
+        </td>
+      </tr>`;
+  }).join('');
+
+  return `
+    <div class="tabs">
+      ${catTabs.map(([k,l]) => `<div class="tab ${tabCat===k?'active':''}" onclick="state.data.inqTabCat='${k}';renderApp()">${l}</div>`).join('')}
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+      ${statusTabs.map(([k,l]) => `<span onclick="state.data.inqTabStatus='${k}';renderApp()" style="cursor:pointer;padding:5px 10px;border-radius:6px;font-size:12px;font-weight:600;background:${tabStatus===k?'var(--accent)':'#f5f5f5'};color:${tabStatus===k?'#fff':'#666'}">${l}</span>`).join('')}
+      <div style="flex:1"></div>
+      <button class="btn btn-primary btn-sm" onclick="window.modalAddInquiry()">+ 手動新增</button>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="width:100px">時間</th>
+            <th>類型</th>
+            <th>聯絡人</th>
+            <th>摘要</th>
+            <th>狀態</th>
+            <th>操作</th>
+          </tr></thead>
+          <tbody>
+          ${filtered.length===0
+            ? `<tr><td colspan="6"><div class="empty"><div class="empty-icon">📥</div><p>目前沒有洽詢紀錄</p></div></td></tr>`
+            : rows}
+          </tbody>
+        </table>
+      </div>
+    </div>`;
+}
+
+// 詳細視窗:看所有欄位 + 改狀態 + 內部備註 + 指派
+window.modalViewInquiry = async function(id) {
+  const rec = (state.data.inquiries||[]).find(r => r.id === id);
+  if (!rec) { showToast('找不到紀錄', 'error'); return; }
+  const sub = INQ_SUBTYPE[rec.subtype];
+  const users = state.data.users || [];
+  const fd = rec.form_data || {};
+  const rows = Object.entries(fd).map(([k,v]) => {
+    let display = v;
+    if (Array.isArray(v)) display = v.join('、');
+    else if (typeof v === 'object' && v) display = JSON.stringify(v);
+    return `<tr>
+      <td style="padding:6px 10px;font-size:12px;color:var(--muted);white-space:nowrap">${k}</td>
+      <td style="padding:6px 10px;font-size:13px">${display||'—'}</td>
+    </tr>`;
+  }).join('');
+  const atts = Array.isArray(rec.attachments) ? rec.attachments : [];
+
+  showModal('合作洽詢詳細', `
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>類型</label>
+        <div style="font-size:13px;padding:8px 10px;background:#f5f5f5;border-radius:6px">${sub?.label || rec.subtype}</div>
+      </div>
+      <div class="form-group"><label>狀態</label>
+        <select class="form-control" id="inq-status">
+          ${INQ_STATUS.map(s => `<option ${s===rec.status?'selected':''}>${s}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)">👤 聯絡人</div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>姓名</label><div>${rec.contact_name || '—'}</div></div>
+      <div class="form-group"><label>公司</label><div>${rec.company || '—'}</div></div>
+      <div class="form-group"><label>職稱</label><div>${rec.title || '—'}</div></div>
+      <div class="form-group"><label>偏好聯絡</label><div>${rec.preferred_channel || '—'}</div></div>
+      <div class="form-group"><label>Email</label><div><a href="mailto:${rec.email}" style="color:var(--accent)">${rec.email || '—'}</a></div></div>
+      <div class="form-group"><label>電話</label><div>${rec.phone ? `<a href="tel:${rec.phone}" style="color:var(--accent)">${rec.phone}</a>` : '—'}</div></div>
+      <div class="form-group"><label>LINE ID</label><div>${rec.line_id || '—'}</div></div>
+    </div>
+
+    <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)">📝 洽詢內容</div>
+    ${rows ? `<table style="width:100%;border-collapse:collapse">${rows}</table>` : '<div style="color:var(--muted);font-size:13px">無其他資料</div>'}
+
+    ${atts.length ? `
+      <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)">📎 附件</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        ${atts.map(a => `<a href="${a.url}" target="_blank" style="display:flex;align-items:center;gap:8px;padding:6px 10px;background:#f0fafa;border-radius:6px;color:var(--accent);font-size:12px">📎 ${a.name||'附件'}</a>`).join('')}
+      </div>` : ''}
+
+    <div class="form-group" style="margin-top:14px">
+      <label>指派給</label>
+      <select class="form-control" id="inq-assignee">
+        <option value="">— 未指派 —</option>
+        ${users.map(u => `<option value="${u.id}" ${rec.assigned_to===u.id?'selected':''}>${u.name}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group">
+      <label>內部備註</label>
+      <textarea class="form-control" id="inq-note" rows="3">${(rec.note||'').replace(/</g,'&lt;')}</textarea>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">
+      建立:${rec.created_at ? new Date(rec.created_at).toLocaleString('zh-TW') : '—'}
+      ${rec.responded_at ? ` · 首次回覆:${new Date(rec.responded_at).toLocaleString('zh-TW')}` : ''}
+    </div>
+  `, [
+    ...(!rec.cs_record_id ? [{ label:'🔗 開客服單', onclick: () => { window._inqCreateCS(rec.id); document.getElementById('modal-overlay')?.remove(); } }] : []),
+    { label:'儲存', primary:true, onclick: async () => {
+      const newStatus = document.getElementById('inq-status').value;
+      const patch = {
+        status: newStatus,
+        assigned_to: document.getElementById('inq-assignee').value || null,
+        note: document.getElementById('inq-note').value.trim() || null,
+        updated_at: new Date().toISOString(),
+      };
+      // 首次「已回覆」時記錄 responded_at
+      if (!rec.responded_at && newStatus !== '未處理') patch.responded_at = new Date().toISOString();
+      const { error } = await db.from('collaboration_inquiries').update(patch).eq('id', id);
+      if (error) { showToast('儲存失敗:'+error.message, 'error'); return; }
+      showToast('已更新');
+      document.getElementById('modal-overlay')?.remove();
+      await loadInquiries(); renderApp();
+    }},
+    { label:'取消', onclick: () => document.getElementById('modal-overlay')?.remove() },
+  ]);
+};
+
+// 快速改狀態(不開 modal)
+window._inqQuickStatus = async function(id, newStatus) {
+  const rec = (state.data.inquiries||[]).find(r => r.id === id);
+  if (!rec) return;
+  const patch = { status: newStatus, updated_at: new Date().toISOString() };
+  if (!rec.responded_at && newStatus !== '未處理') patch.responded_at = new Date().toISOString();
+  const { error } = await db.from('collaboration_inquiries').update(patch).eq('id', id);
+  if (error) { showToast('更新失敗:'+error.message, 'error'); return; }
+  showToast(`已標記「${newStatus}」`);
+  await loadInquiries(); renderApp();
+};
+
+// 一鍵開客服單
+window._inqCreateCS = async function(id) {
+  const rec = (state.data.inquiries||[]).find(r => r.id === id);
+  if (!rec) return;
+  if (rec.cs_record_id) { showToast('已經有關聯的客服單了', 'info'); return; }
+  const sub = INQ_SUBTYPE[rec.subtype];
+  const catLabel = sub?.label || rec.subtype;
+  const fd = rec.form_data || {};
+  const subject = `[合作洽詢] ${catLabel} · ${rec.company || rec.contact_name}`;
+  const summaryLines = [
+    `類型:${catLabel}`,
+    `聯絡人:${rec.contact_name}${rec.company?` (${rec.company})`:''}`,
+    `Email:${rec.email || '—'} · 電話:${rec.phone || '—'}`,
+    ...Object.entries(fd).map(([k,v]) => `${k}:${Array.isArray(v)?v.join('、'):v}`),
+    rec.note ? `備註:${rec.note}` : '',
+  ].filter(Boolean).join('\n');
+  const in3days = new Date(Date.now()+3*86400000).toISOString().slice(0,10);
+  const { data: csRow, error } = await db.from('cs_records').insert({
+    record_type: '一般客服',
+    platform: '官網-合作洽詢',
+    subject,
+    customer_name: rec.company || rec.contact_name,
+    issue_summary: summaryLines,
+    deadline: in3days,
+    reply_status: '未回覆',
+    created_by: state.user?.id || null,
+  }).select().single();
+  if (error) { showToast('開客服單失敗:'+error.message, 'error'); return; }
+  // 把 cs_record_id 回寫到 inquiry
+  await db.from('collaboration_inquiries').update({ cs_record_id: csRow.id, updated_at: new Date().toISOString() }).eq('id', id);
+  showToast('✅ 已開客服單並關聯');
+  await loadInquiries(); await loadCS(); renderApp();
+};
+
+// 手動新增(內部登記)
+window.modalAddInquiry = function() {
+  const subtypeOptions = Object.entries(INQ_SUBTYPE).map(([k,v]) => `<option value="${k}">${v.label}</option>`).join('');
+  showModal('手動新增合作洽詢', `
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>類型 *</label>
+        <select class="form-control" id="new-inq-subtype">${subtypeOptions}</select>
+      </div>
+      <div class="form-group"><label>狀態</label>
+        <select class="form-control" id="new-inq-status">${INQ_STATUS.map(s=>`<option>${s}</option>`).join('')}</select>
+      </div>
+    </div>
+
+    <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:14px 0 8px;padding-bottom:6px;border-bottom:1px solid var(--border)">👤 聯絡人</div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>姓名 *</label><input class="form-control" id="new-inq-name"></div>
+      <div class="form-group"><label>公司</label><input class="form-control" id="new-inq-company"></div>
+      <div class="form-group"><label>Email *</label><input class="form-control" id="new-inq-email" type="email"></div>
+      <div class="form-group"><label>電話</label><input class="form-control" id="new-inq-phone"></div>
+      <div class="form-group"><label>LINE ID</label><input class="form-control" id="new-inq-line"></div>
+      <div class="form-group"><label>職稱</label><input class="form-control" id="new-inq-title"></div>
+    </div>
+
+    <div class="form-group">
+      <label>洽詢內容摘要</label>
+      <textarea class="form-control" id="new-inq-desc" rows="4" placeholder="想開發什麼商品、預算、期望時間…"></textarea>
+    </div>
+    <div class="form-group">
+      <label>內部備註</label>
+      <textarea class="form-control" id="new-inq-note" rows="2"></textarea>
+    </div>
+  `, [
+    { label:'新增', primary:true, onclick: async () => {
+      const name = document.getElementById('new-inq-name').value.trim();
+      const email = document.getElementById('new-inq-email').value.trim();
+      if (!name) { showToast('請填聯絡人姓名', 'error'); return; }
+      if (!email) { showToast('請填 Email', 'error'); return; }
+      const subtype = document.getElementById('new-inq-subtype').value;
+      const category = INQ_SUBTYPE[subtype]?.cat || 'product_dev';
+      const desc = document.getElementById('new-inq-desc').value.trim();
+      const payload = {
+        category, subtype,
+        status: document.getElementById('new-inq-status').value,
+        contact_name: name,
+        company: document.getElementById('new-inq-company').value.trim() || null,
+        title:   document.getElementById('new-inq-title').value.trim() || null,
+        email,
+        phone:   document.getElementById('new-inq-phone').value.trim() || null,
+        line_id: document.getElementById('new-inq-line').value.trim() || null,
+        form_data: desc ? { description: desc } : {},
+        note:    document.getElementById('new-inq-note').value.trim() || null,
+      };
+      const { error } = await db.from('collaboration_inquiries').insert(payload);
+      if (error) { showToast('新增失敗:'+error.message, 'error'); return; }
+      showToast('✅ 已新增');
+      document.getElementById('modal-overlay')?.remove();
+      await loadInquiries(); renderApp();
+    }},
+    { label:'取消', onclick: () => document.getElementById('modal-overlay')?.remove() },
+  ]);
+};
 
 async function loadRepair() {
   const { data } = await db.from('repair_orders').select('*').order('created_at', { ascending: false });
@@ -1092,6 +1401,7 @@ function renderSidebar() {
     cs: d.cs?.length || 0,
     repair: d.repair?.filter(r => !['已完成','已寄回','取消'].includes(r.status)).length || 0,
     approvals: pendingApprovals || 0,
+    inquiries: (state.data.inquiries||[]).filter(i => i.status === '未處理').length || 0,
   };
 
   const secColors = { '業務追蹤':'#42a5f5','商品管理':'#ab47bc','製作部':'#ffa726','物料管理':'#26a69a','行銷':'#f472b6','財務':'#66bb6a','系統':'#90a4ae' };
@@ -22664,6 +22974,7 @@ const pageRenderers = {
   todos:      renderTodos,
   journal:    renderJournal,
   cs:         renderCS,
+  inquiries:  renderInquiries,
   repair:     renderRepair,
   dev:        renderDev,
   accounting: renderAccounting,
