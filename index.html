@@ -742,11 +742,11 @@ async function loadDashboard() {
   const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
-    db.from('calendar_events')
-      .select('id,title,start_date,end_date,priority,event_type,completed_at,assigned_to,assignee_ids,subtasks')
+    _addCalPrivacyFilter(db.from('calendar_events')
+      .select('id,title,start_date,end_date,priority,event_type,completed_at,assigned_to,assignee_ids,subtasks,is_private,created_by')
       .is('completed_at', null)
       .neq('is_template', true)
-      .or(`assigned_to.eq.${myId},assignee_ids.cs.["${myId}"]`)
+      .or(`assigned_to.eq.${myId},assignee_ids.cs.["${myId}"]`))
       .order('priority')
       .order('start_date'),
     db.from('cs_records').select('*').neq('reply_status','已結案'),
@@ -754,10 +754,10 @@ async function loadDashboard() {
     db.from('dev_projects').select('*').eq('status','進行中'),
     db.from('experience_bookings').select('id').eq('status','待確認').neq('source','人工封鎖'),
     // 團隊過期任務:全員未完成事項(含子任務一起載入,由前端判斷事項或子任務任一過期)
-    db.from('calendar_events')
-      .select('id,title,start_date,end_date,priority,event_type,completed_at,assigned_to,assignee_ids,subtasks')
+    _addCalPrivacyFilter(db.from('calendar_events')
+      .select('id,title,start_date,end_date,priority,event_type,completed_at,assigned_to,assignee_ids,subtasks,is_private,created_by')
       .is('completed_at', null)
-      .neq('is_template', true)
+      .neq('is_template', true))
       .order('end_date')
       .limit(200),
     // 餐費(用於儀表板進度卡片,5號前抓前月、5號後抓當月)
@@ -17687,30 +17687,30 @@ async function loadJournal() {
     db.from('work_journals').select('*').order('date', { ascending: false }).limit(300),
     db.from('profiles').select('id, name, email, role, job_title, journal_template, journal_required').order('name'),
     // 個人近期事項 + 過期事項(指派給自己):未完成且 start_date <= today+1個月 (拿掉 gte today 的限制,讓過期事項一起進來)
-    db.from('calendar_events')
-      .select('id, title, start_date, end_date, event_type, priority, assigned_to, assignee_ids, completed_at, subtasks')
+    _addCalPrivacyFilter(db.from('calendar_events')
+      .select('id, title, start_date, end_date, event_type, priority, assigned_to, assignee_ids, completed_at, subtasks, is_private, created_by')
       .is('completed_at', null)
       .neq('is_template', true)
-      .or(`assigned_to.eq.${myUid},assignee_ids.cs.["${myUid}"]`)
-      .lte('start_date', in14)
+      .or(`assigned_to.eq.${myUid},assignee_ids.cs.["${myUid}"],created_by.eq.${myUid}`)
+      .lte('start_date', in14))
       .order('start_date'),
     // 部門團隊協作事項（多人指派，不限個人）
-    db.from('calendar_events')
-      .select('id, title, start_date, end_date, event_type, priority, assignee_ids, subtasks')
+    _addCalPrivacyFilter(db.from('calendar_events')
+      .select('id, title, start_date, end_date, event_type, priority, assignee_ids, subtasks, is_private, created_by')
       .is('completed_at', null)
       .neq('is_template', true)
       .not('assignee_ids', 'is', null)
       .gte('start_date', today)
-      .lte('start_date', in14)
+      .lte('start_date', in14))
       .order('start_date'),
     // 全員子任務：有未完成子任務的行事曆事項;為了讓「子任務指派給我但主任務不是」的事項也能被撈出,
     // 範圍放寬:不限主任務 assignee,也不限 start_date 必須未來。前端再依日期/指派人篩選顯示。
-    db.from('calendar_events')
-      .select('id, title, start_date, end_date, event_type, priority, assignee_ids, assigned_to, subtasks')
+    _addCalPrivacyFilter(db.from('calendar_events')
+      .select('id, title, start_date, end_date, event_type, priority, assignee_ids, assigned_to, subtasks, is_private, created_by')
       .is('completed_at', null)
       .neq('is_template', true)
       .not('subtasks', 'eq', '[]')
-      .not('subtasks', 'is', null)
+      .not('subtasks', 'is', null))
       .order('start_date')
       .limit(300),
   ]);
@@ -20765,19 +20765,19 @@ async function loadCalendarEvents() {
   const rangeFrom = (() => { const d = new Date(firstOfMonth+'T00:00:00'); d.setDate(d.getDate()-7); return d.toISOString().slice(0,10); })();
   const rangeTo   = (() => { const d = new Date(lastOfMonth+'T00:00:00');  d.setDate(d.getDate()+7); return d.toISOString().slice(0,10); })();
   const sel = '*';
-  const { data, error: e1 } = await db.from('calendar_events')
+  const { data, error: e1 } = await _addCalPrivacyFilter(db.from('calendar_events')
     .select(sel)
     .lte('start_date', rangeTo)
     .gte('end_date', rangeFrom)
-    .neq('is_template', true)
+    .neq('is_template', true))
     .order('start_date');
   if (e1) console.error('calEvents query1 error:', e1.message);
-  const { data: singleDay, error: e2 } = await db.from('calendar_events')
+  const { data: singleDay, error: e2 } = await _addCalPrivacyFilter(db.from('calendar_events')
     .select(sel)
     .gte('start_date', rangeFrom)
     .lte('start_date', rangeTo)
     .is('end_date', null)
-    .neq('is_template', true);
+    .neq('is_template', true));
   if (e2) console.error('calEvents query2 error:', e2.message);
   const all = [...(data||[]), ...(singleDay||[])];
   // dedupe by id
@@ -20805,34 +20805,34 @@ async function loadCalendarEvents() {
   const upFrom = _localToday();
   const upTo = _localDateStr((() => { const d = new Date(upFrom+'T00:00:00'); d.setDate(d.getDate()+14); return d; })());
   // 近期:14 天內任何狀態事項
-  const { data: upRange } = await db.from('calendar_events')
+  const { data: upRange } = await _addCalPrivacyFilter(db.from('calendar_events')
     .select(sel)
     .lte('start_date', upTo)
     .gte('end_date', upFrom)
-    .neq('is_template', true)
+    .neq('is_template', true))
     .order('start_date');
-  const { data: upSingle } = await db.from('calendar_events')
+  const { data: upSingle } = await _addCalPrivacyFilter(db.from('calendar_events')
     .select(sel)
     .gte('start_date', upFrom)
     .lte('start_date', upTo)
     .is('end_date', null)
-    .neq('is_template', true)
+    .neq('is_template', true))
     .order('start_date');
   // 過期:end_date 早於今天且未完成
-  const { data: overdueRange } = await db.from('calendar_events')
+  const { data: overdueRange } = await _addCalPrivacyFilter(db.from('calendar_events')
     .select(sel)
     .lt('end_date', upFrom)
     .is('completed_at', null)
-    .neq('is_template', true)
+    .neq('is_template', true))
     .order('end_date', { ascending: false })
     .limit(50);
   // 子任務驅動:有未完成子任務的事項(無論主任務日期遠或近),前端再篩 due_date
-  const { data: subtaskDriven } = await db.from('calendar_events')
+  const { data: subtaskDriven } = await _addCalPrivacyFilter(db.from('calendar_events')
     .select(sel)
     .is('completed_at', null)
     .neq('is_template', true)
     .not('subtasks', 'eq', '[]')
-    .not('subtasks', 'is', null)
+    .not('subtasks', 'is', null))
     .limit(200);
   // 篩出子任務有近期 due (今天 ~ today+14) 或 已過期 的事項
   const subRelevant = (subtaskDriven||[]).filter(ev => {
@@ -21109,16 +21109,18 @@ function renderCalendar() {
           const subBadge = subs.length > 0
             ? `<span style="font-size:9px;opacity:.75;flex-shrink:0"> ✓${ev.subtasks.filter(s=>s.done).length}/${subs.length}</span>`
             : '';
+          const lockIcon = ev.is_private ? '🔒' : '';
           if (hasTimed) {
             // 有時間：圓點＋文字，整行用分類文字色
             const timeStr = ev.start_time.slice(0,5);
             const txtCol  = isDone ? '#bbb' : t.color;
-            return baseDiv(`${timeStr} ${t.label}-${ev.title}${subs.length?` ✓${ev.subtasks.filter(s=>s.done).length}/${subs.length}`:''}`, `padding:1px 2px;color:${txtCol};${deco}`, onclick);
+            return baseDiv(`${lockIcon}${timeStr} ${t.label}-${ev.title}${subs.length?` ✓${ev.subtasks.filter(s=>s.done).length}/${subs.length}`:''}`, `padding:1px 2px;color:${txtCol};${deco}`, onclick);
           } else {
-            // 整天：色塊
+            // 整天：色塊(私人事件加虛線邊框)
             const bg  = isDone ? '#ebebeb' : t.bg;
             const col = isDone ? '#bbb'    : t.color;
-            return baseDiv(`${t.label}-${ev.title}${subs.length?` ✓${ev.subtasks.filter(s=>s.done).length}/${subs.length}`:''}`, `padding:1px 4px;background:${bg};color:${col};border-radius:3px;${deco}`, onclick);
+            const privateBorder = ev.is_private ? `border:1px dashed ${col};` : '';
+            return baseDiv(`${lockIcon}${t.label}-${ev.title}${subs.length?` ✓${ev.subtasks.filter(s=>s.done).length}/${subs.length}`:''}`, `padding:1px 4px;background:${bg};color:${col};border-radius:3px;${privateBorder}${deco}`, onclick);
           }
         }
       }).join('')}
@@ -21271,7 +21273,7 @@ function renderCalendar() {
               return `<div style="display:flex;align-items:center;gap:10px;padding:10px 12px;border-radius:8px;margin-bottom:6px;background:${isDone?'#f9f9f9':'#fff'};border:1px solid ${isOverdue?'#ffcdd2':isDone?'#eee':'var(--border)'};cursor:pointer;opacity:${isDone?.6:1}" onclick="calViewEvent('${ev.id}')">
                 <div style="flex-shrink:0;font-size:16px">${ps.dot}</div>
                 <div style="flex:1;min-width:0">
-                  <div style="font-size:13px;font-weight:${isDone?400:600};color:${isDone?'#aaa':'var(--text)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isDone?'text-decoration:line-through':''}">${ev.title}</div>
+                  <div style="font-size:13px;font-weight:${isDone?400:600};color:${isDone?'#aaa':'var(--text)'};white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isDone?'text-decoration:line-through':''}">${ev.is_private?'🔒 ':''}${ev.title}</div>
                   <div style="font-size:11px;color:${isOverdue?'#e53935':'var(--muted)'};margin-top:2px">${isOverdue?'⚠ 已逾期 ':''}${ev.start_date}${ev.end_date&&ev.end_date!==ev.start_date?' ～ '+ev.end_date:''}${listNames.length?' · '+listNames.join('/'):''}
                   </div>
                 </div>
@@ -21297,7 +21299,7 @@ function renderCalendar() {
         return `<div class="card" style="margin-bottom:8px;padding:10px 12px;border-left:3px solid ${t.color};cursor:pointer" onclick="calViewEvent('${ev.id}')">
           <div style="display:flex;align-items:center;gap:6px;margin-bottom:3px;min-width:0">
             <span style="font-size:10px;background:${t.bg};color:${t.color};border-radius:3px;padding:1px 5px;font-weight:700;flex-shrink:0">${t.label}</span>
-            <span style="font-size:13px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.title}</span>
+            <span style="font-size:13px;font-weight:600;flex:1;min-width:0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${ev.is_private?'🔒 ':''}${ev.title}</span>
           </div>
           <div style="font-size:11px;color:var(--muted);margin-bottom:${listAssigneeName?'3px':'0'}">${ev.start_date}${isMulti?` ～ ${ev.end_date}`:''}${ev.start_time?` ${ev.start_time.slice(0,5)}${ev.end_time?' ～ '+ev.end_time.slice(0,5):''}`:''}</div>
           ${listAssigneeName?`<div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">👤 ${listAssigneeName}</div>`:''}
@@ -21360,7 +21362,7 @@ async function modalCalEvent(existing=null) {
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
       <div class="form-group">
         <label>分類</label>
-        <select class="form-control" id="cal-type">
+        <select class="form-control" id="cal-type" onchange="window._calOnTypeChange && window._calOnTypeChange(this.value)">
           ${Object.entries(getCalEventTypes()).map(([k,t])=>`<option value="${k}" ${(existing?.event_type||'general')===k?'selected':''}>${t.label}</option>`).join('')}
         </select>
       </div>
@@ -21372,6 +21374,15 @@ async function modalCalEvent(existing=null) {
           <option value="低" ${(existing?.priority||'中')==='低'?'selected':''}>🟢 低</option>
         </select>
       </div>
+    </div>
+
+    <div class="form-group" id="cal-private-wrap" style="display:${(existing?.event_type||'general').toLowerCase()==='leave'?'none':'block'}">
+      <label style="display:flex;align-items:center;gap:10px;cursor:pointer;padding:10px 12px;border-radius:8px;border:1px solid var(--border);background:${existing?.is_private?'#fff3e0':'#fafafa'}" id="cal-private-label">
+        <input type="checkbox" id="cal-is-private" ${existing?.is_private?'checked':''} style="width:18px;height:18px;cursor:pointer"
+          onchange="window._calOnPrivateChange && window._calOnPrivateChange(this.checked)">
+        <span style="font-size:13px;font-weight:600">🔒 只有我看得到(私人事件)</span>
+        <span style="font-size:11px;color:var(--muted);margin-left:auto">勾選後其他人看不到,無法指派他人</span>
+      </label>
     </div>
 
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -21670,15 +21681,24 @@ async function modalCalEvent(existing=null) {
         ? (completedEl.checked ? (existing?.completed_at || new Date().toISOString()) : null)
         : undefined;
 
+      // 私人事件邏輯:請假強制公開,私人事件強制清空指派人員
+      const _evType = document.getElementById('cal-type').value;
+      const _isPrivate = (_evType||'').toLowerCase() === 'leave'
+        ? false
+        : (document.getElementById('cal-is-private')?.checked || false);
+      const _finalAssigneeIds = _isPrivate ? [] : assigneeIds;
+      const _finalAssignedTo  = _isPrivate ? null : assignedTo;
+
       const basePayload = {
         title,
-        event_type: document.getElementById('cal-type').value,
+        event_type: _evType,
         priority: document.getElementById('cal-priority').value,
         event_date: startDate,
         start_date: startDate,
         end_date: endDate >= startDate ? endDate : startDate,
         start_time: startTime,
         end_time: endTime,
+        is_private: _isPrivate,
         description: document.getElementById('cal-desc').innerHTML.trim() || null,
         attachments: (() => {
           const rows = document.querySelectorAll('[id^="cal-att-row-"]');
@@ -21692,9 +21712,9 @@ async function modalCalEvent(existing=null) {
           });
           return atts;
         })(),
-        assigned_to: assignedTo,
-        assignee_ids: assigneeIds,
-        subtasks: (() => {
+        assigned_to: _finalAssignedTo,
+        assignee_ids: _finalAssigneeIds,
+        subtasks: _isPrivate ? [] : (() => {
           const rows = document.querySelectorAll('[id^="cal-sub-row-"]');
           const subs = [];
           rows.forEach(row => {
@@ -21901,6 +21921,42 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
 
 window.modalCalEvent = modalCalEvent;
 
+// 分類變更:請假不允許私人
+window._calOnTypeChange = function(newType) {
+  const wrap = document.getElementById('cal-private-wrap');
+  const cb = document.getElementById('cal-is-private');
+  if (!wrap || !cb) return;
+  if ((newType||'').toLowerCase() === 'leave') {
+    cb.checked = false;
+    window._calOnPrivateChange && window._calOnPrivateChange(false);
+    wrap.style.display = 'none';
+  } else {
+    wrap.style.display = 'block';
+  }
+};
+
+// 勾選私人:清空指派人員 + 禁用指派區塊
+window._calOnPrivateChange = function(isPrivate) {
+  const label = document.getElementById('cal-private-label');
+  if (label) label.style.background = isPrivate ? '#fff3e0' : '#fafafa';
+  const wrap = document.getElementById('cal-assignee-wrap');
+  if (!wrap) return;
+  if (isPrivate) {
+    // 取消所有勾選 + 灰掉整區
+    wrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
+      cb.checked = false;
+      cb.dispatchEvent(new Event('change'));
+    });
+    wrap.style.opacity = '0.4';
+    wrap.style.pointerEvents = 'none';
+    wrap.title = '私人事件不能指派他人';
+  } else {
+    wrap.style.opacity = '';
+    wrap.style.pointerEvents = '';
+    wrap.title = '';
+  }
+};
+
 // 餐費明細彈窗:點儀表板的員工進度條開啟,列出該員工該月發票明細
 window.modalMealDetail = async function(applicantName, ymStr, ymLabel) {
   const _budget = getMealBudgetForEmployee(applicantName);
@@ -21983,7 +22039,7 @@ window._calToggleSubtask = async function(evId, subIdx, checked) {
   // 找事項:先看本地快取,沒有就直接從 DB 抓一筆
   let ev = (state.data.calEvents||[]).find(e=>e.id===evId);
   if (!ev) {
-    const { data } = await db.from('calendar_events').select('*').eq('id', evId).single();
+    const { data } = await _addCalPrivacyFilter(db.from('calendar_events').select('*').eq('id', evId)).maybeSingle();
     ev = data;
   }
   if (!ev || !Array.isArray(ev.subtasks)) { showToast('找不到事項', 'error'); return; }
@@ -22133,7 +22189,7 @@ window.calViewEvent = async function(id) {
   let ev = (state.data.calEvents||[]).find(e=>e.id===id);
   if (!ev) {
     // 首頁待辦等情境下 calEvents 尚未載入此事項，直接從資料庫補抓完整資料
-    const { data } = await db.from('calendar_events').select('*').eq('id', id).single();
+    const { data } = await _addCalPrivacyFilter(db.from('calendar_events').select('*').eq('id', id)).maybeSingle();
     ev = data;
   }
   if (!ev) return;
