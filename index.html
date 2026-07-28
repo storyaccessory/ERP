@@ -1381,6 +1381,23 @@ function effectiveUserId() {
 window.effectiveProfile = effectiveProfile;
 window.effectiveUserId  = effectiveUserId;
 
+// ── 行事曆隱私過濾 helper ──────────────────────────
+// 老闆(admin)可以看全部私人事件;其他人只看自己建的私人事件
+function _isBossForCalPrivacy() {
+  const p = state.profile;
+  const email = p?.email || state.user?.email || '';
+  return p?.role === 'admin' || email === 'cailing0516@gmail.com';
+}
+// 套用到 supabase 查詢:非私人 OR 我建立的
+function _addCalPrivacyFilter(q) {
+  if (_isBossForCalPrivacy()) return q;
+  const myId = state.user?.id;
+  if (!myId) return q.eq('is_private', false);
+  return q.or(`is_private.eq.false,created_by.eq.${myId}`);
+}
+window._addCalPrivacyFilter = _addCalPrivacyFilter;
+window._isBossForCalPrivacy = _isBossForCalPrivacy;
+
 function renderSidebar() {
   const role = state.profile?.role;
 
