@@ -2461,6 +2461,34 @@ async function modalProduct(productId = null) {
 
   // 初始化規格欄位（根據已選品類切換鍊長/戒圍）
   setTimeout(pmUpdateSpecField, 80);
+
+  // 編輯模式:載入這個商品的售價歷程
+  if (productId) {
+    setTimeout(async () => {
+      const { data: hist } = await db.from('product_price_history')
+        .select('*')
+        .eq('product_id', productId)
+        .order('changed_at', { ascending: false })
+        .limit(20);
+      if (!hist || !hist.length) return;
+      const wrap = document.getElementById('pm-history-wrap');
+      const list = document.getElementById('pm-history-list');
+      if (!wrap || !list) return;
+      wrap.style.display = 'block';
+      list.innerHTML = hist.map((h,i) => {
+        const dt = new Date(h.changed_at).toLocaleDateString('zh-TW');
+        const sym = h.currency === 'CNY' ? '¥' : '$';
+        const priceTxt = h.retail_price != null ? `${sym}${h.retail_price.toLocaleString()}` : '—';
+        const isLatest = i === 0;
+        return `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:${i<hist.length-1?'1px solid #ffe082':'none'};font-size:12px">
+          <span style="color:var(--muted);white-space:nowrap;width:74px">${dt}</span>
+          <span style="width:60px;color:#666">${h.changed_by_name||'—'}</span>
+          <span style="font-weight:${isLatest?700:500};color:${isLatest?'#e65100':'#444'};min-width:70px">${priceTxt}</span>
+          <span style="color:var(--muted);flex:1">${h.note||''}</span>
+        </div>`;
+      }).join('');
+    }, 150);
+  }
 }
 
 // ── IP 樹狀輔助函數 ──
