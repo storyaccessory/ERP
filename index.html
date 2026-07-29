@@ -3322,8 +3322,10 @@ window.deletePriceHistory = async function(historyId, productId) {
 // 例:AP1R2402W09 → 角色 AP, 品類 R(戒指), 電鍍 W(白K), 尺寸 09
 // ─────────────────────────────────────────────
 window.parseSku = function(sku) {
-  if (!sku || sku.length < 8) return null;
+  if (!sku) return null;
   const s = sku.trim().toUpperCase();
+  if (s.length < 6) return null;
+
   // 品類代碼:N=項鍊、B=手鍊、R=戒指、E=耳環
   const CAT_MAP = {
     'N': '項鍊', 'B': '手鍊', 'R': '戒指', 'E': '耳環',
@@ -3336,25 +3338,39 @@ window.parseSku = function(sku) {
     'S': '純銀不電鍍', 'D': '素銀',
   };
 
-  const m = s.match(/^([A-Z]{2,4})(\d)([A-Z])(\d{4})([A-Z0-9]{0,3})(\d{0,3})$/);
-  if (!m) return null;
-  const [, roleCode, version, catCode, seq, platingCode, sizeCode] = m;
+  // ─── 位置解析(依實務規則)───
+  // 品類代碼:通常在角色代碼後(位置 3,若角色 2 字);找第一個「單字母被夾在數字中」的位置
+  //   例:AP1R2402W09 → 位置 3 = 'R'
+  //   例:LN1R2404-1-00 → 位置 3 = 'R'
+  let catCode = '';
+  // 從第 3 位開始找第一個英文字母(前面是數字,通常是品類)
+  const catMatch = s.match(/^[A-Z]{2,4}\d([A-Z])/);
+  if (catMatch) catCode = catMatch[1];
 
-  // 電鍍名稱:優先從 settings,沒有再用 fallback
+  // 電鍍代碼:倒數第 3 碼(常見規則)
+  //   例:AP1R2402W09 → s[length-3] = 'W'
+  //   例:AP1B2106D15 → s[length-3] = 'D'
+  //   例:AP1E2103999 → s[length-3] = '9'(不是字母 → 沒有電鍍色)
+  let platingCode = '';
+  const cand = s.charAt(s.length - 3);
+  if (/[A-Z]/.test(cand)) platingCode = cand;
+
+  // 電鍍名稱
   let platingName = null;
   if (platingCode) {
     platingName = settingsMap[platingCode] || FALLBACK_PLATING[platingCode] || null;
   }
 
+  // 尺寸(最後 2 碼)
+  const sizeCode = s.slice(-2);
+
   return {
-    role_code: roleCode,
-    version,
+    role_code: s.match(/^[A-Z]+/)?.[0] || '',
     cat_code: catCode,
-    category_name: CAT_MAP[catCode] || null,
-    seq,
-    plating_code: platingCode || '',
+    category_name: catCode ? (CAT_MAP[catCode] || null) : null,
+    plating_code: platingCode,
     plating_name: platingName,
-    size_code: sizeCode || '',
+    size_code: sizeCode,
   };
 };
 
