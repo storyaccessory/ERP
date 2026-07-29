@@ -21949,6 +21949,11 @@ async function modalCalEvent(existing=null) {
   // 啟用子任務拖曳排序
   window._bindCalSubtaskDrag();
 
+  // 打開既有私人事件:套用視覺狀態(灰掉指派區、確保自己有勾)
+  if (existing?.is_private) {
+    setTimeout(() => window._calOnPrivateChange && window._calOnPrivateChange(true), 50);
+  }
+
   // 重新設定週期模式：自動展開週期設定區
   if (existing?._rebuildRecur) {
     setTimeout(() => {
