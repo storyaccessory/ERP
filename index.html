@@ -739,7 +739,7 @@ async function loadDashboard() {
   const _mealYmStr = _mealYmDate.getFullYear().toString() + String(_mealYmDate.getMonth()+1).padStart(2,'0');
   const _mealYmLabel = `${_mealYmDate.getFullYear()}年 ${_mealYmDate.getMonth()+1} 月`;
   const _thisYmStr = _mealYmStr; // 保留變數名供其他地方參考
-  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors] = await Promise.all([
+  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors, myApprovals] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     _addCalPrivacyFilter(db.from('calendar_events')
@@ -768,6 +768,10 @@ async function loadDashboard() {
     db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month'),
     // 廠商(客戶名稱對應 PROJ_RAW key 用)
     db.from('vendors').select('name,company_name'),
+    // 我的送審中 & 最近核准/退回(儀表板卡片用)
+    myId
+      ? db.from('approval_requests').select('id,request_type,item_type,item_name,status,created_at,review_note,reviewed_at').eq('requested_by', myId).order('created_at',{ascending:false}).limit(20)
+      : Promise.resolve({data:[]}),
   ]);
   // 把最新的 sales_daily 寫進 salesCache,確保首頁業績圖表的數字跟業績儀表板一致
   if (!state.data.salesCache) state.data.salesCache = {};
@@ -800,6 +804,7 @@ async function loadDashboard() {
     bookingPending: (bookingPending.data||[]).length,
     overdue: overdueAll.data || [],
     mealThis: mealThis.data || [],
+    myApprovals: myApprovals?.data || [],
     ym: _thisYmStr,
     mealYmLabel: _mealYmLabel,
     today,
@@ -1366,6 +1371,7 @@ function canAccessPage(pageKey) {
   if (pageKey === 'settings') return true;
   if (pageKey === 'journal')  return true;  // 工作日誌全員可見
   if (pageKey === 'sales')    return true;  // 業績儀表板全員可見
+  if (pageKey === 'approvals') return true; // 審核管理:老闆看全部 + 審批,員工看自己送的
   if (pageKey === 'users') return role === 'admin' || adminEmails.includes(email);
   // 沒有任何 permissions 設定時，顯示全部（避免鎖死）
   if (!perms || perms.length === 0) return true;
@@ -1895,6 +1901,34 @@ function renderDashboard() {
           }).join('')
         }
       </div>
+
+      <!-- 我的送審狀態 -->
+      ${(() => {
+        const myAppr = d.myApprovals || [];
+        const pending = myAppr.filter(a => a.status === 'pending');
+        const recent = myAppr.filter(a => a.status !== 'pending').slice(0, 5);
+        if (myAppr.length === 0) return '';
+        const typeLbl = { calendar_edit:'行事曆修改', calendar_delete:'行事曆刪除', price_change:'價格變動', stock_adjust:'庫存調整', casting_restock:'鑄件補貨單' };
+        const statusStyle = { pending:{bg:'#fff8e1',color:'#f57c00',icon:'⏳',label:'待審核'}, approved:{bg:'#e8f5e9',color:'#2e7d32',icon:'✅',label:'已核准'}, rejected:{bg:'#ffebee',color:'#c62828',icon:'❌',label:'已退回'} };
+        const rowHtml = (a) => {
+          const st = statusStyle[a.status] || statusStyle.pending;
+          const dateStr = new Date(a.created_at).toLocaleDateString('zh-TW',{month:'2-digit',day:'2-digit'});
+          return `<div style="display:flex;align-items:center;gap:8px;padding:6px 0;border-bottom:1px solid #f5f5f5;font-size:12px;cursor:pointer" onclick="window.state.currentPage='approvals';renderApp()">
+            <span style="color:var(--muted);font-size:11px;flex-shrink:0;width:34px">${dateStr}</span>
+            <span style="background:${st.bg};color:${st.color};border-radius:3px;padding:1px 6px;font-size:10px;font-weight:600;flex-shrink:0">${st.icon} ${st.label}</span>
+            <span style="flex:1;min-width:0;color:#444;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${typeLbl[a.request_type]||a.request_type} · ${a.item_name||'—'}</span>
+            ${a.review_note ? `<span style="font-size:10px;color:${st.color};flex-shrink:0" title="${a.review_note.replace(/"/g,'&quot;')}">💬</span>` : ''}
+          </div>`;
+        };
+        return `<div class="card" style="grid-column:span 1">
+          <div class="section-title" style="display:flex;align-items:center;justify-content:space-between">
+            <span>📮 我的送審狀態</span>
+            ${pending.length > 0 ? `<span style="background:var(--danger);color:#fff;border-radius:10px;font-size:11px;padding:1px 7px;font-weight:600">${pending.length} 待審</span>` : ''}
+          </div>
+          ${pending.length ? `<div style="font-size:11px;color:#f57c00;font-weight:600;margin-bottom:6px">⏳ 待審核 ${pending.length} 件</div>${pending.map(rowHtml).join('')}` : ''}
+          ${recent.length ? `<div style="font-size:11px;color:var(--muted);font-weight:600;margin-top:${pending.length?'10px':'0'};margin-bottom:4px">近期結果</div>${recent.map(rowHtml).join('')}` : ''}
+        </div>`;
+      })()}
     </div>`;
 }
 
@@ -3057,10 +3091,30 @@ async function modalEditCasting(id) {
 
   await loadIPTree();
 
+  // 若編輯戒指鑄件,先抽出尺寸
+  const _existingRingSize = c?.name ? (c.name.match(/_#(\d+)$/)?.[1] || '') : '';
+  const _existingBaseName = c?.name ? c.name.replace(/_#\d+$/, '') : '';
+
   showModal(c ? '編輯鑄件' : '新增鑄件', `
     <div class="form-group">
       <label>鑄件名稱 <span style="color:var(--danger)">*</span></label>
-      <input class="form-control" id="cs-name" value="${c?.name||''}" placeholder="例：貝克鴨站姿主墬">
+      <input class="form-control" id="cs-name" value="${_existingBaseName||''}" placeholder="例:AP-經典晶鑽項鍊"
+        oninput="window._csNameOnInput && window._csNameOnInput(this.value)">
+      <div id="cs-name-hint" style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.6">
+        <strong style="color:var(--accent-dark)">格式:</strong> <code style="background:#f5f5f5;padding:1px 5px;border-radius:3px">角色代碼-品名</code>
+        <span style="color:#bbb">|</span>
+        角色代碼 2〜3 個大寫英文字母(例 AP、KU、KL、EP)
+        <br>
+        <span style="color:#f57c00">✅ 正確:</span> <code>AP-經典晶鑽項鍊</code>、<code>KU-戒指_#12</code>&nbsp;&nbsp;
+        <span style="color:#c62828">❌ 錯誤:</span> <code>ap-項鍊</code>(小寫)、<code>經典項鍊</code>(無代碼)
+      </div>
+      <!-- 戒指尺寸輔助(名稱含「戒指」或「戒環」時顯示) -->
+      <div id="cs-ring-wrap" style="display:${(_existingBaseName||'').match(/戒指|戒環/)?'flex':'none'};align-items:center;gap:10px;padding:8px 12px;margin-top:8px;background:#fff8e1;border-radius:6px;border:1px solid #ffe082">
+        <span style="font-size:13px;font-weight:600;color:#e65100;flex-shrink:0">💍 戒指尺寸</span>
+        <input class="form-control" id="cs-ring-size" type="number" min="1" max="30" value="${_existingRingSize}"
+          placeholder="例:9、12" style="width:100px" oninput="window._csRingSizeChange && window._csRingSizeChange()">
+        <span style="font-size:12px;color:var(--muted)">→ 最終名稱會自動加上 <code id="cs-ring-preview" style="background:#fff;padding:1px 5px;border-radius:3px;color:#e65100">_#${_existingRingSize||'N'}</code></span>
+      </div>
     </div>
 
     <!-- IP / 系列 樹狀選擇（與商品相同）-->
@@ -3144,8 +3198,49 @@ async function modalEditCasting(id) {
     </div>
   `, [
     { label: id ? '儲存' : '新增', primary: true, onclick: async () => {
-      const name = document.getElementById('cs-name').value.trim();
-      if (!name) { showToast('請填鑄件名稱','error'); return; }
+      let baseName = document.getElementById('cs-name').value.trim();
+      if (!baseName) { showToast('請填鑄件名稱','error'); return; }
+
+      // ─── 名稱標準化:全形→半形、多空白合併、去頭尾空白 ───
+      baseName = baseName
+        .replace(/[  ]+/g, ' ')  // 全形/多重空白合併為單一半形
+        .replace(/\s*-\s*/g, '-') // - 前後空白去掉
+        .replace(/\s*_\s*/g, '_') // _ 前後空白去掉
+        .trim();
+
+      // ─── B: 格式驗證 ───
+      // 檢查:必須是「代碼-名稱」格式,代碼是 2〜3 個大寫英文字母(允許數字混合但需大寫)
+      const formatRE = /^[A-Z][A-Z0-9]{1,2}-.+/;
+      if (!formatRE.test(baseName)) {
+        showToast('名稱格式錯誤:必須是「代碼-名稱」,代碼 2〜3 個大寫英文字母(例 AP-經典項鍊、KU-戒指)', 'error');
+        return;
+      }
+
+      // ─── D: 戒指尺寸自動組合 ───
+      let name = baseName;
+      const ringSizeEl = document.getElementById('cs-ring-size');
+      const isRing = /戒指|戒環/.test(baseName);
+      if (isRing) {
+        const size = ringSizeEl?.value?.trim() || '';
+        if (!size) {
+          showToast('鑄件名稱含「戒指/戒環」,請填寫戒指尺寸', 'error');
+          ringSizeEl?.focus();
+          return;
+        }
+        // 去掉舊 _#N 再重新組合
+        name = baseName.replace(/_#\d+$/, '') + `_#${size}`;
+      }
+
+      // ─── C: 防重複檢查(同名鑄件不能存在)───
+      const existingCastings = state.data.castings || [];
+      const dup = existingCastings.find(x =>
+        (x.name || '').trim() === name && x.id !== id
+      );
+      if (dup) {
+        showToast(`已有相同名稱的鑄件「${name}」,請換一個名字`, 'error');
+        return;
+      }
+
       const seriesId = document.getElementById('cs-series-id').value || null;
       // 從系列反查 ip_id
       const seriesObj = (state.data.series||[]).find(s=>s.id===seriesId);
@@ -16470,37 +16565,60 @@ function renderApprovals() {
     const statusColor = { pending:'#f57c00', approved:'#2e7d32', rejected:'#c62828' };
     const statusLabel = { pending:'待審核', approved:'已核准', rejected:'已退回' };
 
+    // 申請人姓名(從 profiles 對照)
+    const _reqName = r.requested_by
+      ? ((state.data.users||[]).find(u=>u.id===r.requested_by)?.name || '—')
+      : '—';
+
     return `
     <tr>
       <td>${new Date(r.created_at).toLocaleDateString('zh-TW')}</td>
+      <td style="font-size:12px;font-weight:600;color:var(--text)">${_reqName}</td>
       <td><span style="background:#e8f5f4;color:#00695c;border-radius:4px;padding:2px 8px;font-size:12px">${typeLabel[r.request_type]||r.request_type}</span></td>
       <td><span style="color:var(--muted);font-size:12px">${itemLabel[r.item_type]||r.item_type}</span> ${r.item_name||'—'}</td>
       <td style="font-size:13px;color:#444">${chgText}</td>
       <td style="font-size:12px;color:var(--muted)">${r.note||'—'}</td>
       <td><span style="background:${statusColor[r.status]||'#90a4ae'}22;color:${statusColor[r.status]||'#90a4ae'};border-radius:4px;padding:2px 8px;font-size:12px;font-weight:600">${statusLabel[r.status]||r.status}</span></td>
-      ${r.status==='pending' ? `
+      ${r.status==='pending' && _isBossForCalPrivacy() ? `
       <td style="white-space:nowrap">
         <button class="btn-table" style="background:#e0f2f1;color:#2e7d32;margin-right:4px" data-action="approve-request" data-id="${r.id}">核准</button>
         <button class="btn-table" style="background:#ffebee;color:#c62828" data-action="reject-request" data-id="${r.id}">退回</button>
-      </td>` : `<td style="font-size:12px;color:var(--muted)">${r.review_note||'—'}</td>`}
+      </td>` : `<td style="font-size:12px;color:var(--muted)">${r.review_note||(r.status==='pending'?'⏳ 等待審核':'—')}</td>`}
     </tr>`;
   }).join('');
 
+  // 非老闆:標題提醒「只顯示自己送的」
+  const _isBoss = _isBossForCalPrivacy();
+  const scopeHint = _isBoss ? '' : `<div style="background:#fff8e1;border-left:3px solid #f57c00;padding:8px 12px;font-size:12px;color:#666;margin-bottom:12px;border-radius:4px">👤 此頁只顯示您自己送出的申請</div>`;
+
   return `
+  ${scopeHint}
   <div class="tabs" style="margin-bottom:16px">
     ${tabs.map(t=>`<div class="tab ${tab===t.key?'active':''}" data-approvals-tab="${t.key}">${t.label}${t.key==='pending'&&list.filter(x=>x.status==='pending').length>0?` <span style="background:var(--danger);color:#fff;border-radius:10px;font-size:11px;padding:1px 6px;margin-left:4px">${list.filter(x=>x.status==='pending').length}</span>`:''}</div>`).join('')}
   </div>
   ${filtered.length === 0 ? '<div class="empty"><p>暫無資料</p></div>' : `
   <table class="data-table">
     <thead><tr>
-      <th>申請日期</th><th>類型</th><th>對象</th><th>變更內容</th><th>說明</th><th>狀態</th><th>操作 / 備註</th>
+      <th>申請日期</th><th>申請人</th><th>類型</th><th>對象</th><th>變更內容</th><th>說明</th><th>狀態</th><th>操作 / 備註</th>
     </tr></thead>
     <tbody>${rows}</tbody>
   </table>`}`;
 }
 
 async function loadApprovals() {
-  const { data } = await db.from('approval_requests').select('*').order('created_at', { ascending: false });
+  let q = db.from('approval_requests').select('*').order('created_at', { ascending: false });
+  // 非老闆:只看自己送的申請
+  if (!_isBossForCalPrivacy()) {
+    const myId = state.user?.id;
+    if (myId) q = q.eq('requested_by', myId);
+    else q = q.eq('requested_by', '__none__'); // 保守:未登入不回傳
+  }
+  // 確保人員資料有載入(用於顯示申請人姓名)
+  if (!state.data.users?.length) {
+    const { data: uData } = await db.from('profiles').select('id, name, role, department').order('name');
+    state.data.users = uData || [];
+  }
+  const { data } = await q;
   state.data.approvalRequests = data || [];
 }
 
