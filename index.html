@@ -2020,6 +2020,7 @@ function renderProducts() {
       <button class="btn btn-primary" id="add-product-btn">+ 新增商品</button>
       <button class="btn btn-outline" onclick="modalImportProducts()" style="background:#e8f5f4;color:#00695c">↑ 批次匯入</button>
       <button class="btn btn-outline" onclick="modalRetroFillFromSku()" style="background:#fff8e1;color:#e65100" title="從貨號自動補品類/顏色">🔧 補填品類/顏色</button>
+      <button class="btn btn-outline" onclick="modalRetroFillDefaultParts()" style="background:#e3f2fd;color:#1565c0" title="依分類補預設零件">🔩 補預設零件</button>
       <button class="btn btn-outline" id="export-products-btn">↓ 匯出 CSV</button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px">顯示 ${filtered.length} / ${products.length} 件</div>
@@ -2169,6 +2170,103 @@ window.pmUpdateSpecField = function() {
     if (ringInp)   ringInp.style.display   = 'none';
     // 如果有選鍊子零件，自動帶入
     if (hasChain) setTimeout(pmAutoChainLength, 50);
+  }
+
+  // ─── 分類切換自動帶預設零件(項鍊/手鍊)───
+  setTimeout(() => pmApplyDefaultParts(catName), 60);
+};
+
+// ─── 分類預設零件對照 ───
+// 項鍊:圓扣頭 x1
+// 手鍊:圓扣頭 x1 + ST圓牌延長鍊 _ 1"素銀 x1
+// 耳環:耳針(光身)素銀 0.75x11mm x2 + 不鏽鋼耳後扣 x2
+window.PART_DEFAULTS_BY_CAT = [
+  {
+    match: /項鍊|頸鍊|毛衣鍊/,
+    parts: [
+      { nameKw: '圓扣頭', qty: 1 },
+    ],
+  },
+  {
+    match: /手鍊|手環/,
+    parts: [
+      { nameKw: '圓扣頭', qty: 1 },
+      { nameKw: 'ST圓牌延長鍊', spec: '1"素銀', qty: 1 },
+    ],
+  },
+  {
+    match: /耳環|耳夾|耳針|耳扣/,
+    parts: [
+      { nameKw: '耳針', spec: '0.75x11mm', qty: 2 },
+      { nameKw: '不鏽鋼耳後扣', qty: 2 },
+    ],
+  },
+];
+
+// 找零件:優先完全比對 name + spec,不行就用關鍵字模糊
+// 為了容錯:全形/半形引號、空格、雙引號都當作等價
+function _norm(s) {
+  return (s||'').replace(/["""'']/g,'').replace(/\s+/g,'').toLowerCase();
+}
+function _findPartByKeyword(nameKw, spec) {
+  const parts = state.data.parts || [];
+  const nKw = _norm(nameKw);
+  const sKw = spec ? _norm(spec) : '';
+
+  // 有 spec 條件 → 名稱含 nameKw 且 spec 相符(容錯比對)
+  if (sKw) {
+    const exact = parts.find(p =>
+      _norm(p.name).includes(nKw) && _norm(p.spec).includes(sKw)
+    );
+    if (exact) return exact;
+    // 退而求其次:name 含 nameKw + spec 相符 兩者其中之一在名稱裡(有些零件把規格寫在名字裡)
+    const inName = parts.find(p =>
+      _norm(p.name).includes(nKw) && _norm(p.name).includes(sKw)
+    );
+    if (inName) return inName;
+  }
+  // 只用 name 關鍵字
+  return parts.find(p => _norm(p.name).includes(nKw));
+}
+
+// 依分類自動帶預設零件到 BOM(只補缺的,不會重複)
+window.pmApplyDefaultParts = function(catName) {
+  if (!catName) return;
+  const rule = window.PART_DEFAULTS_BY_CAT.find(r => r.match.test(catName));
+  if (!rule) return;
+
+  // 讀取現有 BOM 的零件 id
+  const existingIds = new Set();
+  document.querySelectorAll('#part-bom-list .bom-row input[type="hidden"]').forEach(el => {
+    if (el.value) existingIds.add(el.value);
+  });
+
+  const notFound = [];
+  rule.parts.forEach(spec => {
+    const part = _findPartByKeyword(spec.nameKw, spec.spec);
+    if (!part) { notFound.push(spec.nameKw + (spec.spec?' _ '+spec.spec:'')); return; }
+    if (existingIds.has(part.id)) return; // 已存在,跳過
+
+    // 新增一列到 BOM
+    window.addPartBomRow();
+    // 取最後一列填入
+    const rows = document.querySelectorAll('#part-bom-list .bom-row');
+    const lastRow = rows[rows.length - 1];
+    if (!lastRow) return;
+    const searchInp = lastRow.querySelector('.bom-search-input');
+    const idInp = lastRow.querySelector('input[type="hidden"]');
+    const qtyInp = lastRow.querySelector('input[type="number"]');
+    if (searchInp) searchInp.value = part.name + (part.spec ? ' - ' + part.spec : '');
+    if (idInp) idInp.value = part.id;
+    if (qtyInp) qtyInp.value = spec.qty;
+    lastRow.style.transition = 'background .8s';
+    lastRow.style.background = '#e8f5e9';
+    setTimeout(() => lastRow.style.background = '', 800);
+  });
+
+  if (notFound.length) {
+    console.warn('預設零件找不到:', notFound);
+    showToast(`⚠ 系統中找不到:${notFound.join('、')}(請先在零件管理新增)`, 'warn', 5000);
   }
 };
 
@@ -3039,6 +3137,106 @@ async function saveProduct(productId) {
 function closeSidePanel() {
   document.getElementById('side-panel-root')?.remove();
 }
+
+// ─────────────────────────────────────────────
+// 批次補填分類預設零件(項鍊→圓扣頭;手鍊→圓扣頭+ST圓牌延長鍊)
+// ─────────────────────────────────────────────
+window.modalRetroFillDefaultParts = function() {
+  const products = state.data.products || [];
+  const cats = state.data.categories || [];
+  const rules = window.PART_DEFAULTS_BY_CAT || [];
+
+  // 掃描:每個商品應該有的預設零件,還沒加的就列出
+  const missing = []; // [{ product, part, qty }]
+  const notFoundParts = new Set();
+
+  products.forEach(p => {
+    const catName = cats.find(c => c.id === p.category_id)?.name || '';
+    if (!catName) return;
+    const rule = rules.find(r => r.match.test(catName));
+    if (!rule) return;
+
+    const existingPartIds = new Set((p.product_parts||[]).map(pp => pp.part_id));
+
+    rule.parts.forEach(spec => {
+      const part = _findPartByKeyword(spec.nameKw, spec.spec);
+      if (!part) {
+        notFoundParts.add(spec.nameKw + (spec.spec?' _ '+spec.spec:''));
+        return;
+      }
+      if (existingPartIds.has(part.id)) return; // 已有,略過
+      missing.push({ product: p, part, qty: spec.qty });
+    });
+  });
+
+  if (notFoundParts.size) {
+    showToast(`⚠ 找不到零件:${[...notFoundParts].join('、')} — 請先建立`, 'error', 6000);
+    return;
+  }
+
+  if (!missing.length) {
+    showToast('✅ 所有項鍊/手鍊都已有預設零件,無需補填', 'success');
+    return;
+  }
+
+  // 分組顯示(每個商品要補幾個)
+  const byProduct = {};
+  missing.forEach(m => {
+    if (!byProduct[m.product.id]) byProduct[m.product.id] = { product: m.product, parts: [] };
+    byProduct[m.product.id].parts.push(m);
+  });
+  const productGroups = Object.values(byProduct);
+
+  const preview = productGroups.slice(0, 30).map(g => `
+    <tr style="border-bottom:1px solid #f0f0f0">
+      <td style="padding:5px 8px;font-size:12px">${g.product.name}</td>
+      <td style="padding:5px 8px;font-size:11px;color:var(--success)">
+        ${g.parts.map(m => `+${m.part.name}${m.part.spec?' _ '+m.part.spec:''} ×${m.qty}`).join('<br>')}
+      </td>
+    </tr>
+  `).join('');
+
+  showModal(`🔩 補預設零件 · ${productGroups.length} 件商品`, `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+      系統會依<strong>分類規則</strong>幫既有商品補上預設零件:<br>
+      · <strong>項鍊/頸鍊</strong> → 圓扣頭 x1<br>
+      · <strong>手鍊/手環</strong> → 圓扣頭 x1 + ST圓牌延長鍊_1"素銀 x1<br>
+      · <strong>耳環/耳夾</strong> → 耳針_0.75x11mm x2 + 不鏽鋼耳後扣 x2<br>
+      <strong style="color:#e65100">已有的不會重複加</strong>,只補缺的。
+    </div>
+    <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#f5f5f5;color:var(--muted);font-size:11px">
+          <th style="text-align:left;padding:6px 8px">商品</th>
+          <th style="text-align:left;padding:6px 8px">要補的零件</th>
+        </tr></thead>
+        <tbody>${preview}</tbody>
+      </table>
+      ${productGroups.length > 30 ? `<div style="text-align:center;padding:8px;color:var(--muted);font-size:11px">…還有 ${productGroups.length-30} 件</div>` : ''}
+    </div>
+  `, [
+    { label:`確認補填 ${missing.length} 筆`, primary:true, onclick: async () => {
+      const inserts = missing.map(m => ({
+        product_id: m.product.id,
+        part_id: m.part.id,
+        qty: m.qty,
+      }));
+      // 分批插入避免太大
+      let ok = 0, fail = 0;
+      for (let i = 0; i < inserts.length; i += 100) {
+        const batch = inserts.slice(i, i+100);
+        const { error } = await db.from('product_parts').insert(batch);
+        if (error) { fail += batch.length; console.error('補零件失敗', error); }
+        else ok += batch.length;
+      }
+      showToast(`✅ 補填完成:${ok} 筆成功${fail?`, ${fail} 筆失敗`:''}`);
+      closeModal();
+      await loadProducts();
+      renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
 
 // ─────────────────────────────────────────────
 // 從貨號批次補填品類 + 電鍍色
