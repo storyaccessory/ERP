@@ -2191,22 +2191,56 @@ window.pmAutoFillFromName = function(name) {
   }
 };
 
-// 貨號倒數第三碼自動帶顏色
+// 貨號解析:自動帶品類 + 電鍍色(用 window.parseSku)
 window.pmAutoFillFromSku = function(sku) {
+  const s = (sku||'').toUpperCase().trim();
+  if (s.length < 8) return;
+
+  // 用完整解析器
+  const info = window.parseSku ? window.parseSku(s) : null;
+  if (!info) return;
+
+  // ─── 自動帶品類(只在空欄位時填,避免蓋掉手動選的)───
+  const catSel = document.getElementById('pm-cat');
+  if (catSel && !catSel.value && info.category_name) {
+    const opt = [...catSel.options].find(o => o.text === info.category_name);
+    if (opt) {
+      catSel.value = opt.value;
+      catSel.style.borderColor = 'var(--success)';
+      setTimeout(() => catSel.style.borderColor = '', 1200);
+      // 觸發 change 讓「戒圍/鍊長」欄位更新
+      catSel.dispatchEvent(new Event('change'));
+    }
+  }
+
+  // ─── 自動帶電鍍色 ───
   const colorSel = document.getElementById('pm-color');
-  if (!colorSel) return;
-  const skuCode = { S:'純銀不電鍍', W:'白K金', R:'玫瑰金', Y:'黃18K金' };
-  const s = sku.toUpperCase().trim();
-  if (s.length < 3) return;
-  const code = s[s.length - 3]; // 倒數第三碼
-  const color = skuCode[code];
-  if (color) {
-    // 找對應 option
-    const opt = [...colorSel.options].find(o => o.value === color || o.text === color);
+  if (colorSel && !colorSel.value && info.plating_name) {
+    const opt = [...colorSel.options].find(o => o.value === info.plating_name || o.text === info.plating_name);
     if (opt) {
       colorSel.value = opt.value || opt.text;
       colorSel.style.borderColor = 'var(--success)';
       setTimeout(() => colorSel.style.borderColor = '', 1200);
+    }
+  }
+
+  // ─── 若貨號末尾有戒圍(戒指類的 09、10 等)自動帶 ───
+  if (info.cat_code === 'R' && info.size_code && /^\d{2}$/.test(info.size_code)) {
+    const ringInp = document.getElementById('pm-ring-size');
+    if (ringInp && !ringInp.value) {
+      ringInp.value = '#' + parseInt(info.size_code);
+      ringInp.style.borderColor = 'var(--success)';
+      setTimeout(() => ringInp.style.borderColor = '', 1200);
+    }
+  }
+
+  // ─── 若貨號末尾有鍊長(項/手鍊的 16、15 等)自動帶 ───
+  if ((info.cat_code === 'N' || info.cat_code === 'B') && info.size_code && /^\d{2}$/.test(info.size_code) && info.size_code !== '00') {
+    const chainInp = document.getElementById('pm-chain-length');
+    if (chainInp && !chainInp.value) {
+      chainInp.value = parseInt(info.size_code) + 'cm';
+      chainInp.style.borderColor = 'var(--success)';
+      setTimeout(() => chainInp.style.borderColor = '', 1200);
     }
   }
 };
