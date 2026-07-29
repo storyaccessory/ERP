@@ -2013,6 +2013,7 @@ function renderProducts() {
       </select>
       <button class="btn btn-primary" id="add-product-btn">+ 新增商品</button>
       <button class="btn btn-outline" onclick="modalImportProducts()" style="background:#e8f5f4;color:#00695c">↑ 批次匯入</button>
+      <button class="btn btn-outline" onclick="modalRetroFillFromSku()" style="background:#fff8e1;color:#e65100" title="從貨號自動補品類/顏色">🔧 補填品類/顏色</button>
       <button class="btn btn-outline" id="export-products-btn">↓ 匯出 CSV</button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px">顯示 ${filtered.length} / ${products.length} 件</div>
@@ -2106,7 +2107,6 @@ function renderProducts() {
                 <td>
                   <strong>${p.name}</strong>
                   ${p.shop_url ? `<a href="${p.shop_url}" target="_blank" onclick="event.stopPropagation()" title="開啟官網" style="margin-left:6px;font-size:12px;color:var(--accent-dark);text-decoration:none">🔗</a>` : ''}
-                  ${p.alias ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${p.alias}</div>` : ''}
                 </td>
                 <td style="font-size:11px;color:var(--muted);font-family:monospace;white-space:nowrap">${p.sku||'—'}</td>
                 <td style="font-size:13px;font-weight:600;color:var(--accent-dark);white-space:nowrap">${p.retail_price != null ? `${p.retail_price_currency==='CNY'?'¥':'$'}${p.retail_price.toLocaleString()}` : '—'}</td>
@@ -2436,9 +2436,17 @@ async function modalProduct(productId = null) {
     </div>
 
     <!-- 📈 售價歷程(編輯時才顯示) -->
-    <div id="pm-history-wrap" style="display:none;background:#fff8e1;border-radius:6px;padding:10px 12px;margin-bottom:12px">
-      <div style="font-size:12px;font-weight:600;color:#e65100;margin-bottom:6px">📈 售價變動歷程</div>
-      <div id="pm-history-list" style="font-size:12px"></div>
+    <div id="pm-history-wrap" style="display:${product?.id?'block':'none'};background:#fff8e1;border-radius:6px;padding:10px 12px;margin-bottom:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:600;color:#e65100">📈 售價變動歷程</div>
+        <button type="button" onclick="window.modalAddPriceHistory('${product?.id||''}')"
+          style="font-size:11px;padding:3px 10px;background:#fff;color:#e65100;border:1px solid #ffb74d;border-radius:4px;cursor:pointer;font-weight:600">
+          + 補入歷史價格
+        </button>
+      </div>
+      <div id="pm-history-list" style="font-size:12px">
+        <div style="color:var(--muted);text-align:center;padding:10px;font-size:11px">尚無歷程,存檔後或按上方按鈕補入</div>
+      </div>
     </div>
 
     <!-- 備註 -->
@@ -2464,30 +2472,7 @@ async function modalProduct(productId = null) {
 
   // 編輯模式:載入這個商品的售價歷程
   if (productId) {
-    setTimeout(async () => {
-      const { data: hist } = await db.from('product_price_history')
-        .select('*')
-        .eq('product_id', productId)
-        .order('changed_at', { ascending: false })
-        .limit(20);
-      if (!hist || !hist.length) return;
-      const wrap = document.getElementById('pm-history-wrap');
-      const list = document.getElementById('pm-history-list');
-      if (!wrap || !list) return;
-      wrap.style.display = 'block';
-      list.innerHTML = hist.map((h,i) => {
-        const dt = new Date(h.changed_at).toLocaleDateString('zh-TW');
-        const sym = h.currency === 'CNY' ? '¥' : '$';
-        const priceTxt = h.retail_price != null ? `${sym}${h.retail_price.toLocaleString()}` : '—';
-        const isLatest = i === 0;
-        return `<div style="display:flex;gap:8px;padding:4px 0;border-bottom:${i<hist.length-1?'1px solid #ffe082':'none'};font-size:12px">
-          <span style="color:var(--muted);white-space:nowrap;width:74px">${dt}</span>
-          <span style="width:60px;color:#666">${h.changed_by_name||'—'}</span>
-          <span style="font-weight:${isLatest?700:500};color:${isLatest?'#e65100':'#444'};min-width:70px">${priceTxt}</span>
-          <span style="color:var(--muted);flex:1">${h.note||''}</span>
-        </div>`;
-      }).join('');
-    }, 150);
+    setTimeout(() => window.reloadProductPriceHistory && window.reloadProductPriceHistory(productId), 150);
   }
 }
 
@@ -3046,6 +3031,204 @@ function closeSidePanel() {
 }
 
 // ─────────────────────────────────────────────
+// 從貨號批次補填品類 + 電鍍色
+// ─────────────────────────────────────────────
+window.modalRetroFillFromSku = function() {
+  const products = state.data.products || [];
+  const cats = state.data.categories || [];
+  const platingMap = state.data.platingCodeMap || {};
+
+  // 找出「有貨號但缺品類或顏色」的商品
+  const targets = [];
+  products.forEach(p => {
+    if (!p.sku) return;
+    const info = window.parseSku(p.sku);
+    if (!info) return;
+
+    let needCat = false, needColor = false;
+    let catId = p.category_id;
+    let colorVal = p.color;
+
+    if (!p.category_id && info.category_name) {
+      const cat = cats.find(c => c.name === info.category_name);
+      if (cat) { catId = cat.id; needCat = true; }
+    }
+    if (!p.color && info.plating_name) {
+      colorVal = info.plating_name;
+      needColor = true;
+    }
+
+    if (needCat || needColor) {
+      targets.push({
+        id: p.id, name: p.name, sku: p.sku,
+        catId, colorVal, needCat, needColor,
+        catName: cats.find(c=>c.id===catId)?.name || '',
+      });
+    }
+  });
+
+  if (!targets.length) {
+    showToast('沒有需要補填的商品(或貨號無法解析)', 'success');
+    return;
+  }
+
+  const preview = targets.slice(0, 30).map(t => `
+    <tr style="border-bottom:1px solid #f0f0f0">
+      <td style="padding:5px 8px;font-family:monospace;font-size:11px;color:var(--muted)">${t.sku}</td>
+      <td style="padding:5px 8px;font-size:12px">${t.name}</td>
+      <td style="padding:5px 8px;font-size:12px;color:${t.needCat?'var(--success)':'var(--muted)'}">${t.needCat?'→ '+t.catName:'—'}</td>
+      <td style="padding:5px 8px;font-size:12px;color:${t.needColor?'var(--success)':'var(--muted)'}">${t.needColor?'→ '+t.colorVal:'—'}</td>
+    </tr>
+  `).join('');
+
+  showModal(`🔧 補填品類/顏色 · ${targets.length} 筆`, `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+      系統會用「貨號解析」邏輯,把<strong>缺品類或缺顏色</strong>的商品自動補上。<br>
+      <strong style="color:#e65100">只補空的欄位</strong>,已有值不會被覆蓋。
+    </div>
+    <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead><tr style="background:#f5f5f5;color:var(--muted);font-size:11px">
+          <th style="text-align:left;padding:6px 8px">貨號</th>
+          <th style="text-align:left;padding:6px 8px">品名</th>
+          <th style="text-align:left;padding:6px 8px">品類補</th>
+          <th style="text-align:left;padding:6px 8px">顏色補</th>
+        </tr></thead>
+        <tbody>${preview}</tbody>
+      </table>
+      ${targets.length > 30 ? `<div style="text-align:center;padding:8px;color:var(--muted);font-size:11px">…還有 ${targets.length-30} 筆</div>` : ''}
+    </div>
+    <div id="retro-fill-progress" style="margin-top:10px;font-size:12px"></div>
+  `, [
+    { label:`確認補填 ${targets.length} 筆`, primary:true, onclick: async () => {
+      const progressEl = document.getElementById('retro-fill-progress');
+      let ok = 0, fail = 0;
+      for (let i = 0; i < targets.length; i++) {
+        const t = targets[i];
+        const update = {};
+        if (t.needCat) update.category_id = t.catId;
+        if (t.needColor) update.color = t.colorVal;
+        const { error } = await db.from('products').update(update).eq('id', t.id);
+        if (error) { fail++; console.error('補填失敗', t.sku, error); }
+        else ok++;
+        if ((i+1) % 20 === 0 && progressEl) {
+          progressEl.innerHTML = `<div style="color:var(--muted)">處理中… ${i+1} / ${targets.length}</div>`;
+        }
+      }
+      showToast(`✅ 補填完成:${ok} 筆成功${fail?`, ${fail} 筆失敗`:''}`);
+      closeModal();
+      await loadProducts();
+      renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+// ─────────────────────────────────────────────
+// 手動補入商品歷史價格
+// ─────────────────────────────────────────────
+window.modalAddPriceHistory = function(productId) {
+  if (!productId) { showToast('請先儲存商品','error'); return; }
+  const product = (state.data.products||[]).find(p=>p.id===productId);
+  if (!product) { showToast('找不到商品','error'); return; }
+
+  const today = new Date().toISOString().slice(0,10);
+  showModal(`📈 補入歷史價格:${product.name}`, `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+      填入過去某個時間點的價格,方便追溯售價變動軌跡。<br>
+      <strong style="color:#e65100">⚠ 這只是補紀錄</strong>,不會改變目前的「建議售價」。
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 100px 1fr;gap:8px;margin-bottom:12px">
+      <div class="form-group" style="margin:0">
+        <label style="font-size:12px">變動日期 *</label>
+        <input class="form-control" id="ph-date" type="date" value="${today}">
+      </div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:12px">幣別</label>
+        <select class="form-control" id="ph-currency">
+          <option value="TWD">$ TWD</option>
+          <option value="CNY">¥ CNY</option>
+        </select>
+      </div>
+      <div class="form-group" style="margin:0">
+        <label style="font-size:12px">當時售價 *</label>
+        <input class="form-control" id="ph-price" type="number" min="0" step="1" placeholder="—">
+      </div>
+    </div>
+    <div class="form-group">
+      <label style="font-size:12px">備註(選填)</label>
+      <input class="form-control" id="ph-note" placeholder="例:首賣價、雙 11 特惠、原廠調漲…">
+    </div>
+  `, [
+    { label:'補入', primary:true, onclick: async () => {
+      const dateStr = document.getElementById('ph-date').value;
+      const price = parseFloat(document.getElementById('ph-price').value) || null;
+      const currency = document.getElementById('ph-currency').value || 'TWD';
+      const note = document.getElementById('ph-note').value.trim() || '手動補入';
+      if (!dateStr) { showToast('請選日期','error'); return; }
+      if (price == null) { showToast('請填價格','error'); return; }
+      const changedAt = `${dateStr}T00:00:00`;
+      const { error } = await db.from('product_price_history').insert({
+        product_id: productId,
+        retail_price: price,
+        currency,
+        changed_by: state.user?.id || null,
+        changed_by_name: state.profile?.name || state.user?.email || '',
+        note,
+        changed_at: changedAt,
+      });
+      if (error) { showToast('補入失敗:'+error.message, 'error'); return; }
+      showToast('✅ 已補入一筆歷程');
+      closeModal();
+      // 重新載入歷程顯示
+      window.reloadProductPriceHistory && window.reloadProductPriceHistory(productId);
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+// 重新載入商品的售價歷程顯示(讓補入後立刻反映)
+window.reloadProductPriceHistory = async function(productId) {
+  if (!productId) return;
+  const { data: hist } = await db.from('product_price_history')
+    .select('*')
+    .eq('product_id', productId)
+    .order('changed_at', { ascending: false })
+    .limit(30);
+  const list = document.getElementById('pm-history-list');
+  const wrap = document.getElementById('pm-history-wrap');
+  if (!list || !wrap) return;
+  wrap.style.display = 'block';
+  if (!hist || !hist.length) {
+    list.innerHTML = '<div style="color:var(--muted);text-align:center;padding:10px;font-size:11px">尚無歷程</div>';
+    return;
+  }
+  list.innerHTML = hist.map((h,i) => {
+    const dt = new Date(h.changed_at).toLocaleDateString('zh-TW');
+    const sym = h.currency === 'CNY' ? '¥' : '$';
+    const priceTxt = h.retail_price != null ? `${sym}${h.retail_price.toLocaleString()}` : '—';
+    const isLatest = i === 0;
+    return `<div style="display:flex;gap:8px;align-items:center;padding:4px 0;border-bottom:${i<hist.length-1?'1px solid #ffe082':'none'};font-size:12px">
+      <span style="color:var(--muted);white-space:nowrap;width:74px">${dt}</span>
+      <span style="width:60px;color:#666">${h.changed_by_name||'—'}</span>
+      <span style="font-weight:${isLatest?700:500};color:${isLatest?'#e65100':'#444'};min-width:70px">${priceTxt}</span>
+      <span style="color:var(--muted);flex:1">${h.note||''}</span>
+      <button onclick="window.deletePriceHistory('${h.id}','${productId}')"
+        style="background:none;border:none;color:#c62828;cursor:pointer;font-size:12px;padding:2px 4px" title="刪除這筆">✕</button>
+    </div>`;
+  }).join('');
+};
+
+// 刪除單筆售價歷程
+window.deletePriceHistory = async function(historyId, productId) {
+  if (!confirm('確定刪除這筆歷程紀錄?')) return;
+  const { error } = await db.from('product_price_history').delete().eq('id', historyId);
+  if (error) { showToast('刪除失敗:'+error.message, 'error'); return; }
+  showToast('已刪除');
+  window.reloadProductPriceHistory && window.reloadProductPriceHistory(productId);
+};
+
+// ─────────────────────────────────────────────
 // 貨號解析:自動判斷品類 + 電鍍色 + 尺寸
 // 格式:[角色代碼][系列版本][品類代碼][4位數][電鍍色代碼][尺寸]
 // 例:AP1R2402W09 → 角色 AP, 品類 R(戒指), 電鍍 W(白K), 尺寸 09
@@ -3053,31 +3236,27 @@ function closeSidePanel() {
 window.parseSku = function(sku) {
   if (!sku || sku.length < 8) return null;
   const s = sku.trim().toUpperCase();
-  // 品類代碼(位置固定在角色後 1 位):N=項鍊、B=手鍊、R=戒指、E=耳環
+  // 品類代碼:N=項鍊、B=手鍊、R=戒指、E=耳環
   const CAT_MAP = {
-    'N': '項鍊',
-    'B': '手鍊',
-    'R': '戒指',
-    'E': '耳環',
-    'H': '髮飾',
-    'K': '頸鍊',
-    'M': '對戒',
+    'N': '項鍊', 'B': '手鍊', 'R': '戒指', 'E': '耳環',
+    'H': '髮飾', 'K': '頸鍊', 'M': '對戒',
   };
-  // 電鍍色代碼:通常在品類代碼 + 4 位數字後
-  const PLATING_MAP = {
-    'W': '白K金',
-    'R': '玫瑰金',
-    'Y': '黃K金',
-    'D': '素銀',
-    'B': '素銀(拋光)',
-    'G': '古銅',
-    '999': '素銀(通用)',
+  // 電鍍色代碼優先用設定,後備用硬編碼
+  const settingsMap = state.data?.platingCodeMap || {};
+  const FALLBACK_PLATING = {
+    'W': '白K金', 'R': '玫瑰金', 'Y': '黃18K金',
+    'S': '純銀不電鍍', 'D': '素銀',
   };
 
-  // 用 regex 分解:角色(2-3字母) + 版本(1數字) + 品類(1字母) + 年份+序號(4數字) + 電鍍(0-3字元) + 尺寸(0-3數字)
   const m = s.match(/^([A-Z]{2,4})(\d)([A-Z])(\d{4})([A-Z0-9]{0,3})(\d{0,3})$/);
   if (!m) return null;
   const [, roleCode, version, catCode, seq, platingCode, sizeCode] = m;
+
+  // 電鍍名稱:優先從 settings,沒有再用 fallback
+  let platingName = null;
+  if (platingCode) {
+    platingName = settingsMap[platingCode] || FALLBACK_PLATING[platingCode] || null;
+  }
 
   return {
     role_code: roleCode,
@@ -3086,7 +3265,7 @@ window.parseSku = function(sku) {
     category_name: CAT_MAP[catCode] || null,
     seq,
     plating_code: platingCode || '',
-    plating_name: PLATING_MAP[platingCode] || (platingCode === '' ? null : platingCode),
+    plating_name: platingName,
     size_code: sizeCode || '',
   };
 };
