@@ -3737,14 +3737,20 @@ window._setRestockFilter = function(idx) {
   state.data.restockStatusFilter = _restockStatusList[idx] || '';
   renderApp();
 };
-// 通用搜尋 handler：存值、等組字結束再 render
+// 通用搜尋 handler：存值、等組字結束再 render(保留游標位置)
 window._searchHandler = function(stateKey, elId, e) {
+  // 記錄游標位置(避免 re-render 後跳到最前面)
+  const cursorPos = e.target.selectionStart;
   state.data[stateKey] = e.target.value;
   if (e.isComposing) return; // 注音組字中不 render
   renderApp();
   requestAnimationFrame(() => {
     const el = document.getElementById(elId);
-    if (el) el.focus();
+    if (el) {
+      el.focus();
+      // 恢復游標位置(不然打字順序會顛倒)
+      try { el.setSelectionRange(cursorPos, cursorPos); } catch(err) {}
+    }
   });
 };
 window._restockTriggerSearch = function(val) {
