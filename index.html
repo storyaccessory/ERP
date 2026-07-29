@@ -3662,8 +3662,16 @@ function renderCastings() {
         <table>
           <thead><tr>
             <th style="width:32px"><input type="checkbox" class="batch-cb" id="batch-all-castings" onchange="batchToggleAll('castings',this.checked)"></th>
-            <th>操作</th><th>商品型號</th><th>鑄件名稱</th><th>角色</th><th>系列</th>
-            <th>品類</th><th>在庫數量</th><th>安全庫存</th><th>模具工錢</th><th>狀態</th>
+            <th style="min-width:150px">操作</th>
+            <th style="min-width:110px;font-size:12px">商品型號</th>
+            <th>鑄件名稱</th>
+            <th style="width:60px">角色</th>
+            <th>系列</th>
+            <th style="width:60px">品類</th>
+            <th style="width:60px">在庫</th>
+            <th style="width:60px">安庫</th>
+            <th style="width:80px">模具工錢</th>
+            <th style="width:70px">狀態</th>
           </tr></thead>
           <tbody>
           ${filtered.length === 0 ? `<tr><td colspan="10"><div class="empty"><div class="empty-icon">⚙️</div><p>尚無鑄件資料</p></div></td></tr>` :
@@ -3685,7 +3693,7 @@ function renderCastings() {
                   ${canAdjustStock()?`<button class="btn-table" data-action="adj-stock-casting" data-id="${c.id}" style="background:#e8f5f4;color:var(--accent-dark)">庫存異動</button>`:''}
                   <button class="btn-table danger" data-action="del-casting" data-id="${c.id}">刪除</button>
                 </div></td>
-                <td style="font-size:12px;color:var(--muted);font-family:monospace">${c.sku||'—'}</td>
+                <td style="font-size:11px;color:var(--muted);font-family:monospace;white-space:nowrap">${c.sku||'—'}</td>
                 <td><strong style="cursor:pointer;color:var(--text)" data-action="edit-casting" data-id="${c.id}">${c.name}</strong></td>
                 <td>${codeHtml}</td>
                 <td style="font-size:12px">${c.series?.name||'—'}</td>
