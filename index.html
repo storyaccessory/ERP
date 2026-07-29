@@ -3091,29 +3091,19 @@ async function modalEditCasting(id) {
 
   await loadIPTree();
 
-  // 若編輯戒指鑄件,先抽出尺寸
-  const _existingRingSize = c?.name ? (c.name.match(/_#(\d+)$/)?.[1] || '') : '';
-  const _existingBaseName = c?.name ? c.name.replace(/_#\d+$/, '') : '';
-
   showModal(c ? '編輯鑄件' : '新增鑄件', `
     <div class="form-group">
       <label>鑄件名稱 <span style="color:var(--danger)">*</span></label>
-      <input class="form-control" id="cs-name" value="${_existingBaseName||''}" placeholder="例:AP-經典晶鑽項鍊"
-        oninput="window._csNameOnInput && window._csNameOnInput(this.value)">
+      <input class="form-control" id="cs-name" value="${c?.name||''}" placeholder="例:CN-喜拿雲朵戒指-CN頭(2)">
       <div id="cs-name-hint" style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.6">
-        <strong style="color:var(--accent-dark)">格式:</strong> <code style="background:#f5f5f5;padding:1px 5px;border-radius:3px">角色代碼-品名</code>
+        <strong style="color:var(--accent-dark)">格式:</strong> <code style="background:#f5f5f5;padding:1px 5px;border-radius:3px">代碼-名稱-代碼頭(N)</code>
         <span style="color:#bbb">|</span>
-        角色代碼 2〜3 個大寫英文字母(例 AP、KU、KL、EP)
+        代碼:大寫英文字母(例 CN、AP、KU、EP)
+        <span style="color:#bbb">|</span>
+        <strong>(N) = 穴數/蠟數</strong>(1 支蠟能做幾件,寫在名字最後)
         <br>
-        <span style="color:#f57c00">✅ 正確:</span> <code>AP-經典晶鑽項鍊</code>、<code>KU-戒指_#12</code>&nbsp;&nbsp;
-        <span style="color:#c62828">❌ 錯誤:</span> <code>ap-項鍊</code>(小寫)、<code>經典項鍊</code>(無代碼)
-      </div>
-      <!-- 戒指尺寸輔助(名稱含「戒指」或「戒環」時顯示) -->
-      <div id="cs-ring-wrap" style="display:${(_existingBaseName||'').match(/戒指|戒環/)?'flex':'none'};align-items:center;gap:10px;padding:8px 12px;margin-top:8px;background:#fff8e1;border-radius:6px;border:1px solid #ffe082">
-        <span style="font-size:13px;font-weight:600;color:#e65100;flex-shrink:0">💍 戒指尺寸</span>
-        <input class="form-control" id="cs-ring-size" type="number" min="1" max="30" value="${_existingRingSize}"
-          placeholder="例:9、12" style="width:100px" oninput="window._csRingSizeChange && window._csRingSizeChange()">
-        <span style="font-size:12px;color:var(--muted)">→ 最終名稱會自動加上 <code id="cs-ring-preview" style="background:#fff;padding:1px 5px;border-radius:3px;color:#e65100">_#${_existingRingSize||'N'}</code></span>
+        <span style="color:#f57c00">✅ 正確:</span> <code>CN-喜拿雲朵戒指-CN頭(2)</code>、<code>AP-經典晶鑽項鍊</code>&nbsp;&nbsp;
+        <span style="color:#c62828">❌ 錯誤:</span> <code>cn-戒指</code>(小寫)、<code>戒指(2)</code>(無代碼)
       </div>
     </div>
 
@@ -3198,37 +3188,32 @@ async function modalEditCasting(id) {
     </div>
   `, [
     { label: id ? '儲存' : '新增', primary: true, onclick: async () => {
-      let baseName = document.getElementById('cs-name').value.trim();
-      if (!baseName) { showToast('請填鑄件名稱','error'); return; }
+      let name = document.getElementById('cs-name').value.trim();
+      if (!name) { showToast('請填鑄件名稱','error'); return; }
 
       // ─── 名稱標準化:全形→半形、多空白合併、去頭尾空白 ───
-      baseName = baseName
+      name = name
         .replace(/[  ]+/g, ' ')  // 全形/多重空白合併為單一半形
         .replace(/\s*-\s*/g, '-') // - 前後空白去掉
-        .replace(/\s*_\s*/g, '_') // _ 前後空白去掉
+        .replace(/[()]/g, m => m === '(' ? '(' : ')') // 全形括號轉半形
         .trim();
 
       // ─── B: 格式驗證 ───
-      // 檢查:必須是「代碼-名稱」格式,代碼是 2〜3 個大寫英文字母(允許數字混合但需大寫)
-      const formatRE = /^[A-Z][A-Z0-9]{1,2}-.+/;
-      if (!formatRE.test(baseName)) {
-        showToast('名稱格式錯誤:必須是「代碼-名稱」,代碼 2〜3 個大寫英文字母(例 AP-經典項鍊、KU-戒指)', 'error');
+      // 必須以「大寫英文字母代碼-」開頭
+      const formatRE = /^[A-Z][A-Z0-9]{0,4}-.+/;
+      if (!formatRE.test(name)) {
+        showToast('名稱格式錯誤:必須「代碼-名稱」,代碼是大寫英文字母(例 CN-喜拿雲朵戒指-CN頭(2))', 'error');
         return;
       }
 
-      // ─── D: 戒指尺寸自動組合 ───
-      let name = baseName;
-      const ringSizeEl = document.getElementById('cs-ring-size');
-      const isRing = /戒指|戒環/.test(baseName);
-      if (isRing) {
-        const size = ringSizeEl?.value?.trim() || '';
-        if (!size) {
-          showToast('鑄件名稱含「戒指/戒環」,請填寫戒指尺寸', 'error');
-          ringSizeEl?.focus();
-          return;
+      // ─── D: 若名稱結尾有 (N),自動抽出當作蠟數同步到欄位 ───
+      const yieldMatch = name.match(/\((\d+)\)\s*$/);
+      if (yieldMatch) {
+        const yieldFromName = parseInt(yieldMatch[1]);
+        const yieldInput = document.getElementById('cs-mold-yield');
+        if (yieldInput && parseInt(yieldInput.value) !== yieldFromName) {
+          yieldInput.value = yieldFromName;
         }
-        // 去掉舊 _#N 再重新組合
-        name = baseName.replace(/_#\d+$/, '') + `_#${size}`;
       }
 
       // ─── C: 防重複檢查(同名鑄件不能存在)───
@@ -3672,9 +3657,6 @@ function renderCastings() {
                 ? `<span style="display:inline-block;font-size:11px;font-weight:700;background:${ipCat.color||'#90a4ae'};color:#fff;padding:2px 7px;border-radius:4px">${ipCat.code}</span>`
                 : '—';
 
-              const yieldBadge = (c.mold_yield||1) > 1
-                ? ` <span style="font-size:11px;color:var(--muted);font-weight:400">×${c.mold_yield}</span>` : '';
-
               return `<tr class="${sel?'selected-row':''}">
                 <td><input type="checkbox" class="batch-cb" ${sel?'checked':''} onchange="batchToggle('castings','${c.id}',this.checked)"></td>
                 <td><div class="action-btns">
@@ -3682,7 +3664,7 @@ function renderCastings() {
                   ${canAdjustStock()?`<button class="btn-table" data-action="adj-stock-casting" data-id="${c.id}" style="background:#e8f5f4;color:var(--accent-dark)">庫存異動</button>`:''}
                   <button class="btn-table danger" data-action="del-casting" data-id="${c.id}">刪除</button>
                 </div></td>
-                <td><strong style="cursor:pointer;color:var(--text)" data-action="edit-casting" data-id="${c.id}">${c.name}${yieldBadge}</strong></td>
+                <td><strong style="cursor:pointer;color:var(--text)" data-action="edit-casting" data-id="${c.id}">${c.name}</strong></td>
                 <td>${codeHtml}</td>
                 <td style="font-size:12px">${c.series?.name||'—'}</td>
                 <td><span class="tag ${c.casting_type==='改蠟'?'tag-orange':'tag-teal'}">${c.casting_type||'鑄件'}</span></td>
@@ -7995,7 +7977,7 @@ window.modalNewCastingRestock = async function modalNewCastingRestock() {
         <td style="text-align:center">
           ${it.item_type==='remelt'
             ? `<input type="number" min="1" max="30" style="width:60px;font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;text-align:center" placeholder="#尺寸" value="${it.remelt_size||''}" oninput="restockDraftRemeltSize(${i},this.value)">`
-            : `<input type="number" min="1" style="width:60px;font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;text-align:center" value="${it.wax_qty||1}" oninput="restockDraftWax(${i},this.value)"> 支`
+            : `<input type="number" min="1" style="width:56px;font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;text-align:center" value="${it.wax_qty||1}" oninput="restockDraftWax(${i},this.value)"> 支${(it.mold_yield||1)>1?`<div style="font-size:11px;color:var(--success);margin-top:2px;font-weight:600">= ${(it.wax_qty||1) * (it.mold_yield||1)} 件</div>`:''}`
           }
         </td>
         <td style="text-align:right;font-size:12px">${it.mold_fee?'$'+it.mold_fee:'—'}</td>
@@ -24227,9 +24209,59 @@ async function handleAction(action, id, dataset) {
     }
 
     case 'complete-casting-restock': {
-      await db.from('casting_restock_orders').update({ status: '已完成' }).eq('id', id);
-      showToast('✅ 鑄件補貨單已完成');
-      await loadRestock(); renderApp();
+      const order = (state.data.castingRestock||[]).find(r=>r.id===id);
+      if (!order) { showToast('找不到補貨單','error'); break; }
+      const items = order.casting_restock_items || [];
+      const castingsCache = state.data.castings || [];
+      // 預覽:每筆會加多少件
+      const addList = items.map(it => {
+        const c = castingsCache.find(x => x.id === it.casting_id);
+        const yieldN = c?.mold_yield || it.mold_yield || 1;
+        const waxN = it.wax_qty || 1;
+        // 下臘:加 wax_qty × mold_yield;改蠟:1 支蠟改 1 個
+        const addQty = it.item_type === 'remelt' ? 1 : (waxN * yieldN);
+        return { casting_id: it.casting_id, casting_name: c?.name || it.castings?.name || '?', add: addQty, waxN, yieldN, itemType: it.item_type, curStock: c?.stock || 0 };
+      }).filter(x => x.casting_id);
+
+      const previewRows = addList.map(x => `
+        <tr>
+          <td>${x.casting_name}</td>
+          <td style="text-align:center;font-size:12px;color:var(--muted)">${x.itemType==='remelt'?'🔸 改蠟':'⚪ 下臘'}</td>
+          <td style="text-align:center;font-size:12px">${x.itemType==='remelt'?'—':`${x.waxN} 支 × ${x.yieldN}`}</td>
+          <td style="text-align:center;color:var(--success);font-weight:700">+${x.add}</td>
+          <td style="text-align:center;font-size:12px">${x.curStock} → <strong>${x.curStock + x.add}</strong></td>
+        </tr>
+      `).join('');
+      showModal('✅ 確認完成:入庫預覽', `
+        <div style="font-size:13px;color:var(--muted);margin-bottom:10px">
+          按下確認後,以下鑄件的庫存會自動增加(下臘:支數 × 蠟數;改蠟:每筆 1 件)。
+        </div>
+        <table class="data-table">
+          <thead><tr>
+            <th>鑄件</th><th style="text-align:center">類型</th><th style="text-align:center">計算</th>
+            <th style="text-align:center">入庫</th><th style="text-align:center">庫存變化</th>
+          </tr></thead>
+          <tbody>${previewRows||'<tr><td colspan="5" style="text-align:center;color:var(--muted)">無明細</td></tr>'}</tbody>
+        </table>
+      `, [
+        { label:'確認完成 → 加庫存', primary:true, onclick: async () => {
+          let deductErr = false;
+          for (const x of addList) {
+            const cur = castingsCache.find(c => c.id === x.casting_id);
+            if (!cur) continue;
+            const newStock = (cur.stock || 0) + x.add;
+            const { error: e } = await db.from('castings').update({ stock: newStock }).eq('id', x.casting_id);
+            if (e) { deductErr = true; console.error('加庫存失敗', x.casting_id, e); }
+          }
+          await db.from('casting_restock_orders').update({ status: '已完成', completed_at: new Date().toISOString() }).eq('id', id);
+          closeModal();
+          if (deductErr) showToast('⚠ 部分庫存更新失敗,請手動確認', 'warn');
+          else showToast(`✅ 已完成,${addList.length} 項鑄件庫存已增加`);
+          await Promise.all([loadRestock(), loadCastings()]);
+          renderApp();
+        }},
+        { label:'取消', onclick: closeModal },
+      ]);
       break;
     }
 
