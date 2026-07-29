@@ -3695,10 +3695,14 @@ function renderParts() {
               const isOut = stock === 0;
               const isLow = stock > 0 && stock <= safe;
               const stockCol = isOut ? 'var(--danger)' : isLow ? 'var(--warning)' : 'var(--success)';
+              // 單筆的分組:不重複顯示品名(避免跟卡片標題重複)
+              // 多筆的分組:仍顯示品名 + 規格,方便閱讀
+              const showName = items.length > 1;
               return `<tr style="border-top:1px solid #f0f0f0">
                 <td style="padding:8px 12px">
-                  <span style="color:var(--accent-dark);font-weight:500">${p.name||''}</span>
-                  ${p.spec ? `<span style="color:var(--muted);margin:0 4px">_</span><span>${p.spec}</span>` : ''}
+                  ${showName ? `<span style="color:var(--accent-dark);font-weight:500">${p.name||''}</span>` : ''}
+                  ${showName && p.spec ? `<span style="color:var(--muted);margin:0 4px">_</span>` : ''}
+                  <span>${p.spec || (showName ? '' : '<span style="color:#ccc">(無規格)</span>')}</span>
                   ${p.notes ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${p.notes}</div>` : ''}
                 </td>
                 <td style="text-align:center;padding:8px 8px;font-weight:700;color:${stockCol}">${stock}${isOut ? ' 🔴' : isLow ? ' 🟠' : ''}</td>
