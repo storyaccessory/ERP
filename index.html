@@ -3092,19 +3092,26 @@ async function modalEditCasting(id) {
   await loadIPTree();
 
   showModal(c ? '編輯鑄件' : '新增鑄件', `
-    <div class="form-group">
-      <label>鑄件名稱 <span style="color:var(--danger)">*</span></label>
-      <input class="form-control" id="cs-name" value="${c?.name||''}" placeholder="例:CN-喜拿雲朵戒指-CN頭(2)">
-      <div id="cs-name-hint" style="font-size:11px;color:var(--muted);margin-top:4px;line-height:1.6">
-        <strong style="color:var(--accent-dark)">格式:</strong> <code style="background:#f5f5f5;padding:1px 5px;border-radius:3px">代碼-名稱-代碼頭(N)</code>
-        <span style="color:#bbb">|</span>
-        代碼:大寫英文字母(例 CN、AP、KU、EP)
-        <span style="color:#bbb">|</span>
-        <strong>(N) = 穴數/蠟數</strong>(1 支蠟能做幾件,寫在名字最後)
-        <br>
-        <span style="color:#f57c00">✅ 正確:</span> <code>CN-喜拿雲朵戒指-CN頭(2)</code>、<code>AP-經典晶鑽項鍊</code>&nbsp;&nbsp;
-        <span style="color:#c62828">❌ 錯誤:</span> <code>cn-戒指</code>(小寫)、<code>戒指(2)</code>(無代碼)
+    <div class="form-row form-row-2">
+      <div class="form-group">
+        <label>商品型號(SKU)</label>
+        <input class="form-control" id="cs-sku" value="${c?.sku||''}" placeholder="例:KL1N2401-2-1">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">內部識別碼,匯入時用來比對是新增還是更新</div>
       </div>
+      <div class="form-group">
+        <label>鑄件名稱 <span style="color:var(--danger)">*</span></label>
+        <input class="form-control" id="cs-name" value="${c?.name||''}" placeholder="例:CN-喜拿雲朵戒指-CN頭(2)">
+      </div>
+    </div>
+    <div id="cs-name-hint" style="font-size:11px;color:var(--muted);margin-top:-6px;margin-bottom:12px;line-height:1.6;padding:8px 10px;background:#f8f9fa;border-radius:4px">
+      <strong style="color:var(--accent-dark)">名稱格式:</strong> <code style="background:#fff;padding:1px 5px;border-radius:3px">代碼-名稱-代碼頭(N)</code>
+      <span style="color:#bbb">|</span>
+      代碼:大寫英文字母(例 CN、AP、KU、EP)
+      <span style="color:#bbb">|</span>
+      <strong>(N) = 穴數/蠟數</strong>(寫在名字最後,系統會自動抽出)
+      <br>
+      <span style="color:#f57c00">✅ 正確:</span> <code>CN-喜拿雲朵戒指-CN頭(2)</code>&nbsp;&nbsp;
+      <span style="color:#c62828">❌ 錯誤:</span> <code>cn-戒指</code>(小寫)、<code>戒指(2)</code>(無代碼)
     </div>
 
     <!-- IP / 系列 樹狀選擇（與商品相同）-->
@@ -3226,6 +3233,18 @@ async function modalEditCasting(id) {
         return;
       }
 
+      // ─── SKU 防重複檢查 ───
+      const sku = document.getElementById('cs-sku')?.value.trim() || null;
+      if (sku) {
+        const skuDup = existingCastings.find(x =>
+          (x.sku || '').trim() === sku && x.id !== id
+        );
+        if (skuDup) {
+          showToast(`已有相同商品型號「${sku}」的鑄件「${skuDup.name}」`, 'error');
+          return;
+        }
+      }
+
       const seriesId = document.getElementById('cs-series-id').value || null;
       // 從系列反查 ip_id
       const seriesObj = (state.data.series||[]).find(s=>s.id===seriesId);
@@ -3251,6 +3270,7 @@ async function modalEditCasting(id) {
         if (priceChanged) {
           // 先儲存非價格欄位
           const nonPricePayload = {
+            sku,
             name,
             ip_id:        ipId,
             series_id:    seriesId,
@@ -3285,7 +3305,7 @@ async function modalEditCasting(id) {
 
         // 無價格變動，直接全部儲存
         const payload = {
-          name, ip_id: ipId, series_id: seriesId,
+          sku, name, ip_id: ipId, series_id: seriesId,
           casting_type: document.getElementById('cs-type').value,
           stock:        parseInt(document.getElementById('cs-stock').value)||0,
           safety_stock: parseInt(document.getElementById('cs-safety').value)||0,
@@ -3302,7 +3322,7 @@ async function modalEditCasting(id) {
       } else {
         // ── 新增模式：直接儲存（新鑄件沒有舊價格，不需審核）──
         const payload = {
-          name, ip_id: ipId, series_id: seriesId,
+          sku, name, ip_id: ipId, series_id: seriesId,
           casting_type: document.getElementById('cs-type').value,
           stock:        parseInt(document.getElementById('cs-stock').value)||0,
           safety_stock: parseInt(document.getElementById('cs-safety').value)||0,
@@ -3606,6 +3626,7 @@ function renderCastings() {
   if (filterCode) filtered = filtered.filter(c => c.series?.ip_categories?.code === filterCode);
   if (searchQ) filtered = filtered.filter(c =>
     (c.name||'').toLowerCase().includes(searchQ) ||
+    (c.sku||'').toLowerCase().includes(searchQ) ||
     (c.series?.name||'').toLowerCase().includes(searchQ) ||
     (c.series?.ip_categories?.code||'').toLowerCase().includes(searchQ)
   );
@@ -3628,7 +3649,7 @@ function renderCastings() {
       }).join('')}
     </div>
     <div class="search-bar">
-      <input class="search-input" id="casting-search" value="${state.data.castingSearch||''}" placeholder="搜尋鑄件名稱、系列、角色代碼…"
+      <input class="search-input" id="casting-search" value="${state.data.castingSearch||''}" placeholder="搜尋商品型號、鑄件名稱、系列、角色代碼…"
         oninput="_searchHandler('castingSearch','casting-search',event)"
         oncompositionend="_searchHandler('castingSearch','casting-search',event)">
       <button class="btn btn-primary" id="add-casting-btn">+ 新增鑄件</button>
@@ -3641,11 +3662,11 @@ function renderCastings() {
         <table>
           <thead><tr>
             <th style="width:32px"><input type="checkbox" class="batch-cb" id="batch-all-castings" onchange="batchToggleAll('castings',this.checked)"></th>
-            <th>操作</th><th>鑄件名稱</th><th>角色</th><th>系列</th>
+            <th>操作</th><th>商品型號</th><th>鑄件名稱</th><th>角色</th><th>系列</th>
             <th>品類</th><th>在庫數量</th><th>安全庫存</th><th>模具工錢</th><th>狀態</th>
           </tr></thead>
           <tbody>
-          ${filtered.length === 0 ? `<tr><td colspan="9"><div class="empty"><div class="empty-icon">⚙️</div><p>尚無鑄件資料</p></div></td></tr>` :
+          ${filtered.length === 0 ? `<tr><td colspan="10"><div class="empty"><div class="empty-icon">⚙️</div><p>尚無鑄件資料</p></div></td></tr>` :
             filtered.map(c => {
               const sel = (state.batch?.castings||new Set()).has(c.id);
               const stock = c.stock || 0;
@@ -3664,6 +3685,7 @@ function renderCastings() {
                   ${canAdjustStock()?`<button class="btn-table" data-action="adj-stock-casting" data-id="${c.id}" style="background:#e8f5f4;color:var(--accent-dark)">庫存異動</button>`:''}
                   <button class="btn-table danger" data-action="del-casting" data-id="${c.id}">刪除</button>
                 </div></td>
+                <td style="font-size:12px;color:var(--muted);font-family:monospace">${c.sku||'—'}</td>
                 <td><strong style="cursor:pointer;color:var(--text)" data-action="edit-casting" data-id="${c.id}">${c.name}</strong></td>
                 <td>${codeHtml}</td>
                 <td style="font-size:12px">${c.series?.name||'—'}</td>
@@ -24828,13 +24850,30 @@ async function handleAction(action, id, dataset) {
 
 // 匯入鑄件工錢清單
 function modalImportCastings() {
-  showModal('匯入鑄件工錢清單', `
-    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.7">
-      每行一筆，格式：<code style="background:#f0faf9;padding:2px 6px;border-radius:4px;color:var(--accent-dark)">系列名稱,鑄件名稱,模具工錢</code><br>
-      例：<code style="background:#f0faf9;padding:2px 6px;border-radius:4px;color:var(--accent-dark)">Pekkle經典系列,AP-經典晶鑽項鍊,45</code><br>
-      <span style="color:var(--warning)">⚠ 鑄件名稱若已存在，只更新工錢；若不存在，則新增。</span>
+  showModal('匯入鑄件清單', `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.8">
+      <strong style="color:var(--accent-dark)">格式:</strong>
+      <code style="background:#f0faf9;padding:2px 6px;border-radius:4px;color:var(--accent-dark)">貨號,品名,價格</code>
+      (每行一筆,用半形逗號分隔)
+      <br>
+      <strong style="color:var(--accent-dark)">範例:</strong>
+      <code style="background:#f0faf9;padding:2px 6px;border-radius:4px;color:var(--accent-dark)">KL1N2401-2-1,KL-莫桑石項鍊_主墜,40</code>
+      <br>
+      <div style="background:#fff8e1;border-left:3px solid #f57c00;padding:8px 12px;margin-top:8px;font-size:12px;line-height:1.6;color:#444">
+        <strong>比對邏輯:</strong>用<u>貨號</u>當唯一識別
+        <br>
+        &nbsp;&nbsp;• 貨號已存在 → 更新品名 + 價格
+        <br>
+        &nbsp;&nbsp;• 貨號不存在 → 新增鑄件
+        <br>
+        <strong>自動處理:</strong>
+        <br>
+        &nbsp;&nbsp;• 品名尾端 <code>(N)</code> 會被抽出當「穴數」(例:<code>爪台-4mm愛心(10)</code> → 穴數 10)
+        <br>
+        &nbsp;&nbsp;• 價格為 <code>0</code> 或空白 → 視為未定價(不會寫入)
+      </div>
     </div>
-    <textarea class="form-control" id="import-castings-text" rows="12" style="font-size:12px;font-family:monospace" placeholder="Pekkle經典系列,AP-經典晶鑽項鍊,45&#10;Pekkle經典系列,AP-經典晶鑽手鍊,45&#10;訂製&amp;誕生,AP-誕生石項鍊,45"></textarea>
+    <textarea class="form-control" id="import-castings-text" rows="12" style="font-size:12px;font-family:monospace" placeholder="KL1N2401-2-1,KL-莫桑石項鍊_主墜,40&#10;ACP2022-01,爪台-4mm愛心(10),50&#10;XO1R2402-1-09,XO-莫桑石戒指_#09,50"></textarea>
     <div id="import-castings-result" style="margin-top:10px;font-size:12px"></div>
   `, [
     { label: '開始匯入', primary: true, onclick: async () => {
@@ -24844,52 +24883,57 @@ function modalImportCastings() {
       const resultEl = document.getElementById('import-castings-result');
       resultEl.innerHTML = '處理中…';
 
-      const series = state.data.series || [];
       let ok = 0, updated = 0, created = 0, errors = [];
+      const castingsCache = state.data.castings || [];
 
       for (const line of lines) {
         const cols = line.split(',').map(s=>s.trim());
-        if (cols.length < 3) { errors.push(`格式錯誤：${line}`); continue; }
-        const [seriesName, rawName, feeStr] = cols;
-        const fee = parseFloat(feeStr);
-        if (!rawName || isNaN(fee)) { errors.push(`資料有誤：${line}`); continue; }
+        if (cols.length < 2) { errors.push(`格式錯誤(欄位不足):${line}`); continue; }
+        const [sku, rawName, priceStr] = cols;
+        if (!sku) { errors.push(`貨號空白:${line}`); continue; }
+        if (!rawName) { errors.push(`品名空白:${line}`); continue; }
 
-        // 解析名稱裡的 (數字) → mold_yield，名稱去掉括號
+        // 解析價格:空白或 0 → null(未定價)
+        let price = null;
+        if (priceStr) {
+          const p = parseFloat(priceStr);
+          if (!isNaN(p) && p > 0) price = p;
+        }
+
+        // 解析品名尾端的 (數字) → mold_yield;名稱保留 (N) 不修改
         const yieldMatch = rawName.match(/\((\d+)\)\s*$/);
         const moldYield = yieldMatch ? parseInt(yieldMatch[1]) : 1;
-        const castingName = rawName.replace(/\(\d+\)\s*$/, '').trim();
+        const castingName = rawName;
 
-        // 找系列（完全符合優先，再試去空格比對）
-        const s = series.find(x=>x.name===seriesName)
-               || series.find(x=>x.name.replace(/\s/g,'')===seriesName.replace(/\s/g,''));
-        if (!s && seriesName) errors.push(`⚠ 找不到系列「${seriesName}」，${castingName} 無法綁定系列`);
-
-        // 查有無同名鑄件
-        const existing = (state.data.castings||[]).find(c=>c.name===castingName);
+        // 用貨號(sku)找有無現有鑄件
+        const existing = castingsCache.find(c => c.sku === sku);
         if (existing) {
-          // 更新工錢、穴數，並補上系列/角色（若之前未設定或本次有帶系列）
-          const updatePayload = { mold_fee: fee, mold_yield: moldYield };
-          if (s) {
-            updatePayload.series_id = s.id;
-            if (s.ip_id) updatePayload.ip_id = s.ip_id;
-          }
+          const updatePayload = { name: castingName, mold_yield: moldYield };
+          if (price !== null) updatePayload.mold_fee = price;
           const { error } = await db.from('castings').update(updatePayload).eq('id', existing.id);
-          if (error) { errors.push(`更新失敗 ${castingName}：${error.message}`); }
+          if (error) { errors.push(`更新失敗 ${sku}:${error.message}`); }
           else updated++;
         } else {
-          const payload = { name: castingName, mold_fee: fee, mold_yield: moldYield, casting_type: '鑄件', stock: 0, safety_stock: 0 };
-          if (s) { payload.series_id = s.id; if (s.ip_id) payload.ip_id = s.ip_id; }
+          const payload = {
+            sku,
+            name: castingName,
+            mold_yield: moldYield,
+            casting_type: '鑄件',
+            stock: 0,
+            safety_stock: 0
+          };
+          if (price !== null) payload.mold_fee = price;
           const { error } = await db.from('castings').insert(payload);
-          if (error) { errors.push(`新增失敗 ${castingName}：${error.message}`); }
+          if (error) { errors.push(`新增失敗 ${sku}:${error.message}`); }
           else created++;
         }
         ok++;
       }
 
       await loadCastings();
-      const msg = `完成：新增 ${created} 筆，更新 ${updated} 筆${errors.length?`，失敗 ${errors.length} 筆`:''}`;
+      const msg = `完成:新增 ${created} 筆,更新 ${updated} 筆${errors.length?`,失敗 ${errors.length} 筆`:''}`;
       resultEl.innerHTML = `<div style="color:${errors.length?'var(--warning)':'var(--success)'};font-weight:600">${msg}</div>`
-        + (errors.length ? `<div style="color:var(--danger);margin-top:6px">${errors.join('<br>')}</div>` : '');
+        + (errors.length ? `<div style="color:var(--danger);margin-top:6px;max-height:200px;overflow-y:auto">${errors.join('<br>')}</div>` : '');
       renderApp();
     }},
     { label: '關閉', onclick: closeModal },
