@@ -18159,26 +18159,63 @@ function renderCategoryManager() {
 
 function renderColorManager() {
   const colors = state.data.colorOptions || ['純銀不電鍍','純銀硫化','白K金','玫瑰金','黃18K金','黃22K金'];
+  const codeMap = state.data.platingCodeMap || {};
+  const nameToCode = {};
+  Object.entries(codeMap).forEach(([code, name]) => { nameToCode[name] = code; });
+
   return `
     <div class="card">
-      <div class="section-title" style="margin-bottom:12px">🎨 電鍍顏色選項管理</div>
+      <div class="section-title" style="margin-bottom:12px">🎨 電鍍顏色 & 貨號代碼管理</div>
+      <div style="background:#fff8e1;border-left:3px solid #f57c00;padding:8px 12px;font-size:12px;color:#666;margin-bottom:12px;line-height:1.6">
+        💡 <strong>代碼</strong>用於貨號自動解析(例:貨號 <code>AP1R2402<b>W</b>09</code> 的 W 對應「白K金」)。
+      </div>
       <div style="margin-bottom:12px;display:flex;gap:8px">
-        <input class="form-control" id="new-color-name" placeholder="新增顏色（例：黑金）" style="max-width:220px">
+        <input class="form-control" id="new-color-name" placeholder="新增顏色(例:黑金)" style="flex:1">
+        <input class="form-control" id="new-color-code" placeholder="代碼(例:K)" style="width:110px;text-transform:uppercase" maxlength="3">
         <button class="btn btn-primary" onclick="addColorOption()">+ 新增</button>
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">☰ 拖曳左側把手可調整順序，順序即為新增商品時的下拉選單順序</div>
+      <div style="font-size:12px;color:var(--muted);margin-bottom:8px">☰ 拖曳把手可調整順序 · 代碼改完按「儲存代碼」</div>
+
+      <div style="display:grid;grid-template-columns:24px 90px 1fr 130px;gap:8px;font-size:11px;color:var(--muted);font-weight:600;padding:6px 12px;background:#f5f5f5;border-radius:4px;margin-bottom:4px">
+        <div></div><div>代碼</div><div>顏色名稱</div><div style="text-align:right">操作</div>
+      </div>
+
       <div id="color-drag-list">
         ${colors.map((c,i)=>`
         <div class="drag-row" draggable="true" data-index="${i}" data-type="color"
-          style="display:flex;align-items:center;gap:10px;padding:10px 12px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--card);cursor:default">
+          style="display:grid;grid-template-columns:24px 90px 1fr 130px;gap:8px;align-items:center;padding:8px 12px;border:1px solid var(--border);border-radius:6px;margin-bottom:6px;background:var(--card)">
           <span class="drag-handle" style="cursor:grab;color:var(--muted);font-size:16px;user-select:none">☰</span>
-          <span style="flex:1;font-weight:500">${c}</span>
-          <button class="btn-table danger" onclick="deleteColorOption(${i})">刪除</button>
+          <input type="text" id="plating-code-${i}" value="${nameToCode[c]||''}" maxlength="3"
+            style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-family:monospace;font-weight:700;text-transform:uppercase;color:var(--accent-dark)"
+            placeholder="—">
+          <span style="font-weight:500">${c}</span>
+          <div style="display:flex;gap:4px;justify-content:flex-end">
+            <button class="btn-table danger" onclick="deleteColorOption(${i})" style="font-size:11px">刪</button>
+          </div>
         </div>`).join('')}
       </div>
-      <div style="font-size:12px;color:var(--muted);margin-top:8px">顏色選項儲存於系統設定，變更後立即生效</div>
+      <div style="margin-top:10px;display:flex;gap:8px">
+        <button class="btn btn-primary" onclick="savePlatingCodes()" style="background:#e0f2f1;color:#00695c;border-color:#00695c">💾 儲存所有代碼對照</button>
+        <span style="font-size:12px;color:var(--muted);align-self:center">改完代碼記得按這個</span>
+      </div>
+      <div style="font-size:12px;color:var(--muted);margin-top:8px">顏色 & 代碼儲存於系統設定,變更後立即生效</div>
     </div>`;
 }
+
+// 儲存所有電鍍色代碼對照
+window.savePlatingCodes = async function() {
+  const colors = state.data.colorOptions || [];
+  const map = {};
+  colors.forEach((name, i) => {
+    const code = (document.getElementById(`plating-code-${i}`)?.value || '').trim().toUpperCase();
+    if (code) map[code] = name;
+  });
+  const { error } = await db.from('settings').upsert({ key:'plating_code_map', value: JSON.stringify(map) });
+  if (error) { showToast('儲存失敗:'+error.message, 'error'); return; }
+  state.data.platingCodeMap = map;
+  showToast(`✅ 已儲存 ${Object.keys(map).length} 個代碼對照`);
+  renderApp();
+};
 
 function renderRepairPriceManager() {
   const prices = state.data.repairPrices || [];
@@ -21567,12 +21604,19 @@ window.deleteCategory = async function(id, name) {
 
 window.addColorOption = async function() {
   const name = document.getElementById('new-color-name').value.trim();
+  const code = (document.getElementById('new-color-code')?.value || '').trim().toUpperCase();
   if (!name) { showToast('請輸入顏色名稱','error'); return; }
   const colors = state.data.colorOptions || ['純銀不電鍍','純銀硫化','白K金','玫瑰金','黃18K金','黃22K金'];
   if (colors.includes(name)) { showToast('此顏色已存在','error'); return; }
   colors.push(name);
   await db.from('settings').upsert({ key:'color_options', value: JSON.stringify(colors) });
   state.data.colorOptions = colors;
+  // 順便存代碼(如果有填)
+  if (code) {
+    const map = { ...(state.data.platingCodeMap||{}), [code]: name };
+    await db.from('settings').upsert({ key:'plating_code_map', value: JSON.stringify(map) });
+    state.data.platingCodeMap = map;
+  }
   renderApp();
 };
 
