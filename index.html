@@ -8627,13 +8627,20 @@ function renderCS() {
 function modalImportParts() {
   showModal('批次匯入零件', `
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.8">
-      每行一筆，支援以下格式：<br>
+      每行一筆,支援以下格式:<br>
       <span style="font-family:monospace;background:#f5f5f5;padding:2px 6px;border-radius:3px">分類-品名_規格</span>
       &nbsp;或&nbsp;
       <span style="font-family:monospace;background:#f5f5f5;padding:2px 6px;border-radius:3px">分類-品名</span>
       &nbsp;或&nbsp;
-      <span style="font-family:monospace;background:#f5f5f5;padding:2px 6px;border-radius:3px">品名</span><br>
-      <span style="color:#aaa">例：鋯石-1.2mm圓_1月石榴紅</span>
+      <span style="font-family:monospace;background:#f5f5f5;padding:2px 6px;border-radius:3px">品名</span>
+      <div style="margin-top:6px;padding:8px 10px;background:#fff8e1;border-left:3px solid #f57c00;border-radius:4px;font-size:11px;color:#444;line-height:1.6">
+        <strong>💎 自動處理:</strong>
+        分類為「鋯石」且名稱結尾非「鑽」→ 系統自動補上「鑽」字<br>
+        <span style="color:#999">例:</span>
+        <code style="background:#fff;padding:1px 4px;border-radius:2px">鋯石-1.2mm圓_1月石榴紅</code>
+        →
+        分類 <strong>鋯石</strong> · 名稱 <strong>1.2mm圓鑽</strong> · 規格 <strong>1月石榴紅</strong>
+      </div>
     </div>
     <textarea class="form-control" id="import-parts-text" rows="10"
       placeholder="鋯石-1.2mm圓_1月石榴紅&#10;鋯石-1.2mm圓_2月紫水晶&#10;五金配件-彈弓扣&#10;鍊條-O形鍊_42cm"
@@ -8664,6 +8671,13 @@ function parsePartLine(line) {
     name = line.trim();
   }
   if (!name) return null;
+
+  // ─── 分類是「鋯石」且名稱結尾非「鑽」→ 自動補「鑽」字 ───
+  // 例:「鋯石-1.2mm圓_1月石榴紅」→ 名稱「1.2mm圓」變「1.2mm圓鑽」
+  if (category === '鋯石' && !name.endsWith('鑽')) {
+    name = name + '鑽';
+  }
+
   return { category: category || null, name, spec: spec || null };
 }
 
