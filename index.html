@@ -3588,7 +3588,25 @@ function renderParts() {
   let displayItems = base;
   if (filterCat) displayItems = displayItems.filter(p => (p.category||'(未分類)') === filterCat);
   if (filterShape) displayItems = displayItems.filter(p => p._shape === filterShape);
-  displayItems.sort((a,b) => (a.name||'').localeCompare(b.name||'','zh-Hant') || (a.spec||'').localeCompare(b.spec||'','zh-Hant'));
+
+  // 排序:先照名稱,同名字則:有「X月」的按月份 1→12 排前面,其他照文字排後面
+  const _monthMatch = s => {
+    const m = (s||'').match(/(\d{1,2})\s*月/);
+    return m ? parseInt(m[1]) : null;
+  };
+  displayItems.sort((a,b) => {
+    const nameCmp = (a.name||'').localeCompare(b.name||'','zh-Hant');
+    if (nameCmp !== 0) return nameCmp;
+    const ma = _monthMatch(a.spec);
+    const mb = _monthMatch(b.spec);
+    // 有月份 → 排前面
+    if (ma && !mb) return -1;
+    if (!ma && mb) return 1;
+    // 都有月份 → 按月份數字
+    if (ma && mb) return ma - mb;
+    // 都沒月份 → 按規格文字
+    return (a.spec||'').localeCompare(b.spec||'','zh-Hant');
+  });
 
   // 依名稱分組(同零件的不同規格聚在一起)
   const nameGroups = {};
