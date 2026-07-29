@@ -2072,7 +2072,11 @@ function renderProducts() {
                     const label = c.parts?.name || (part?.name) || '?';
                     const spec = c.parts?.spec || part?.spec || '';
                     const cat = part?.category || '';
-                    const showSpec = cat ? (partCatShowSpec[cat] !== false) : false;
+                    // 顯示規則:零件個別設定優先(true/false),null 才看分類設定
+                    const partIndividual = c.parts?.show_spec_in_product ?? part?.show_spec_in_product;
+                    const showSpec = partIndividual === false ? false
+                                   : partIndividual === true  ? true
+                                   : (cat ? (partCatShowSpec[cat] !== false) : false);
                     const unit = part?.unit || c.parts?.unit || '';
                     return `<div style="display:flex;align-items:center;gap:4px;white-space:nowrap">
                       <span>${label}${(showSpec && spec) ? ' '+spec : ''} ×${c.qty}${unit}</span>
