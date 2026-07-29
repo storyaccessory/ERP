@@ -3889,14 +3889,21 @@ function modalViewProduct(productId) {
     </div>`;
   }).join('');
 
+  const partCatShowSpecCfg = state.data.partCatShowSpec || {};
   const partRows = (p.product_parts||[]).map(c => {
     const part = (state.data.parts||[]).find(pt=>pt.id===c.part_id);
     const ok = !part || (part.stock||0) >= c.qty;
     const displayName = c.parts?.display_name || part?.display_name || c.parts?.name || part?.name || '?';
     const internalName = c.parts?.name || part?.name || '?';
     const spec = c.parts?.spec || part?.spec || '';
+    const cat  = part?.category || '';
+    // 跟清單一致的顯示規則
+    const partIndividual = c.parts?.show_spec_in_product ?? part?.show_spec_in_product;
+    const showSpec = partIndividual === false ? false
+                   : partIndividual === true  ? true
+                   : (cat ? (partCatShowSpecCfg[cat] !== false) : false);
     return `<div class="sp-bom-row" style="border-left:3px solid ${ok?'#b2dfdb':'var(--danger)'}">
-      <span class="name">${displayName}${displayName!==internalName?` <span style="color:var(--muted);font-weight:400;font-size:11px">(${internalName})</span>`:''}</span>
+      <span class="name">${displayName}${(showSpec && spec) ? ` <span style="color:var(--muted);font-size:12px">_${spec}</span>` : ''}${displayName!==internalName?` <span style="color:var(--muted);font-weight:400;font-size:11px">(${internalName})</span>`:''}</span>
       <span class="qty">× ${c.qty} ${c.parts?.unit||part?.unit||'顆'}</span>
       ${!ok?'<span class="tag tag-red" style="font-size:10px">缺貨</span>':''}
     </div>`;
