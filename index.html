@@ -9048,10 +9048,15 @@ function modalEditPart(id, copyFromId) {
       const catInput = document.getElementById('pt-cat').value.trim();
       // 名稱標準化(統一「馬眼形鑽」→「馬眼鑽」等,含分類限定規則)
       name = normalizePartName(name, catInput);
+      // ─── shape 判斷 ───
+      // 只有「您真的改成跟自動解析不同」時才存,不然存 null(讓顯示自動解析)
+      // 這樣未來解析規則更新,顯示會自動跟上;您也可以覆蓋為自訂值
+      const autoShape = parsePartShape(name, catInput);
+      const finalShape = shapeInput && shapeInput !== autoShape ? shapeInput : null;
       const payload = {
         name,
         category: catInput || null,
-        shape:    shapeInput || parsePartShape(name, catInput) || null,
+        shape:    finalShape,
         unit:     document.getElementById('pt-unit').value,
         spec:         document.getElementById('pt-spec').value.trim() || null,
         display_name: document.getElementById('pt-display-name').value.trim() || null,
