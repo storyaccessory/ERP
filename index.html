@@ -3048,25 +3048,50 @@ window.modalRetroFillFromSku = function() {
   const cats = state.data.categories || [];
   const platingMap = state.data.platingCodeMap || {};
 
-  // 找出「有貨號但缺品類或顏色」的商品
+  // 診斷統計
+  const diag = {
+    total: products.length,
+    withSku: 0,
+    skuParsed: 0,
+    skuUnparsed: [],
+    alreadyHaveBoth: 0,
+    catNotFound: {},   // {'戒指': 3, '項鍊': 5} → 名稱有解但 DB 找不到
+    colorUnknown: {},  // {'W': 2, 'X': 1} → 代碼沒對照
+    unparsedSample: [],
+  };
+
   const targets = [];
   products.forEach(p => {
     if (!p.sku) return;
+    diag.withSku++;
     const info = window.parseSku(p.sku);
-    if (!info) return;
+    if (!info) {
+      if (diag.unparsedSample.length < 5) diag.unparsedSample.push(p.sku);
+      return;
+    }
+    diag.skuParsed++;
 
     let needCat = false, needColor = false;
     let catId = p.category_id;
     let colorVal = p.color;
 
+    // 品類判斷
     if (!p.category_id && info.category_name) {
       const cat = cats.find(c => c.name === info.category_name);
       if (cat) { catId = cat.id; needCat = true; }
+      else diag.catNotFound[info.category_name] = (diag.catNotFound[info.category_name]||0)+1;
     }
-    if (!p.color && info.plating_name) {
-      colorVal = info.plating_name;
-      needColor = true;
+    // 顏色判斷
+    if (!p.color) {
+      if (info.plating_name) {
+        colorVal = info.plating_name;
+        needColor = true;
+      } else if (info.plating_code) {
+        diag.colorUnknown[info.plating_code] = (diag.colorUnknown[info.plating_code]||0)+1;
+      }
     }
+
+    if (p.category_id && p.color) diag.alreadyHaveBoth++;
 
     if (needCat || needColor) {
       targets.push({
@@ -3078,7 +3103,60 @@ window.modalRetroFillFromSku = function() {
   });
 
   if (!targets.length) {
-    showToast('沒有需要補填的商品(或貨號無法解析)', 'success');
+    // 顯示詳細診斷讓使用者知道為什麼沒東西可補
+    const catNotFoundList = Object.entries(diag.catNotFound).map(([n,c])=>`${n}(${c}筆)`).join('、') || '無';
+    const colorUnknownList = Object.entries(diag.colorUnknown).map(([c,n])=>`${c}(${n}筆)`).join('、') || '無';
+    const currentCats = cats.map(c=>c.name).join('、') || '(還沒建品類)';
+    const currentPlating = Object.entries(platingMap).map(([c,n])=>`${c}=${n}`).join('、') || '(還沒設代碼)';
+
+    showModal('🔍 診斷結果', `
+      <div style="font-size:13px;line-height:1.8">
+        <div style="background:#f0f7ff;padding:10px 14px;border-radius:6px;margin-bottom:12px">
+          <strong>📊 統計</strong><br>
+          總商品數:${diag.total}<br>
+          有貨號的:${diag.withSku}<br>
+          貨號可解析:${diag.skuParsed}<br>
+          貨號解析失敗:${diag.withSku - diag.skuParsed}<br>
+          已有品類 + 顏色的:${diag.alreadyHaveBoth}
+        </div>
+
+        ${Object.keys(diag.catNotFound).length ? `
+        <div style="background:#fff8e1;padding:10px 14px;border-radius:6px;margin-bottom:12px;border-left:3px solid #f57c00">
+          <strong style="color:#e65100">⚠ 貨號解析出的品類,但系統找不到對應:</strong><br>
+          ${catNotFoundList}<br>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">
+            👉 到「設定 → 品類管理」新增這些品類,或改成跟這裡一樣的名稱
+          </div>
+        </div>` : ''}
+
+        ${Object.keys(diag.colorUnknown).length ? `
+        <div style="background:#ffebee;padding:10px 14px;border-radius:6px;margin-bottom:12px;border-left:3px solid #c62828">
+          <strong style="color:#c62828">⚠ 貨號有電鍍代碼,但設定裡沒對照:</strong><br>
+          ${colorUnknownList}<br>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">
+            👉 到「設定 → 顏色選項」新增這些代碼對照
+          </div>
+        </div>` : ''}
+
+        ${diag.unparsedSample.length ? `
+        <div style="background:#fce4ec;padding:10px 14px;border-radius:6px;margin-bottom:12px;border-left:3px solid #c2185b">
+          <strong style="color:#c2185b">⚠ 這些貨號無法解析(範例):</strong><br>
+          ${diag.unparsedSample.map(s=>`<code>${s}</code>`).join('、')}<br>
+          <div style="font-size:11px;color:var(--muted);margin-top:6px">
+            👉 標準格式:代碼(2-4字母)+ 版本(1數字)+ 品類(1字母)+ 4數字 + 電鍍代碼 + 尺寸<br>
+            例:<code>AP1R2402W09</code>
+          </div>
+        </div>` : ''}
+
+        <div style="background:#e8f5e9;padding:10px 14px;border-radius:6px;font-size:12px">
+          <strong>📚 目前系統設定</strong><br>
+          品類:${currentCats}<br>
+          電鍍代碼對照:${currentPlating}
+        </div>
+      </div>
+    `, [
+      { label:'關閉', onclick: closeModal },
+    ]);
     return;
   }
 
