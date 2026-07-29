@@ -3558,10 +3558,10 @@ function renderParts() {
   const lowStock = parts.filter(p => (p.stock||0) > 0 && p.stock <= (p.safety_stock||0)).length;
 
   // 每筆算出 shape (優先用即時解析,確保用最新規則;沒解析結果才 fallback 到資料庫欄位)
-  // 只用資料庫的 shape 欄位(以編輯視窗填的為準);未設定 → (未設定形狀)
+  // 有 shape 就用(編輯視窗填的以此為準);沒 shape 就自動解析
   const withShape = parts.map(p => ({
     ...p,
-    _shape: p.shape || '(未設定形狀)',
+    _shape: p.shape || parsePartShape(p.name, p.category) || '(未分類)',
   }));
 
   // 應用搜尋 + 庫存篩選(這兩個影響左右兩邊)
