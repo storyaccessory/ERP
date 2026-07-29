@@ -3558,9 +3558,10 @@ function renderParts() {
   const lowStock = parts.filter(p => (p.stock||0) > 0 && p.stock <= (p.safety_stock||0)).length;
 
   // 每筆算出 shape (優先用即時解析,確保用最新規則;沒解析結果才 fallback 到資料庫欄位)
+  // 只用資料庫的 shape 欄位(以編輯視窗填的為準);未設定 → (未設定形狀)
   const withShape = parts.map(p => ({
     ...p,
-    _shape: parsePartShape(p.name, p.category) || p.shape || '(未分類)',
+    _shape: p.shape || '(未設定形狀)',
   }));
 
   // 應用搜尋 + 庫存篩選(這兩個影響左右兩邊)
@@ -3696,7 +3697,7 @@ function renderParts() {
                 <td style="text-align:center;padding:8px 8px;font-size:12px">${p.unit_price!=null?`$${p.unit_price}`:'—'}</td>
                 <td style="text-align:right;padding:6px 12px;white-space:nowrap">
                   <button class="btn-table" data-action="edit-part" data-id="${p.id}" style="font-size:11px">編輯</button>
-                  <button class="btn-table" data-action="copy-part" data-id="${p.id}" style="background:#e3f2fd;color:#1565c0;font-size:11px" title="複製新增">📄</button>
+                  <button class="btn-table" data-action="copy-part" data-id="${p.id}" style="background:#e3f2fd;color:#1565c0;font-size:11px" title="複製新增">複製</button>
                   ${canAdjustStock()?`<button class="btn-table" data-action="adj-stock-part" data-id="${p.id}" style="background:#e8f5f4;color:var(--accent-dark);font-size:11px">庫存</button>`:''}
                   <button class="btn-table danger" data-action="del-part" data-id="${p.id}" style="font-size:11px">刪</button>
                 </td>
@@ -24225,11 +24226,24 @@ window.modalManagePartCategories = function() {
       </tr>`;
   }).join('');
 
+  const noShapeCount = parts.filter(p => !p.shape).length;
+
   showModal('📚 分類管理', `
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.7">
       共 <strong>${cats.filter(c=>c!=='(未分類)').length}</strong> 個分類 · 總計 <strong>${parts.length}</strong> 筆零件<br>
       <span style="color:#f57c00">⚠ 分類是綁在零件上的,重命名/合併/刪除會影響所有相關零件</span>
     </div>
+
+    ${noShapeCount > 0 ? `
+    <!-- 批次自動填形狀 -->
+    <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:12px;margin-bottom:16px">
+      <div style="font-weight:600;color:#e65100;font-size:13px;margin-bottom:6px">🔧 有 ${noShapeCount} 筆零件的形狀未設定</div>
+      <div style="font-size:12px;color:#5d4037;line-height:1.6;margin-bottom:8px">
+        目前樹狀選單只用「編輯視窗裡填的形狀」。未設定形狀的零件會被歸到「(未設定形狀)」群組。<br>
+        可以按下方按鈕,系統會根據名稱自動抽出形狀填入(例:<code>1.2mm圓鑽</code> → 形狀「圓鑽」)。
+      </div>
+      <button class="btn btn-primary" onclick="window._autoFillPartShapes()" style="background:#f57c00;border-color:#f57c00">🔧 自動填 ${noShapeCount} 筆形狀</button>
+    </div>` : ''}
 
     <!-- 新增分類 -->
     <div style="background:#f0faf9;border:1px solid #b2dfdb;border-radius:6px;padding:12px;margin-bottom:16px">
@@ -24258,6 +24272,36 @@ window.modalManagePartCategories = function() {
   `, [
     { label: '關閉', onclick: closeModal },
   ]);
+};
+
+// 批次自動填形狀:遍歷所有 shape 為空的零件,用 parsePartShape 解析並存入 DB
+window._autoFillPartShapes = async function() {
+  const parts = state.data.parts || [];
+  const targets = parts.filter(p => !p.shape);
+  if (!targets.length) { showToast('沒有需要填的零件', 'success'); return; }
+
+  const updates = targets.map(p => ({
+    id: p.id,
+    shape: parsePartShape(p.name, p.category) || null,
+  })).filter(u => u.shape); // 沒解析出形狀的略過
+
+  if (!updates.length) {
+    showToast('這些零件的名稱無法解析出形狀,請手動編輯', 'warn');
+    return;
+  }
+
+  if (!confirm(`會更新 ${updates.length} 筆零件的形狀欄位,確定?`)) return;
+
+  let ok = 0, fail = 0;
+  for (const u of updates) {
+    const { error } = await db.from('parts').update({ shape: u.shape }).eq('id', u.id);
+    if (error) fail++;
+    else ok++;
+  }
+  showToast(`✅ 成功更新 ${ok} 筆${fail?`,失敗 ${fail} 筆`:''}`);
+  await loadParts();
+  closeModal();
+  window.modalManagePartCategories();
 };
 
 // 新增分類 → 建一筆示範零件
