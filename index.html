@@ -3547,22 +3547,145 @@ function modalViewCasting(castingId) {
   ]);
 }
 
-// ── Parts ──
+// ── Parts ── 樹狀瀏覽:分類 → 形狀 → 規格
 function renderParts() {
   const parts = state.data.parts || [];
-  const cats = [...new Set(parts.map(p => p.category).filter(Boolean))];
   const filterCat = state.data.filterPartCat || '';
+  const filterShape = state.data.filterPartShape || '';
+  const stockOnly = !!state.data.partsStockOnly;
   const searchQ = (state.data.partSearch||'').toLowerCase().trim();
   const outOfStock = parts.filter(p => (p.stock||0) === 0).length;
   const lowStock = parts.filter(p => (p.stock||0) > 0 && p.stock <= (p.safety_stock||0)).length;
 
-  let filtered = filterCat ? parts.filter(p => p.category === filterCat) : parts;
-  if (searchQ) filtered = filtered.filter(p =>
+  // 每筆算出 shape (優先用資料庫欄位,退回自動解析)
+  const withShape = parts.map(p => ({
+    ...p,
+    _shape: p.shape || parsePartShape(p.name, p.category) || '(未分類)',
+  }));
+
+  // 應用搜尋 + 庫存篩選(這兩個影響左右兩邊)
+  let base = withShape;
+  if (searchQ) base = base.filter(p =>
     p.name?.toLowerCase().includes(searchQ) ||
     p.spec?.toLowerCase().includes(searchQ) ||
     p.category?.toLowerCase().includes(searchQ) ||
+    (p._shape||'').toLowerCase().includes(searchQ) ||
     p.notes?.toLowerCase().includes(searchQ)
   );
+  if (stockOnly) base = base.filter(p => (p.stock||0) > 0);
+
+  // 建樹:分類 → 形狀 → 零件陣列
+  const tree = {};
+  base.forEach(p => {
+    const cat = p.category || '(未分類)';
+    if (!tree[cat]) tree[cat] = {};
+    const sh = p._shape || '(未分類)';
+    if (!tree[cat][sh]) tree[cat][sh] = [];
+    tree[cat][sh].push(p);
+  });
+
+  // 右邊顯示的清單
+  let displayItems = base;
+  if (filterCat) displayItems = displayItems.filter(p => (p.category||'(未分類)') === filterCat);
+  if (filterShape) displayItems = displayItems.filter(p => p._shape === filterShape);
+  displayItems.sort((a,b) => (a.name||'').localeCompare(b.name||'','zh-Hant') || (a.spec||'').localeCompare(b.spec||'','zh-Hant'));
+
+  // 依名稱分組(同零件的不同規格聚在一起)
+  const nameGroups = {};
+  displayItems.forEach(p => {
+    const k = p.name || '(未命名)';
+    if (!nameGroups[k]) nameGroups[k] = [];
+    nameGroups[k].push(p);
+  });
+
+  // 左側樹狀 HTML
+  const catNames = Object.keys(tree).sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+  const treeHtml = catNames.map(cat => {
+    const shapes = Object.keys(tree[cat]).sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+    const catCount = shapes.reduce((s,sh)=>s+tree[cat][sh].length,0);
+    const isActiveCat = filterCat === cat;
+    return `
+      <div style="margin-bottom:2px">
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:${isActiveCat?700:600};background:${isActiveCat?'var(--accent-light)':'transparent'};color:${isActiveCat?'var(--accent-dark)':'var(--text)'}"
+          onclick="_partsSelectCat('${cat.replace(/'/g,"\\'")}')"
+          onmouseover="if(!this.style.background.includes('accent'))this.style.background='#f5f5f5'"
+          onmouseout="if(!${isActiveCat})this.style.background='transparent'">
+          <span style="font-size:10px;color:var(--muted)">${isActiveCat?'▼':'▶'}</span>
+          <span style="flex:1">${cat}</span>
+          <span style="font-size:11px;color:var(--muted);font-weight:400">${catCount}</span>
+        </div>
+        ${isActiveCat ? `
+          <div style="padding-left:18px;margin:3px 0 6px">
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;color:${!filterShape?'var(--accent-dark)':'var(--muted)'};font-weight:${!filterShape?600:400};background:${!filterShape?'#e8f5f4':'transparent'}"
+              onclick="_partsSelectShape('')">
+              <span>📋</span><span style="flex:1">全部</span><span style="font-size:11px;color:var(--muted)">${catCount}</span>
+            </div>
+            ${shapes.map(sh => {
+              const active = filterShape === sh;
+              return `<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;background:${active?'#e8f5f4':'transparent'};color:${active?'var(--accent-dark)':'var(--text)'};font-weight:${active?600:400}"
+                onclick="_partsSelectShape('${sh.replace(/'/g,"\\'")}')"
+                onmouseover="if(!${active})this.style.background='#fafafa'"
+                onmouseout="if(!${active})this.style.background='transparent'">
+                <span style="width:5px;height:5px;border-radius:50%;background:${active?'var(--accent)':'#ccc'}"></span>
+                <span style="flex:1">${sh}</span>
+                <span style="font-size:11px;color:var(--muted)">${tree[cat][sh].length}</span>
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+      </div>`;
+  }).join('');
+
+  // 右側零件列表(按名稱分組成卡片)
+  const groupNames = Object.keys(nameGroups);
+  const listHtml = groupNames.length === 0
+    ? `<div class="card"><div class="empty" style="padding:40px 20px"><div class="empty-icon">🔩</div><p>${searchQ?'找不到符合條件的零件':'請從左側選擇分類'}</p></div></div>`
+    : groupNames.map(gName => {
+      const items = nameGroups[gName];
+      const totalStock = items.reduce((s,p)=>s+(p.stock||0),0);
+      const anyStock = items.some(p=>(p.stock||0)>0);
+      return `
+        <div class="card" style="margin-bottom:10px;padding:0;overflow:hidden">
+          <div style="padding:9px 14px;background:#f8f9fa;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px">
+            <span style="font-size:14px;font-weight:700;flex:1">${gName}</span>
+            <span style="font-size:11px;color:var(--muted)">${items.length} 種規格 · 總庫存 ${totalStock}</span>
+            ${!anyStock ? `<span class="tag tag-red" style="font-size:10px">全部缺貨</span>` : ''}
+          </div>
+          <table style="width:100%;font-size:13px;border-collapse:collapse">
+            <thead><tr style="background:#fafafa;color:var(--muted);font-size:11px">
+              <th style="text-align:left;padding:6px 12px">規格</th>
+              <th style="text-align:center;padding:6px 8px;width:80px">庫存</th>
+              <th style="text-align:center;padding:6px 8px;width:50px">單位</th>
+              <th style="text-align:center;padding:6px 8px;width:60px">安庫</th>
+              <th style="text-align:center;padding:6px 8px;width:70px">單價</th>
+              <th style="text-align:right;padding:6px 12px;width:200px">操作</th>
+            </tr></thead>
+            <tbody>
+            ${items.map(p => {
+              const stock = p.stock||0;
+              const safe = p.safety_stock||0;
+              const isOut = stock === 0;
+              const isLow = stock > 0 && stock <= safe;
+              const stockCol = isOut ? 'var(--danger)' : isLow ? 'var(--warning)' : 'var(--success)';
+              return `<tr style="border-top:1px solid #f0f0f0">
+                <td style="padding:8px 12px">
+                  ${p.spec || '<span style="color:#ccc">—</span>'}
+                  ${p.notes ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${p.notes}</div>` : ''}
+                </td>
+                <td style="text-align:center;padding:8px 8px;font-weight:700;color:${stockCol}">${stock}${isOut ? ' 🔴' : isLow ? ' 🟠' : ''}</td>
+                <td style="text-align:center;padding:8px 8px;color:var(--muted);font-size:12px">${p.unit||'顆'}</td>
+                <td style="text-align:center;padding:8px 8px;color:var(--muted);font-size:12px">${safe||'—'}</td>
+                <td style="text-align:center;padding:8px 8px;font-size:12px">${p.unit_price!=null?`$${p.unit_price}`:'—'}</td>
+                <td style="text-align:right;padding:6px 12px;white-space:nowrap">
+                  <button class="btn-table" data-action="edit-part" data-id="${p.id}" style="font-size:11px">編輯</button>
+                  ${canAdjustStock()?`<button class="btn-table" data-action="adj-stock-part" data-id="${p.id}" style="background:#e8f5f4;color:var(--accent-dark);font-size:11px">庫存</button>`:''}
+                  <button class="btn-table danger" data-action="del-part" data-id="${p.id}" style="font-size:11px">刪</button>
+                </td>
+              </tr>`;
+            }).join('')}
+            </tbody>
+          </table>
+        </div>`;
+    }).join('');
 
   return `
     <div class="cards cards-4" style="margin-bottom:16px">
@@ -3571,67 +3694,55 @@ function renderParts() {
       <div class="card"><div class="card-title">庫存偏低</div><div class="card-value warning">${lowStock}<span style="font-size:16px"> 種</span></div></div>
       <div class="card"><div class="card-title">缺貨</div><div class="card-value danger">${outOfStock}<span style="font-size:16px"> 種</span></div></div>
     </div>
-    <div class="chip-tabs">
-      <div class="chip ${!filterCat?'active':''}" data-part-cat="">全部 <span class="count">${parts.length}</span></div>
-      ${cats.map(c => `<div class="chip ${filterCat===c?'active':''}" data-part-cat="${c}">${c} <span class="count">${parts.filter(p=>p.category===c).length}</span></div>`).join('')}
-    </div>
-    <div class="search-bar">
-      <input class="search-input" id="part-search" value="${state.data.partSearch||''}" placeholder="搜尋零件名稱、規格、備註…"
+
+    <div class="search-bar" style="margin-bottom:12px">
+      <input class="search-input" id="part-search" value="${state.data.partSearch||''}" placeholder="🔍 搜尋 分類 / 形狀 / 名稱 / 規格 / 備註…"
         oninput="_searchHandler('partSearch','part-search',event)"
         oncompositionend="_searchHandler('partSearch','part-search',event)">
+      <label style="display:flex;align-items:center;gap:6px;padding:6px 12px;border:1px solid ${stockOnly?'var(--accent)':'var(--border)'};background:${stockOnly?'var(--accent-light)':'#fff'};border-radius:6px;cursor:pointer;font-size:12px;font-weight:${stockOnly?600:400};color:${stockOnly?'var(--accent-dark)':'var(--text)'};white-space:nowrap">
+        <input type="checkbox" ${stockOnly?'checked':''} onchange="state.data.partsStockOnly=this.checked;renderApp()">
+        ✅ 只顯示有庫存
+      </label>
       <button class="btn btn-primary" id="add-part-btn">+ 新增零件</button>
       <button class="btn btn-outline" id="import-parts-btn">↑ 批次匯入</button>
       <button class="btn btn-outline" id="export-parts-btn">↓ 匯出 CSV</button>
       <button class="btn btn-outline" onclick="modalPartCatSpecSetting()" title="設定各分類是否在商品頁顯示規格">⚙ 分類規格顯示</button>
     </div>
-    ${batchBar('parts', filtered)}
-    <div class="card">
-      <div class="table-wrap">
-        <table>
-          <thead><tr>
-            <th style="width:32px"><input type="checkbox" class="batch-cb" id="batch-all-parts" onchange="batchToggleAll('parts',this.checked)"></th>
-            <th>操作</th><th>零件名稱</th><th>分類</th><th>規格</th>
-            <th>庫存</th><th>單位</th><th>安全庫存</th><th>單價</th><th>狀態</th>
-          </tr></thead>
-          <tbody>
-          ${filtered.length === 0 ? `<tr><td colspan="10"><div class="empty"><div class="empty-icon">🔩</div><p>${searchQ?'找不到符合條件的零件':'尚無零件資料'}</p></div></td></tr>` :
-            filtered.map(p => {
-              const sel = (state.batch?.parts||new Set()).has(p.id);
-              const stock = p.stock || 0;
-              const safe = p.safety_stock || 0;
-              const status = stock === 0 ? ['缺貨','tag-red'] : stock <= safe ? ['庫存低','tag-orange'] : ['充足','tag-green'];
-              const pct = safe > 0 ? Math.min(stock/safe*100, 100) : 100;
-              const barColor = stock===0?'var(--danger)':stock<=safe?'var(--warning)':'var(--success)';
-              return `<tr class="${sel?'selected-row':''}">
-                <td><input type="checkbox" class="batch-cb" ${sel?'checked':''} onchange="batchToggle('parts','${p.id}',this.checked)"></td>
-                <td><div class="action-btns">
-                  <button class="btn-table" data-action="edit-part" data-id="${p.id}">編輯</button>
-                  ${canAdjustStock()?`<button class="btn-table" data-action="adj-stock-part" data-id="${p.id}" style="background:#e8f5f4;color:var(--accent-dark)">庫存異動</button>`:''}
-                  <button class="btn-table danger" data-action="del-part" data-id="${p.id}">刪除</button>
-                </div></td>
-                <td>
-                  <strong>${p.name}</strong>
-                  ${p.notes?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${p.notes}</div>`:''}
-                </td>
-                <td>${p.category ? `<span class="tag tag-teal">${p.category}</span>` : '—'}</td>
-                <td style="font-size:12px;color:var(--muted)">${p.spec||'—'}</td>
-                <td>
-                  <strong style="font-size:15px">${stock}</strong>
-                  <div style="width:72px;background:#e0e0e0;border-radius:3px;height:4px;margin-top:4px">
-                    <div style="width:${pct}%;background:${barColor};height:4px;border-radius:3px;transition:width .3s"></div>
-                  </div>
-                </td>
-                <td style="color:var(--muted)">${p.unit||'顆'}</td>
-                <td style="color:var(--muted)">${safe||'—'}</td>
-                <td style="font-size:12px">${p.unit_price!=null?`$${p.unit_price}`:'—'}</td>
-                <td><span class="tag ${status[1]}">${status[0]}</span></td>
-              </tr>`;
-            }).join('')}
-          </tbody>
-        </table>
+
+    ${(filterCat || filterShape) ? `<div style="margin-bottom:10px;padding:8px 12px;background:var(--accent-light);border-left:3px solid var(--accent);border-radius:5px;font-size:12px;color:var(--accent-dark)">
+      篩選中:<strong>${filterCat || '全部'}</strong>${filterShape ? ` · <strong>${filterShape}</strong>` : ''}
+      <button onclick="state.data.filterPartCat='';state.data.filterPartShape='';renderApp()" style="margin-left:10px;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px">✕ 清除</button>
+    </div>` : ''}
+
+    <div style="display:grid;grid-template-columns:260px 1fr;gap:16px;align-items:start">
+      <!-- 左:分類/形狀 樹 -->
+      <div class="card" style="padding:12px;max-height:calc(100vh - 260px);overflow-y:auto;position:sticky;top:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">📚 分類 / 形狀</div>
+        ${catNames.length ? treeHtml : '<div style="font-size:12px;color:var(--muted);text-align:center;padding:20px">尚無零件</div>'}
       </div>
-    </div>`;
+      <!-- 右:零件列表 -->
+      <div>
+        ${listHtml}
+      </div>
+    </div>
+  `;
 }
+
+// 樹狀選單事件
+window._partsSelectCat = function(cat) {
+  if (state.data.filterPartCat === cat) {
+    state.data.filterPartCat = '';
+    state.data.filterPartShape = '';
+  } else {
+    state.data.filterPartCat = cat;
+    state.data.filterPartShape = '';
+  }
+  renderApp();
+};
+window._partsSelectShape = function(sh) {
+  state.data.filterPartShape = sh;
+  renderApp();
+};
 
 // ── Castings ──
 function renderCastings() {
@@ -8679,13 +8790,39 @@ function parsePartLine(line) {
   if (!name) return null;
 
   // ─── 分類是「鋯石」且名稱結尾非「鑽」→ 自動補「鑽」字 ───
-  // 例:「鋯石-1.2mm圓_1月石榴紅」→ 名稱「1.2mm圓」變「1.2mm圓鑽」
   if (category === '鋯石' && !name.endsWith('鑽')) {
     name = name + '鑽';
   }
 
-  return { category: category || null, name, spec: spec || null };
+  const shape = parsePartShape(name, category);
+  return { category: category || null, name, spec: spec || null, shape };
 }
+
+// ─── 從名稱抽出「形狀/類型」──────────────────
+// 用於樹狀瀏覽的第二層分類
+// 邏輯:
+//   鋯石類:抽出「圓鑽/橢圓鑽/星星鑽/愛心鑽」等 (去掉尺寸)
+//   鏈類/其他:整個名稱去掉尺寸/長度就是形狀
+function parsePartShape(name, category) {
+  if (!name) return null;
+  const cat = (category || '').trim();
+  let s = name.trim();
+
+  // 去掉尺寸相關的字元:mm、cm、公分、"、'、# + 前綴數字
+  //   例:「1.2mm圓鑽」→「圓鑽」;「42cm」→ ''
+  s = s.replace(/[\d.]+\s*(mm|cm|公分|吋|"|')/gi, '').trim();
+  //   例:「#9 戒指」→「戒指」
+  s = s.replace(/#\d+/g, '').trim();
+  //   去掉開頭殘留的數字 (例:「10顆」→「顆」)
+  s = s.replace(/^[\d.]+/, '').trim();
+  //   兩端可能殘留的括號、標點
+  s = s.replace(/^[\s()（）_-]+/, '').replace(/[\s()（）_-]+$/, '').trim();
+
+  // 若整個名稱都是尺寸,shape 為空
+  if (!s) return null;
+  return s;
+}
+window.parsePartShape = parsePartShape;
 
 function previewImportParts() {
   const text = document.getElementById('import-parts-text')?.value || '';
@@ -8698,17 +8835,19 @@ function previewImportParts() {
     return;
   }
   preview.innerHTML = `
-    <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px">預覽 ${parsed.length} 筆：</div>
+    <div style="font-size:12px;font-weight:600;color:var(--muted);margin-bottom:6px">預覽 ${parsed.length} 筆:</div>
     <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden;max-height:220px;overflow-y:auto">
       <table style="width:100%;font-size:12px;border-collapse:collapse">
         <thead><tr style="background:#f5f5f5">
           <th style="padding:6px 10px;text-align:left;font-weight:600;border-bottom:1px solid var(--border)">分類</th>
+          <th style="padding:6px 10px;text-align:left;font-weight:600;border-bottom:1px solid var(--border)">形狀</th>
           <th style="padding:6px 10px;text-align:left;font-weight:600;border-bottom:1px solid var(--border)">品名</th>
           <th style="padding:6px 10px;text-align:left;font-weight:600;border-bottom:1px solid var(--border)">規格</th>
         </tr></thead>
         <tbody>
           ${parsed.map((p,i) => `<tr style="border-bottom:1px solid #f5f5f5;background:${i%2?'#fafafa':'#fff'}">
             <td style="padding:5px 10px;color:var(--muted)">${p.category||'<span style="color:#ccc">—</span>'}</td>
+            <td style="padding:5px 10px;color:var(--accent-dark);font-size:11px">${p.shape||'<span style="color:#ccc">—</span>'}</td>
             <td style="padding:5px 10px;font-weight:500">${p.name}</td>
             <td style="padding:5px 10px;color:var(--muted)">${p.spec||'<span style="color:#ccc">—</span>'}</td>
           </tr>`).join('')}
@@ -8738,6 +8877,7 @@ async function confirmImportParts() {
   const inserts = toInsert.map(p => ({
     name: p.name,
     category: p.category || null,
+    shape: p.shape || null,
     spec: p.spec || null,
     stock: 0,
     safety_stock: 0,
@@ -8770,11 +8910,19 @@ function modalEditPart(id) {
       <label>零件名稱 <span style="color:var(--danger)">*</span></label>
       <input class="form-control" id="pt-name" placeholder="例：造型吊飾、彈弓扣">
     </div>
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
       <div class="form-group">
-        <label>分類</label>
-        <input class="form-control" id="pt-cat" list="pt-cat-list" placeholder="例：五金配件">
+        <label>分類 <span style="font-size:11px;color:var(--muted);font-weight:400">(第一層)</span></label>
+        <input class="form-control" id="pt-cat" list="pt-cat-list" placeholder="例:鋯石、鏈子、配件">
         <datalist id="pt-cat-list">${cats.map(c=>`<option value="${c}">`).join('')}</datalist>
+      </div>
+      <div class="form-group">
+        <label>形狀/類型 <span style="font-size:11px;color:var(--muted);font-weight:400">(第二層,選填)</span></label>
+        <input class="form-control" id="pt-shape" list="pt-shape-list" placeholder="例:圓鑽、O形鍊(自動抽出)">
+        <datalist id="pt-shape-list">${(() => {
+          const shapes = [...new Set(parts.map(p=>p.shape||parsePartShape(p.name,p.category)).filter(Boolean))];
+          return shapes.map(s=>`<option value="${s}">`).join('');
+        })()}</datalist>
       </div>
       <div class="form-group">
         <label>單位</label>
@@ -8785,8 +8933,8 @@ function modalEditPart(id) {
       </div>
     </div>
     <div class="form-group">
-      <label>規格說明</label>
-      <input class="form-control" id="pt-spec" placeholder="例：12mm 圓形、鍍金">
+      <label>規格說明 <span style="font-size:11px;color:var(--muted);font-weight:400">(第三層:顏色、尺寸細節)</span></label>
+      <input class="form-control" id="pt-spec" placeholder="例:1月石榴紅、42cm、鍍金">
     </div>
     <div class="form-group">
       <label>客人顯示名稱 <span style="font-size:11px;color:var(--muted);font-weight:400">（顯示在商品規格給客人看，留空則顯示零件名稱）</span></label>
@@ -8816,6 +8964,7 @@ function modalEditPart(id) {
   if (pt) {
     body.querySelector('#pt-name').value        = pt.name || '';
     body.querySelector('#pt-cat').value         = pt.category || '';
+    body.querySelector('#pt-shape').value       = pt.shape || parsePartShape(pt.name, pt.category) || '';
     body.querySelector('#pt-unit').value        = pt.unit || '顆';
     body.querySelector('#pt-spec').value        = pt.spec || '';
     body.querySelector('#pt-display-name').value= pt.display_name || '';
@@ -8831,9 +8980,12 @@ function modalEditPart(id) {
     { label: id ? '儲存' : '新增', primary: true, onclick: async () => {
       const name = document.getElementById('pt-name').value.trim();
       if (!name) { showToast('請填零件名稱','error'); return; }
+      const shapeInput = document.getElementById('pt-shape')?.value.trim() || '';
+      const catInput = document.getElementById('pt-cat').value.trim();
       const payload = {
         name,
-        category: document.getElementById('pt-cat').value.trim() || null,
+        category: catInput || null,
+        shape:    shapeInput || parsePartShape(name, catInput) || null,
         unit:     document.getElementById('pt-unit').value,
         spec:         document.getElementById('pt-spec').value.trim() || null,
         display_name: document.getElementById('pt-display-name').value.trim() || null,
