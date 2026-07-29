@@ -3557,10 +3557,10 @@ function renderParts() {
   const outOfStock = parts.filter(p => (p.stock||0) === 0).length;
   const lowStock = parts.filter(p => (p.stock||0) > 0 && p.stock <= (p.safety_stock||0)).length;
 
-  // 每筆算出 shape (優先用資料庫欄位,退回自動解析)
+  // 每筆算出 shape (優先用即時解析,確保用最新規則;沒解析結果才 fallback 到資料庫欄位)
   const withShape = parts.map(p => ({
     ...p,
-    _shape: p.shape || parsePartShape(p.name, p.category) || '(未分類)',
+    _shape: parsePartShape(p.name, p.category) || p.shape || '(未分類)',
   }));
 
   // 應用搜尋 + 庫存篩選(這兩個影響左右兩邊)
@@ -3670,7 +3670,7 @@ function renderParts() {
           </div>
           <table style="width:100%;font-size:13px;border-collapse:collapse">
             <thead><tr style="background:#fafafa;color:var(--muted);font-size:11px">
-              <th style="text-align:left;padding:6px 12px">規格</th>
+              <th style="text-align:left;padding:6px 12px">品名 · 規格</th>
               <th style="text-align:center;padding:6px 8px;width:80px">庫存</th>
               <th style="text-align:center;padding:6px 8px;width:50px">單位</th>
               <th style="text-align:center;padding:6px 8px;width:60px">安庫</th>
@@ -3686,7 +3686,8 @@ function renderParts() {
               const stockCol = isOut ? 'var(--danger)' : isLow ? 'var(--warning)' : 'var(--success)';
               return `<tr style="border-top:1px solid #f0f0f0">
                 <td style="padding:8px 12px">
-                  ${p.spec || '<span style="color:#ccc">—</span>'}
+                  <span style="color:var(--accent-dark);font-weight:500">${p.name||''}</span>
+                  ${p.spec ? `<span style="color:var(--muted);margin:0 6px">·</span><span>${p.spec}</span>` : ''}
                   ${p.notes ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${p.notes}</div>` : ''}
                 </td>
                 <td style="text-align:center;padding:8px 8px;font-weight:700;color:${stockCol}">${stock}${isOut ? ' 🔴' : isLow ? ' 🟠' : ''}</td>
