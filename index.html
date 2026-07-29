@@ -2022,11 +2022,11 @@ function renderProducts() {
         <table>
           <thead><tr>
             <th style="width:32px"><input type="checkbox" class="batch-cb" id="batch-all-products" onchange="batchToggleAll('products',this.checked)"></th>
-            <th>操作</th><th>圖</th><th>角色</th><th>系列</th><th>品名</th><th>品類</th><th>顏色</th>
+            <th>操作</th><th>圖</th><th>角色</th><th>系列</th><th>品名</th><th>貨號</th><th>售價</th><th>品類</th><th>顏色</th>
             <th>鑄件組成</th><th>零件組成</th><th>缺少材料</th>
           </tr></thead>
           <tbody>
-          ${filtered.length === 0 ? `<tr><td colspan="11"><div class="empty"><div class="empty-icon">🗄️</div><p>尚無商品</p></div></td></tr>` :
+          ${filtered.length === 0 ? `<tr><td colspan="13"><div class="empty"><div class="empty-icon">🗄️</div><p>尚無商品</p></div></td></tr>` :
             filtered.map(p => {
               const sel = (state.batch?.products||new Set()).has(p.id);
               const castingList = p.product_castings || [];
@@ -2106,7 +2106,10 @@ function renderProducts() {
                 <td>
                   <strong>${p.name}</strong>
                   ${p.shop_url ? `<a href="${p.shop_url}" target="_blank" onclick="event.stopPropagation()" title="開啟官網" style="margin-left:6px;font-size:12px;color:var(--accent-dark);text-decoration:none">🔗</a>` : ''}
+                  ${p.alias ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${p.alias}</div>` : ''}
                 </td>
+                <td style="font-size:11px;color:var(--muted);font-family:monospace;white-space:nowrap">${p.sku||'—'}</td>
+                <td style="font-size:13px;font-weight:600;color:var(--accent-dark);white-space:nowrap">${p.retail_price != null ? `${p.retail_price_currency==='CNY'?'¥':'$'}${p.retail_price.toLocaleString()}` : '—'}</td>
                 <td>${p.categories?.name ? `<span class="tag tag-blue">${p.categories.name}</span>` : '—'}</td>
                 <td style="font-size:12px">${p.color||'—'}</td>
                 <td style="font-size:12px">${castingHtml}</td>
@@ -2374,7 +2377,35 @@ async function modalProduct(productId = null) {
         <input class="form-control" id="pm-ring-size" value="${product?.ring_size||''}" placeholder="例：#9、#11" style="display:none">
       </div>
     </div>
-    <div class="form-group"><label>官網連結</label><input class="form-control" id="pm-shop-url" value="${product?.shop_url||''}" placeholder="例：https://storyplus.com.tw/products/..."></div>
+    <div class="form-group"><label>官網連結</label><input class="form-control" id="pm-shop-url" value="${product?.shop_url||''}" placeholder="例:https://storyplus.com.tw/products/..."></div>
+
+    <!-- 💰 售價區 -->
+    <div style="background:#f8f9fa;border-radius:6px;padding:12px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin-bottom:10px">💰 售價</div>
+      <div style="display:grid;grid-template-columns:100px 1fr 1fr;gap:8px">
+        <div class="form-group" style="margin:0">
+          <label style="font-size:12px">幣別</label>
+          <select class="form-control" id="pm-price-currency">
+            <option value="TWD" ${(product?.retail_price_currency||'TWD')==='TWD'?'selected':''}>$ TWD</option>
+            <option value="CNY" ${product?.retail_price_currency==='CNY'?'selected':''}>¥ CNY</option>
+          </select>
+        </div>
+        <div class="form-group" style="margin:0">
+          <label style="font-size:12px">建議售價</label>
+          <input class="form-control" id="pm-retail-price" type="number" min="0" step="1" value="${product?.retail_price ?? ''}" placeholder="—">
+        </div>
+        <div class="form-group" style="margin:0">
+          <label style="font-size:12px">別名/舊稱</label>
+          <input class="form-control" id="pm-alias" value="${product?.alias||''}" placeholder="舊稱/簡稱">
+        </div>
+      </div>
+    </div>
+
+    <!-- 📈 售價歷程(編輯時才顯示) -->
+    <div id="pm-history-wrap" style="display:none;background:#fff8e1;border-radius:6px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-size:12px;font-weight:600;color:#e65100;margin-bottom:6px">📈 售價變動歷程</div>
+      <div id="pm-history-list" style="font-size:12px"></div>
+    </div>
 
     <!-- 備註 -->
     <div class="form-group"><label>備註（內部用）</label><textarea class="form-control" id="pm-notes" rows="2">${product?.notes||''}</textarea></div>
@@ -2874,11 +2905,19 @@ async function saveProduct(productId) {
     chain_length: document.getElementById('pm-chain-length')?.style.display!=='none' ? (document.getElementById('pm-chain-length').value.trim()||null) : null,
     ring_size: document.getElementById('pm-ring-size')?.style.display!=='none' ? (document.getElementById('pm-ring-size').value.trim()||null) : null,
     shop_url: document.getElementById('pm-shop-url').value.trim() || null,
+    alias: document.getElementById('pm-alias')?.value.trim() || null,
+    retail_price: parseFloat(document.getElementById('pm-retail-price')?.value) || null,
+    retail_price_currency: document.getElementById('pm-price-currency')?.value || 'TWD',
     notes: document.getElementById('pm-notes').value.trim() || null,
     updated_at: new Date().toISOString(),
   };
 
   let pid = productId;
+  const oldProduct = productId ? (state.data.products||[]).find(p=>p.id===productId) : null;
+  const priceChanged = oldProduct && (
+    (oldProduct.retail_price ?? null) !== productData.retail_price ||
+    (oldProduct.retail_price_currency || 'TWD') !== productData.retail_price_currency
+  );
   if (!pid) {
     productData.created_by = state.user?.id;
     const { data, error } = await db.from('products').insert(productData).select().single();
@@ -2887,6 +2926,18 @@ async function saveProduct(productId) {
   } else {
     const { error } = await db.from('products').update(productData).eq('id', pid);
     if (error) { showToast('儲存失敗：'+error.message, 'error'); btn.textContent='儲存變更'; btn.disabled=false; return; }
+  }
+
+  // 寫售價歷程(新增 or 有變動)
+  if (pid && productData.retail_price != null && (!oldProduct || priceChanged)) {
+    await db.from('product_price_history').insert({
+      product_id: pid,
+      retail_price: productData.retail_price,
+      currency: productData.retail_price_currency,
+      changed_by: state.user?.id || null,
+      changed_by_name: state.profile?.name || state.user?.email || '',
+      note: oldProduct ? '編輯' : '新增',
+    });
   }
 
   // 上傳圖片
@@ -2931,6 +2982,52 @@ async function saveProduct(productId) {
 function closeSidePanel() {
   document.getElementById('side-panel-root')?.remove();
 }
+
+// ─────────────────────────────────────────────
+// 貨號解析:自動判斷品類 + 電鍍色 + 尺寸
+// 格式:[角色代碼][系列版本][品類代碼][4位數][電鍍色代碼][尺寸]
+// 例:AP1R2402W09 → 角色 AP, 品類 R(戒指), 電鍍 W(白K), 尺寸 09
+// ─────────────────────────────────────────────
+window.parseSku = function(sku) {
+  if (!sku || sku.length < 8) return null;
+  const s = sku.trim().toUpperCase();
+  // 品類代碼(位置固定在角色後 1 位):N=項鍊、B=手鍊、R=戒指、E=耳環
+  const CAT_MAP = {
+    'N': '項鍊',
+    'B': '手鍊',
+    'R': '戒指',
+    'E': '耳環',
+    'H': '髮飾',
+    'K': '頸鍊',
+    'M': '對戒',
+  };
+  // 電鍍色代碼:通常在品類代碼 + 4 位數字後
+  const PLATING_MAP = {
+    'W': '白K金',
+    'R': '玫瑰金',
+    'Y': '黃K金',
+    'D': '素銀',
+    'B': '素銀(拋光)',
+    'G': '古銅',
+    '999': '素銀(通用)',
+  };
+
+  // 用 regex 分解:角色(2-3字母) + 版本(1數字) + 品類(1字母) + 年份+序號(4數字) + 電鍍(0-3字元) + 尺寸(0-3數字)
+  const m = s.match(/^([A-Z]{2,4})(\d)([A-Z])(\d{4})([A-Z0-9]{0,3})(\d{0,3})$/);
+  if (!m) return null;
+  const [, roleCode, version, catCode, seq, platingCode, sizeCode] = m;
+
+  return {
+    role_code: roleCode,
+    version,
+    cat_code: catCode,
+    category_name: CAT_MAP[catCode] || null,
+    seq,
+    plating_code: platingCode || '',
+    plating_name: PLATING_MAP[platingCode] || (platingCode === '' ? null : platingCode),
+    size_code: sizeCode || '',
+  };
+};
 
 // ─────────────────────────────────────────────
 // 商品批次匯入
@@ -2993,6 +3090,22 @@ window.modalImportProducts = function() {
 
         const price = priceStr && parseFloat(priceStr) > 0 ? parseFloat(priceStr) : null;
 
+        // ─── 從貨號自動判斷品類 + 電鍍色 ───
+        const skuInfo = window.parseSku(sku);
+        let catId = null;
+        let colorValue = null;
+        if (skuInfo) {
+          // 品類 → 找 categories 表對應 id
+          if (skuInfo.category_name) {
+            const cat = (state.data.categories||[]).find(c => c.name === skuInfo.category_name);
+            if (cat) catId = cat.id;
+          }
+          // 電鍍色 → 存 color 欄位
+          if (skuInfo.plating_name) {
+            colorValue = skuInfo.plating_name;
+          }
+        }
+
         const payload = {
           sku,
           name,
@@ -3003,6 +3116,8 @@ window.modalImportProducts = function() {
           status: 'active',
           updated_at: new Date().toISOString(),
         };
+        if (catId) payload.category_id = catId;
+        if (colorValue) payload.color = colorValue;
 
         // 用 sku 找有無現有商品
         const { data: existing } = await db.from('products').select('id, retail_price').eq('sku', sku).maybeSingle();
