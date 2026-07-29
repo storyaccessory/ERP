@@ -21803,13 +21803,14 @@ async function modalCalEvent(existing=null) {
         ? (completedEl.checked ? (existing?.completed_at || new Date().toISOString()) : null)
         : undefined;
 
-      // 私人事件邏輯:請假強制公開,私人事件強制清空指派人員
+      // 私人事件邏輯:請假強制公開,私人事件自動指派給自己(才會出現在「我的」)
       const _evType = document.getElementById('cal-type').value;
       const _isPrivate = (_evType||'').toLowerCase() === 'leave'
         ? false
         : (document.getElementById('cal-is-private')?.checked || false);
-      const _finalAssigneeIds = _isPrivate ? [] : assigneeIds;
-      const _finalAssignedTo  = _isPrivate ? null : assignedTo;
+      const _myUid = state.user?.id || null;
+      const _finalAssigneeIds = _isPrivate ? (_myUid ? [_myUid] : []) : assigneeIds;
+      const _finalAssignedTo  = _isPrivate ? _myUid : assignedTo;
 
       const basePayload = {
         title,
@@ -22057,21 +22058,25 @@ window._calOnTypeChange = function(newType) {
   }
 };
 
-// 勾選私人:清空指派人員 + 禁用指派區塊
+// 勾選私人:自動指派給自己(這樣「我的」才看得到) + 灰掉指派區(不能改)
 window._calOnPrivateChange = function(isPrivate) {
   const label = document.getElementById('cal-private-label');
   if (label) label.style.background = isPrivate ? '#fff3e0' : '#fafafa';
   const wrap = document.getElementById('cal-assignee-wrap');
   if (!wrap) return;
+  const myId = state?.user?.id || null;
   if (isPrivate) {
-    // 取消所有勾選 + 灰掉整區
+    // 先清空全部,再只勾自己(這樣「我的」才看得到)
     wrap.querySelectorAll('input[type="checkbox"]').forEach(cb => {
-      cb.checked = false;
-      cb.dispatchEvent(new Event('change'));
+      const shouldCheck = myId && cb.value === myId;
+      if (cb.checked !== shouldCheck) {
+        cb.checked = shouldCheck;
+        cb.dispatchEvent(new Event('change'));
+      }
     });
-    wrap.style.opacity = '0.4';
+    wrap.style.opacity = '0.6';
     wrap.style.pointerEvents = 'none';
-    wrap.title = '私人事件不能指派他人';
+    wrap.title = '私人事件已自動指派給自己,不能指派他人';
   } else {
     wrap.style.opacity = '';
     wrap.style.pointerEvents = '';
