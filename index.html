@@ -24231,24 +24231,11 @@ window.modalManagePartCategories = function() {
       </tr>`;
   }).join('');
 
-  const noShapeCount = parts.filter(p => !p.shape).length;
-
   showModal('📚 分類管理', `
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.7">
       共 <strong>${cats.filter(c=>c!=='(未分類)').length}</strong> 個分類 · 總計 <strong>${parts.length}</strong> 筆零件<br>
       <span style="color:#f57c00">⚠ 分類是綁在零件上的,重命名/合併/刪除會影響所有相關零件</span>
     </div>
-
-    ${noShapeCount > 0 ? `
-    <!-- 批次自動填形狀 -->
-    <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:12px;margin-bottom:16px">
-      <div style="font-weight:600;color:#e65100;font-size:13px;margin-bottom:6px">🔧 有 ${noShapeCount} 筆零件的形狀未設定</div>
-      <div style="font-size:12px;color:#5d4037;line-height:1.6;margin-bottom:8px">
-        目前樹狀選單只用「編輯視窗裡填的形狀」。未設定形狀的零件會被歸到「(未設定形狀)」群組。<br>
-        可以按下方按鈕,系統會根據名稱自動抽出形狀填入(例:<code>1.2mm圓鑽</code> → 形狀「圓鑽」)。
-      </div>
-      <button class="btn btn-primary" onclick="window._autoFillPartShapes()" style="background:#f57c00;border-color:#f57c00">🔧 自動填 ${noShapeCount} 筆形狀</button>
-    </div>` : ''}
 
     <!-- 新增分類 -->
     <div style="background:#f0faf9;border:1px solid #b2dfdb;border-radius:6px;padding:12px;margin-bottom:16px">
