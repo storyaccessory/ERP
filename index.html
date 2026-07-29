@@ -3696,6 +3696,7 @@ function renderParts() {
                 <td style="text-align:center;padding:8px 8px;font-size:12px">${p.unit_price!=null?`$${p.unit_price}`:'—'}</td>
                 <td style="text-align:right;padding:6px 12px;white-space:nowrap">
                   <button class="btn-table" data-action="edit-part" data-id="${p.id}" style="font-size:11px">編輯</button>
+                  <button class="btn-table" data-action="copy-part" data-id="${p.id}" style="background:#e3f2fd;color:#1565c0;font-size:11px" title="複製新增">📄</button>
                   ${canAdjustStock()?`<button class="btn-table" data-action="adj-stock-part" data-id="${p.id}" style="background:#e8f5f4;color:var(--accent-dark);font-size:11px">庫存</button>`:''}
                   <button class="btn-table danger" data-action="del-part" data-id="${p.id}" style="font-size:11px">刪</button>
                 </td>
@@ -8950,9 +8951,14 @@ async function confirmImportParts() {
 }
 
 // ── Parts CRUD ──
-function modalEditPart(id) {
+// id = 現有 id → 編輯;id = null → 新增
+// copyFromId = 複製來源 id → 開新增視窗但帶入該筆資料
+function modalEditPart(id, copyFromId) {
   const parts = state.data.parts || [];
   const pt = id ? parts.find(p => p.id === id) : null;
+  const isCopy = !id && !!copyFromId;
+  const source = isCopy ? parts.find(p => p.id === copyFromId) : null;
+  const effective = pt || source; // 資料來源:編輯用 pt,複製用 source
   const cats = [...new Set(parts.map(p => p.category).filter(Boolean))];
   const unitOptions = ['顆','個','條','組','片','對','包','支','捲','碼','克','公克','毫升'];
 
@@ -9014,22 +9020,25 @@ function modalEditPart(id) {
   `;
 
   // 用 textContent / value 安全填入資料（避免特殊字元爆版面）
-  if (pt) {
-    body.querySelector('#pt-name').value        = pt.name || '';
-    body.querySelector('#pt-cat').value         = pt.category || '';
-    body.querySelector('#pt-shape').value       = pt.shape || parsePartShape(pt.name, pt.category) || '';
-    body.querySelector('#pt-unit').value        = pt.unit || '顆';
-    body.querySelector('#pt-spec').value        = pt.spec || '';
-    body.querySelector('#pt-display-name').value= pt.display_name || '';
-    body.querySelector('#pt-stock').value       = pt.stock ?? 0;
-    body.querySelector('#pt-safety').value      = pt.safety_stock ?? 0;
-    body.querySelector('#pt-price').value       = pt.unit_price ?? '';
-    body.querySelector('#pt-note').value        = pt.notes || '';
+  if (effective) {
+    // 複製模式:名稱後加「(複製)」,庫存歸零(其他都帶入)
+    const nameVal = isCopy ? `${effective.name||''}(複製)` : (effective.name||'');
+    body.querySelector('#pt-name').value        = nameVal;
+    body.querySelector('#pt-cat').value         = effective.category || '';
+    body.querySelector('#pt-shape').value       = effective.shape || parsePartShape(effective.name, effective.category) || '';
+    body.querySelector('#pt-unit').value        = effective.unit || '顆';
+    body.querySelector('#pt-spec').value        = effective.spec || '';
+    body.querySelector('#pt-display-name').value= effective.display_name || '';
+    body.querySelector('#pt-stock').value       = isCopy ? 0 : (effective.stock ?? 0);
+    body.querySelector('#pt-safety').value      = effective.safety_stock ?? 0;
+    body.querySelector('#pt-price').value       = effective.unit_price ?? '';
+    body.querySelector('#pt-note').value        = effective.notes || '';
   } else {
     body.querySelector('#pt-unit').value = '顆';
   }
 
-  showModal(pt ? '編輯零件' : '新增零件', body, [
+  const modalTitle = pt ? '編輯零件' : (isCopy ? `📄 複製新增(來源:${source?.name||''})` : '新增零件');
+  showModal(modalTitle, body, [
     { label: id ? '儲存' : '新增', primary: true, onclick: async () => {
       let name = document.getElementById('pt-name').value.trim();
       if (!name) { showToast('請填零件名稱','error'); return; }
@@ -25024,6 +25033,9 @@ async function handleAction(action, id, dataset) {
     // ── 零件 ──
     case 'edit-part':
       modalEditPart(id);
+      break;
+    case 'copy-part':
+      modalEditPart(null, id); // 第 2 個參數 = 複製來源 id
       break;
     case 'adj-stock-part':
       if (!canAdjustStock()) { showToast('您沒有調整庫存的權限', 'error'); break; }
