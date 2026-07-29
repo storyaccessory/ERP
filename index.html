@@ -3143,6 +3143,158 @@ function closeSidePanel() {
 }
 
 // ─────────────────────────────────────────────
+// 批次改零件單位(用篩選 or 手動勾)
+// ─────────────────────────────────────────────
+window.modalBatchEditUnit = function() {
+  const allParts = state.data.parts || [];
+  const cats = [...new Set(allParts.map(p => p.category).filter(Boolean))].sort();
+  const unitOptions = ['顆','個','條','組','片','對','包','支','捲','碼','克','公克','毫升','mm','cm','副'];
+  // 使用 state 暫存選中的 id
+  if (!state.data._batchUnitSel) state.data._batchUnitSel = new Set();
+
+  const renderBody = () => {
+    const filterCat = state.data._batchUnitCat || '';
+    const filterShape = state.data._batchUnitShape || '';
+    const searchQ = (state.data._batchUnitSearch || '').toLowerCase().trim();
+    const filtered = allParts.filter(p => {
+      if (filterCat && p.category !== filterCat) return false;
+      if (filterShape) {
+        const s = p.shape || parsePartShape(p.name, p.category) || '';
+        if (s !== filterShape) return false;
+      }
+      if (searchQ) {
+        if (!p.name?.toLowerCase().includes(searchQ) &&
+            !p.spec?.toLowerCase().includes(searchQ)) return false;
+      }
+      return true;
+    });
+    // 這個分類下的形狀
+    const shapes = filterCat
+      ? [...new Set(allParts.filter(p=>p.category===filterCat).map(p=>p.shape||parsePartShape(p.name,p.category)||'').filter(Boolean))].sort()
+      : [];
+
+    const sel = state.data._batchUnitSel;
+    const allSelected = filtered.length > 0 && filtered.every(p => sel.has(p.id));
+
+    return `
+      <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+        用篩選找出要改的零件,勾起來 → 選新單位 → 套用
+      </div>
+
+      <!-- 篩選列 -->
+      <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;margin-bottom:10px">
+        <select class="form-control" id="bu-cat" onchange="window._buFilterCat(this.value)">
+          <option value="">全部分類</option>
+          ${cats.map(c => `<option value="${c}" ${filterCat===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+        <select class="form-control" id="bu-shape" onchange="window._buFilterShape(this.value)" ${shapes.length?'':'disabled'}>
+          <option value="">全部形狀</option>
+          ${shapes.map(s => `<option value="${s}" ${filterShape===s?'selected':''}>${s}</option>`).join('')}
+        </select>
+        <input class="form-control" id="bu-search" placeholder="🔍 名稱/規格" value="${state.data._batchUnitSearch||''}"
+          oninput="window._buSearch(this.value)">
+      </div>
+
+      <!-- 已選 + 全選 -->
+      <div style="display:flex;align-items:center;gap:12px;margin-bottom:8px;padding:6px 10px;background:#fff8e1;border-radius:6px">
+        <label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:12px">
+          <input type="checkbox" ${allSelected?'checked':''} onchange="window._buSelectAll(this.checked)">
+          全選(當前 ${filtered.length} 筆)
+        </label>
+        <span style="font-size:12px;color:#e65100;font-weight:600;margin-left:auto">
+          已選 <strong>${sel.size}</strong> 筆
+        </span>
+      </div>
+
+      <!-- 零件清單 -->
+      <div style="max-height:280px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+        ${filtered.length === 0 ? '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">沒有符合條件的零件</div>' :
+          filtered.map(p => `
+            <label style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid #f0f0f0;cursor:pointer;font-size:12px" onmouseover="this.style.background='#fafafa'" onmouseout="this.style.background=''">
+              <input type="checkbox" ${sel.has(p.id)?'checked':''} onchange="window._buToggle('${p.id}',this.checked)">
+              <span style="flex:1">${p.name}${p.spec?'<span style="color:var(--muted)">_'+p.spec+'</span>':''}</span>
+              <span style="font-family:monospace;color:var(--accent-dark);font-weight:600;font-size:11px;background:#e8f5f4;padding:1px 6px;border-radius:3px">${p.unit||'顆'}</span>
+            </label>
+          `).join('')
+        }
+      </div>
+
+      <!-- 新單位 -->
+      <div style="margin-top:12px;display:flex;gap:8px;align-items:center">
+        <label style="font-size:12px;font-weight:600">改為單位:</label>
+        <input class="form-control" id="bu-new-unit" list="bu-unit-list" placeholder="輸入或選擇" style="flex:1">
+        <datalist id="bu-unit-list">${unitOptions.map(u => `<option value="${u}">`).join('')}</datalist>
+      </div>
+    `;
+  };
+
+  const overlay = showModal('📏 批次改零件單位', renderBody(), [
+    { label:'套用', primary:true, onclick: async () => {
+      const sel = state.data._batchUnitSel;
+      const newUnit = document.getElementById('bu-new-unit').value.trim();
+      if (!sel.size) { showToast('請至少勾一筆','error'); return; }
+      if (!newUnit) { showToast('請填新單位','error'); return; }
+      if (!confirm(`將 ${sel.size} 筆零件的單位改成「${newUnit}」?`)) return;
+      const { error } = await db.from('parts').update({ unit: newUnit }).in('id', [...sel]);
+      if (error) { showToast('更新失敗:'+error.message, 'error'); return; }
+      showToast(`✅ ${sel.size} 筆零件的單位已改為「${newUnit}」`);
+      state.data._batchUnitSel = new Set();
+      state.data._batchUnitCat = '';
+      state.data._batchUnitShape = '';
+      state.data._batchUnitSearch = '';
+      closeModal();
+      await loadParts();
+      renderApp();
+    }},
+    { label:'關閉', onclick: () => {
+      state.data._batchUnitSel = new Set();
+      state.data._batchUnitCat = '';
+      state.data._batchUnitShape = '';
+      state.data._batchUnitSearch = '';
+      closeModal();
+    }},
+  ]);
+
+  // ─── 互動 handler ───
+  window._buRefresh = () => {
+    const body = document.querySelector('.modal-body') || overlay?.querySelector('.modal-body');
+    if (body) body.innerHTML = renderBody();
+  };
+  window._buFilterCat = (v) => { state.data._batchUnitCat = v; state.data._batchUnitShape = ''; window._buRefresh(); };
+  window._buFilterShape = (v) => { state.data._batchUnitShape = v; window._buRefresh(); };
+  window._buSearch = (v) => {
+    state.data._batchUnitSearch = v;
+    // 用 debounce 避免每次打字都重繪
+    clearTimeout(window._buSearchTimer);
+    window._buSearchTimer = setTimeout(() => window._buRefresh(), 250);
+  };
+  window._buToggle = (id, checked) => {
+    if (checked) state.data._batchUnitSel.add(id);
+    else state.data._batchUnitSel.delete(id);
+    // 只更新已選數字
+    const label = document.querySelector('[style*="e65100"] strong');
+    if (label) label.textContent = state.data._batchUnitSel.size;
+  };
+  window._buSelectAll = (checked) => {
+    // 找出當前顯示的 filtered ids
+    const filterCat = state.data._batchUnitCat || '';
+    const filterShape = state.data._batchUnitShape || '';
+    const searchQ = (state.data._batchUnitSearch || '').toLowerCase().trim();
+    allParts.forEach(p => {
+      if (filterCat && p.category !== filterCat) return;
+      if (filterShape) {
+        const s = p.shape || parsePartShape(p.name, p.category) || '';
+        if (s !== filterShape) return;
+      }
+      if (searchQ && !p.name?.toLowerCase().includes(searchQ) && !p.spec?.toLowerCase().includes(searchQ)) return;
+      if (checked) state.data._batchUnitSel.add(p.id);
+      else state.data._batchUnitSel.delete(p.id);
+    });
+    window._buRefresh();
+  };
+};
+
+// ─────────────────────────────────────────────
 // 批次補填分類預設零件(項鍊→圓扣頭;手鍊→圓扣頭+ST圓牌延長鍊)
 // ─────────────────────────────────────────────
 window.modalRetroFillDefaultParts = function() {
@@ -4547,6 +4699,7 @@ function renderParts() {
       </label>
       <button class="btn btn-primary" id="add-part-btn">+ 新增零件</button>
       <button class="btn btn-outline" onclick="modalManagePartCategories()" style="background:#e8f5f4;color:#00695c" title="新增/重命名/合併/刪除分類">📚 分類管理</button>
+      <button class="btn btn-outline" onclick="modalBatchEditUnit()" style="background:#fff8e1;color:#e65100" title="批次改單位">📏 批次改單位</button>
       <button class="btn btn-outline" id="import-parts-btn">↑ 批次匯入</button>
       <button class="btn btn-outline" id="export-parts-btn">↓ 匯出 CSV</button>
       <button class="btn btn-outline" onclick="modalPartCatSpecSetting()" title="設定各分類是否在商品頁顯示規格">⚙ 分類規格顯示</button>
