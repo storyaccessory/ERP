@@ -22176,12 +22176,17 @@ window._calAddAttachRow = function() {
 
 // 行事曆編輯權限：新增不受限；修改既有事項一律需主管審核
 // 只有主管蔡采玲、管理員、老闆帳號可修改既有事項，其他員工(含建立者本人)不可改既有事項
+// 例外:私人事件的建立者可以直接編輯/刪除自己的私人事件(不需審核)
 function _canEditCalEvent(ev) {
   const me = effectiveProfile() || {};
-  return me.role === 'admin'
+  const isBoss = me.role === 'admin'
     || me.email === 'cailing0516@gmail.com'
     || state.user?.email === 'cailing0516@gmail.com'
     || me.name === '蔡采玲';
+  if (isBoss) return true;
+  // 私人事件:建立者本人可以編輯/刪除
+  if (ev?.is_private && ev?.created_by && ev.created_by === state.user?.id) return true;
+  return false;
 }
 window._canEditCalEvent = _canEditCalEvent;
 
