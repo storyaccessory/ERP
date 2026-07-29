@@ -3151,11 +3151,11 @@ async function modalEditCasting(id) {
       </div>
       <div class="form-group">
         <label>模具工錢</label>
-        <input class="form-control" id="cs-mold-fee" type="number" min="0" step="0.01" value="${c?.mold_fee||''}">
+        <input class="form-control" id="cs-mold-fee" type="number" min="0" step="0.01" value="${c?.mold_fee||''}" oninput="window._csRecalcCastLabor && window._csRecalcCastLabor()">
       </div>
       <div class="form-group">
         <label>每模產出數 <span style="font-size:11px;color:var(--muted);font-weight:400">（穴數）</span></label>
-        <input class="form-control" id="cs-mold-yield" type="number" min="1" value="${c?.mold_yield||1}">
+        <input class="form-control" id="cs-mold-yield" type="number" min="1" value="${c?.mold_yield||1}" oninput="window._csRecalcCastLabor && window._csRecalcCastLabor()">
       </div>
     </div>
 
@@ -3172,8 +3172,10 @@ async function modalEditCasting(id) {
         <input class="form-control" id="cs-mold-flat-fee" type="number" min="0" step="0.01" value="${c?.mold_flat_fee||''}">
       </div>
       <div class="form-group">
-        <label>鑄工 <span style="font-size:11px;color:var(--muted);font-weight:400">(每件)</span></label>
-        <input class="form-control" id="cs-cast-labor" type="number" min="0" step="0.01" value="${c?.cast_labor||''}">
+        <label>鑄工 <span style="font-size:11px;color:var(--accent);font-weight:600">(每件,自動計算)</span></label>
+        <input class="form-control" id="cs-cast-labor" type="number" min="0" step="0.01" readonly value="${c?.cast_labor||''}"
+          style="background:#f5f5f5;color:var(--accent-dark);font-weight:600;cursor:not-allowed">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">= 模具工錢 ÷ 穴數(改上面兩欄會自動更新)</div>
       </div>
       <div class="form-group">
         <label>3D母版費</label>
@@ -3355,6 +3357,9 @@ async function modalEditCasting(id) {
       }
     }, 50);
   }
+
+  // 開視窗就自動算一次「鑄工(每件)」
+  setTimeout(() => window._csRecalcCastLabor && window._csRecalcCastLabor(), 50);
 }
 
 // 鑄件用的 IP 樹狀渲染（跟商品相同邏輯，id 前綴 cs-）
@@ -3444,6 +3449,22 @@ window.csSelectSeries = function(seriesId, seriesName) {
 window.csFilterIPTree = function(q) {
   const tree = document.getElementById('cs-ip-tree');
   if (tree) tree.innerHTML = renderIPTreeForCasting(null, q);
+};
+
+// 鑄工(每件)= 模具工錢 ÷ 穴數 —— 即時計算
+window._csRecalcCastLabor = function() {
+  const feeEl = document.getElementById('cs-mold-fee');
+  const yieldEl = document.getElementById('cs-mold-yield');
+  const laborEl = document.getElementById('cs-cast-labor');
+  if (!laborEl) return;
+  const fee = parseFloat(feeEl?.value) || 0;
+  const y = parseInt(yieldEl?.value) || 1;
+  if (fee > 0 && y > 0) {
+    // 保留 2 位小數
+    laborEl.value = (fee / y).toFixed(2).replace(/\.?0+$/, '');
+  } else {
+    laborEl.value = '';
+  }
 };
 
 function modalViewCasting(castingId) {
@@ -24908,8 +24929,15 @@ function modalImportCastings() {
         const cols = line.split(',').map(s=>s.trim());
         if (cols.length < 2) { errors.push(`格式錯誤(欄位不足):${line}`); continue; }
         const [sku, rawName, priceStr] = cols;
-        if (!sku) { errors.push(`貨號空白:${line}`); continue; }
-        if (!rawName) { errors.push(`品名空白:${line}`); continue; }
+
+        // ─── 貨號必填 + 格式檢查 ───
+        if (!sku) { errors.push(`❌ 貨號空白,跳過:${line}`); continue; }
+        // 貨號至少要 3 個字元(避免只填 - 或短代碼)
+        if (sku.length < 3) { errors.push(`❌ 貨號太短「${sku}」,需要完整貨號:${line}`); continue; }
+        // 貨號不能只有數字或只有英文字母,通常應該是「代碼+數字」組合
+        if (!/[-_a-zA-Z0-9]{3,}/.test(sku)) { errors.push(`❌ 貨號格式不對「${sku}」:${line}`); continue; }
+
+        if (!rawName) { errors.push(`❌ 品名空白:${line}`); continue; }
 
         // 解析價格:空白或 0 → null(未定價)
         let price = null;
