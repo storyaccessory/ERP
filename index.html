@@ -3724,6 +3724,7 @@ function renderParts() {
         ✅ 只顯示有庫存
       </label>
       <button class="btn btn-primary" id="add-part-btn">+ 新增零件</button>
+      <button class="btn btn-outline" onclick="modalManagePartCategories()" style="background:#e8f5f4;color:#00695c" title="新增/重命名/合併/刪除分類">📚 分類管理</button>
       <button class="btn btn-outline" id="import-parts-btn">↑ 批次匯入</button>
       <button class="btn btn-outline" id="export-parts-btn">↓ 匯出 CSV</button>
       <button class="btn btn-outline" onclick="modalPartCatSpecSetting()" title="設定各分類是否在商品頁顯示規格">⚙ 分類規格顯示</button>
@@ -24195,6 +24196,159 @@ window.modalPartCatSpecSetting = async function() {
     }},
     { label: '取消', onclick: closeModal },
   ]);
+};
+
+// ─────────────────────────────────────────────
+// 零件分類管理:新增/重命名/合併/刪除
+// ─────────────────────────────────────────────
+window.modalManagePartCategories = function() {
+  const parts = state.data.parts || [];
+  // 統計每個分類有多少筆
+  const catCounts = {};
+  parts.forEach(p => {
+    const c = p.category || '(未分類)';
+    catCounts[c] = (catCounts[c] || 0) + 1;
+  });
+  const cats = Object.keys(catCounts).sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+
+  const rows = cats.map(c => {
+    const isUncat = c === '(未分類)';
+    return `
+      <tr style="border-bottom:1px solid #f0f0f0">
+        <td style="padding:8px 12px;font-weight:${isUncat?400:600};color:${isUncat?'var(--muted)':'var(--text)'}">${c}</td>
+        <td style="padding:8px 12px;text-align:center;color:var(--muted);font-size:12px">${catCounts[c]} 筆</td>
+        <td style="padding:8px 12px;text-align:right;white-space:nowrap">
+          ${isUncat ? '' : `<button class="btn-table" style="background:#e3f2fd;color:#1565c0" onclick="window._renamePartCategory('${c.replace(/'/g,"\\'")}')">✏️ 重命名</button>`}
+          ${isUncat ? '' : `<button class="btn-table" style="background:#fff8e1;color:#e65100" onclick="window._mergePartCategory('${c.replace(/'/g,"\\'")}')">🔀 合併</button>`}
+          ${isUncat ? '' : `<button class="btn-table danger" onclick="window._deletePartCategory('${c.replace(/'/g,"\\'")}')">🗑</button>`}
+        </td>
+      </tr>`;
+  }).join('');
+
+  showModal('📚 分類管理', `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.7">
+      共 <strong>${cats.filter(c=>c!=='(未分類)').length}</strong> 個分類 · 總計 <strong>${parts.length}</strong> 筆零件<br>
+      <span style="color:#f57c00">⚠ 分類是綁在零件上的,重命名/合併/刪除會影響所有相關零件</span>
+    </div>
+
+    <!-- 新增分類 -->
+    <div style="background:#f0faf9;border:1px solid #b2dfdb;border-radius:6px;padding:12px;margin-bottom:16px">
+      <div style="font-weight:600;color:#00695c;font-size:13px;margin-bottom:8px">➕ 新增分類</div>
+      <div style="display:flex;gap:8px;align-items:end">
+        <div style="flex:1">
+          <input class="form-control" id="new-cat-name" placeholder="例:天然石、莫桑石、鏈子…" style="font-size:14px">
+        </div>
+        <button class="btn btn-primary" onclick="window._addPartCategory()">新增</button>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">新增後會建立一筆示範零件,方便您之後填入具體資料</div>
+    </div>
+
+    <!-- 現有分類清單 -->
+    <div style="font-weight:600;color:var(--accent-dark);font-size:13px;margin-bottom:8px">現有分類</div>
+    <div style="border:1px solid var(--border);border-radius:6px;overflow:hidden">
+      <table style="width:100%;font-size:14px;border-collapse:collapse">
+        <thead><tr style="background:#f8f9fa;color:var(--muted);font-size:11px">
+          <th style="text-align:left;padding:6px 12px">分類名稱</th>
+          <th style="text-align:center;padding:6px 12px;width:80px">零件數</th>
+          <th style="text-align:right;padding:6px 12px;width:250px">操作</th>
+        </tr></thead>
+        <tbody>${rows || '<tr><td colspan="3" style="text-align:center;padding:20px;color:var(--muted)">尚無分類</td></tr>'}</tbody>
+      </table>
+    </div>
+  `, [
+    { label: '關閉', onclick: closeModal },
+  ]);
+};
+
+// 新增分類 → 建一筆示範零件
+window._addPartCategory = async function() {
+  const el = document.getElementById('new-cat-name');
+  const cat = el?.value.trim();
+  if (!cat) { showToast('請填分類名稱', 'error'); return; }
+  // 檢查是否已存在
+  const parts = state.data.parts || [];
+  if (parts.some(p => p.category === cat)) {
+    showToast(`分類「${cat}」已存在`, 'error'); return;
+  }
+  if (!confirm(`確定新增分類「${cat}」?\n會建立一筆示範零件方便您維護。`)) return;
+  const { error } = await db.from('parts').insert({
+    name: '(範本)請修改或刪除',
+    category: cat,
+    stock: 0,
+    safety_stock: 0,
+    unit: '顆',
+  });
+  if (error) { showToast('新增失敗:'+error.message, 'error'); return; }
+  showToast(`✅ 分類「${cat}」已新增`);
+  await loadParts();
+  closeModal();
+  window.modalManagePartCategories();
+};
+
+// 重命名分類 → 更新所有相關零件
+window._renamePartCategory = function(oldName) {
+  const newName = prompt(`把分類「${oldName}」改成:`, oldName);
+  if (!newName || newName === oldName) return;
+  const parts = state.data.parts || [];
+  const count = parts.filter(p => p.category === oldName).length;
+  if (!confirm(`將 ${count} 筆零件的分類從「${oldName}」改成「${newName}」?`)) return;
+  (async () => {
+    const { error } = await db.from('parts').update({ category: newName }).eq('category', oldName);
+    if (error) { showToast('重命名失敗:'+error.message, 'error'); return; }
+    showToast(`✅ 已將 ${count} 筆零件的分類改為「${newName}」`);
+    await loadParts();
+    closeModal();
+    window.modalManagePartCategories();
+  })();
+};
+
+// 合併分類 → 選另一個分類,把這個併過去
+window._mergePartCategory = function(fromName) {
+  const parts = state.data.parts || [];
+  const otherCats = [...new Set(parts.map(p=>p.category).filter(Boolean))].filter(c=>c!==fromName).sort();
+  if (!otherCats.length) { showToast('沒有其他分類可合併', 'error'); return; }
+  const count = parts.filter(p => p.category === fromName).length;
+
+  showModal(`🔀 合併分類「${fromName}」`, `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px">
+      將「<strong style="color:var(--accent-dark)">${fromName}</strong>」的 <strong>${count}</strong> 筆零件,合併到另一個分類。<br>
+      合併後「${fromName}」分類會消失。
+    </div>
+    <div class="form-group">
+      <label>合併到:</label>
+      <select class="form-control" id="merge-target">
+        <option value="">— 選擇目標分類 —</option>
+        ${otherCats.map(c=>`<option value="${c}">${c}</option>`).join('')}
+      </select>
+    </div>
+  `, [
+    { label: '執行合併', primary: true, onclick: async () => {
+      const target = document.getElementById('merge-target').value;
+      if (!target) { showToast('請選目標分類', 'error'); return; }
+      const { error } = await db.from('parts').update({ category: target }).eq('category', fromName);
+      if (error) { showToast('合併失敗:'+error.message, 'error'); return; }
+      showToast(`✅ 已將「${fromName}」的 ${count} 筆零件合併到「${target}」`);
+      await loadParts();
+      closeModal();
+      window.modalManagePartCategories();
+    }},
+    { label: '取消', onclick: () => { closeModal(); window.modalManagePartCategories(); } },
+  ]);
+};
+
+// 刪除分類 → 把該分類的零件設為未分類 (不刪零件)
+window._deletePartCategory = function(cat) {
+  const parts = state.data.parts || [];
+  const count = parts.filter(p => p.category === cat).length;
+  if (!confirm(`⚠ 刪除分類「${cat}」?\n\n這會把 ${count} 筆零件的分類欄位清空(變成未分類),零件本身不會被刪除。\n\n確定要繼續?`)) return;
+  (async () => {
+    const { error } = await db.from('parts').update({ category: null }).eq('category', cat);
+    if (error) { showToast('刪除失敗:'+error.message, 'error'); return; }
+    showToast(`✅ 分類「${cat}」已刪除,${count} 筆零件變為未分類`);
+    await loadParts();
+    closeModal();
+    window.modalManagePartCategories();
+  })();
 };
 
 // 批次改單位（零件）
