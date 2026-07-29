@@ -3670,7 +3670,7 @@ function renderParts() {
           </div>
           <table style="width:100%;font-size:13px;border-collapse:collapse">
             <thead><tr style="background:#fafafa;color:var(--muted);font-size:11px">
-              <th style="text-align:left;padding:6px 12px">品名 · 規格</th>
+              <th style="text-align:left;padding:6px 12px">品名_規格</th>
               <th style="text-align:center;padding:6px 8px;width:80px">庫存</th>
               <th style="text-align:center;padding:6px 8px;width:50px">單位</th>
               <th style="text-align:center;padding:6px 8px;width:60px">安庫</th>
@@ -3687,7 +3687,7 @@ function renderParts() {
               return `<tr style="border-top:1px solid #f0f0f0">
                 <td style="padding:8px 12px">
                   <span style="color:var(--accent-dark);font-weight:500">${p.name||''}</span>
-                  ${p.spec ? `<span style="color:var(--muted);margin:0 6px">·</span><span>${p.spec}</span>` : ''}
+                  ${p.spec ? `<span style="color:var(--muted);margin:0 4px">_</span><span>${p.spec}</span>` : ''}
                   ${p.notes ? `<div style="font-size:10px;color:var(--muted);margin-top:2px">${p.notes}</div>` : ''}
                 </td>
                 <td style="text-align:center;padding:8px 8px;font-weight:700;color:${stockCol}">${stock}${isOut ? ' 🔴' : isLow ? ' 🟠' : ''}</td>
@@ -8813,6 +8813,9 @@ function parsePartLine(line) {
     name = name + '鑽';
   }
 
+  // 名稱標準化(統一「馬眼形鑽」→「馬眼鑽」等,含分類限定規則)
+  name = normalizePartName(name, category);
+
   const shape = parsePartShape(name, category);
   return { category: category || null, name, spec: spec || null, shape };
 }
@@ -8846,10 +8849,33 @@ function parsePartShape(name, category) {
   // 兩端殘留的底線、破折號、空白
   s = s.replace(/^[\s_-]+/, '').replace(/[\s_-]+$/, '').trim();
 
+  // ─── 標準化(統一常見的變體)─────────
+  s = s.replace(/馬眼形鑽/g, '馬眼鑽');
+  // 半寶石的「蛋面」補成「蛋面圓」
+  if (cat === '半寶石' && s.includes('蛋面') && !s.includes('蛋面圓')) {
+    s = s.replace(/蛋面/g, '蛋面圓');
+  }
+  // 未來要加其他標準化,在這裡加
+
   if (!s) return null;
   return s;
 }
 window.parsePartShape = parsePartShape;
+
+// ─── 零件名稱標準化(用於新增/編輯/匯入)───
+// category 傳入才會套用「限定分類」的規則
+function normalizePartName(name, category) {
+  if (!name) return name;
+  let s = name.trim();
+  s = s.replace(/馬眼形鑽/g, '馬眼鑽');
+  // 半寶石的「蛋面」補成「蛋面圓」
+  if ((category||'').trim() === '半寶石' && s.includes('蛋面') && !s.includes('蛋面圓')) {
+    s = s.replace(/蛋面/g, '蛋面圓');
+  }
+  // 未來要加其他標準化,在這裡加
+  return s;
+}
+window.normalizePartName = normalizePartName;
 
 function previewImportParts() {
   const text = document.getElementById('import-parts-text')?.value || '';
@@ -9005,10 +9031,12 @@ function modalEditPart(id) {
 
   showModal(pt ? '編輯零件' : '新增零件', body, [
     { label: id ? '儲存' : '新增', primary: true, onclick: async () => {
-      const name = document.getElementById('pt-name').value.trim();
+      let name = document.getElementById('pt-name').value.trim();
       if (!name) { showToast('請填零件名稱','error'); return; }
       const shapeInput = document.getElementById('pt-shape')?.value.trim() || '';
       const catInput = document.getElementById('pt-cat').value.trim();
+      // 名稱標準化(統一「馬眼形鑽」→「馬眼鑽」等,含分類限定規則)
+      name = normalizePartName(name, catInput);
       const payload = {
         name,
         category: catInput || null,
