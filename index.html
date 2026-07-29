@@ -3558,11 +3558,21 @@ function renderParts() {
   const lowStock = parts.filter(p => (p.stock||0) > 0 && p.stock <= (p.safety_stock||0)).length;
 
   // 每筆算出 shape (優先用即時解析,確保用最新規則;沒解析結果才 fallback 到資料庫欄位)
-  // 有 shape 就用(編輯視窗填的以此為準);沒 shape 就自動解析
-  const withShape = parts.map(p => ({
-    ...p,
-    _shape: p.shape || parsePartShape(p.name, p.category) || '(未分類)',
-  }));
+  // 顯示規則:
+  //   shape === null/undefined(從沒改過)→ 自動解析
+  //   shape 有值 → 用您改的
+  //   shape === ''(您清空了)→ 顯示 (未分類),不再自動解析
+  const withShape = parts.map(p => {
+    let _shape;
+    if (p.shape === null || p.shape === undefined) {
+      _shape = parsePartShape(p.name, p.category) || '(未分類)';
+    } else if (p.shape === '') {
+      _shape = '(未分類)';
+    } else {
+      _shape = p.shape;
+    }
+    return { ...p, _shape };
+  });
 
   // 應用搜尋 + 庫存篩選(這兩個影響左右兩邊)
   let base = withShape;
@@ -9049,10 +9059,18 @@ function modalEditPart(id, copyFromId) {
       // 名稱標準化(統一「馬眼形鑽」→「馬眼鑽」等,含分類限定規則)
       name = normalizePartName(name, catInput);
       // ─── shape 判斷 ───
-      // 只有「您真的改成跟自動解析不同」時才存,不然存 null(讓顯示自動解析)
-      // 這樣未來解析規則更新,顯示會自動跟上;您也可以覆蓋為自訂值
-      const autoShape = parsePartShape(name, catInput);
-      const finalShape = shapeInput && shapeInput !== autoShape ? shapeInput : null;
+      // shapeInput 是空字串 → 使用者主動清空,存 '' 讓顯示變(未分類)
+      // shapeInput 跟自動解析一樣 → 存 null,以後顯示自動解析(未來規則更新會自動跟上)
+      // shapeInput 有值且跟自動解析不同 → 存使用者的值
+      const autoShape = parsePartShape(name, catInput) || '';
+      let finalShape;
+      if (shapeInput === '') {
+        finalShape = ''; // 主動清空
+      } else if (shapeInput === autoShape) {
+        finalShape = null; // 跟自動解析一樣,讓未來自動更新
+      } else {
+        finalShape = shapeInput; // 使用者自訂
+      }
       const payload = {
         name,
         category: catInput || null,
