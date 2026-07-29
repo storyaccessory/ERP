@@ -834,6 +834,12 @@ async function loadProducts() {
     try { state.data.colorOptions = JSON.parse(colorSetting.value); } catch(e) {}
   }
   if (!state.data.colorOptions) state.data.colorOptions = ['純銀不電鍍','純銀硫化','白K金','玫瑰金','黃18K金','黃22K金'];
+  // 載入電鍍色代碼對照
+  const { data: platingSetting } = await db.from('settings').select('value').eq('key','plating_code_map').maybeSingle();
+  if (platingSetting?.value) {
+    try { state.data.platingCodeMap = JSON.parse(platingSetting.value); } catch(e) { state.data.platingCodeMap = {}; }
+  }
+  if (!state.data.platingCodeMap) state.data.platingCodeMap = {};
   await loadIPTree();
 }
 
@@ -2259,6 +2265,10 @@ async function modalProduct(productId = null) {
     db.from('settings').select('value').eq('key','color_options').maybeSingle().then(({data}) => {
       if (data?.value) { try { state.data.colorOptions = JSON.parse(data.value); } catch(e){} }
       if (!state.data.colorOptions?.length) state.data.colorOptions = ['純銀不電鍍','純銀硫化','白K金','玫瑰金','黃18K金','黃22K金'];
+    }),
+    db.from('settings').select('value').eq('key','plating_code_map').maybeSingle().then(({data}) => {
+      if (data?.value) { try { state.data.platingCodeMap = JSON.parse(data.value); } catch(e){} }
+      if (!state.data.platingCodeMap) state.data.platingCodeMap = {};
     }),
   ]);
 
