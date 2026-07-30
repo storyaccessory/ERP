@@ -3887,8 +3887,8 @@ window.pmAutoDetectMaterial = function() {
 // 產品材質判斷:
 //   貨號倒數第三碼:
 //     S → 925純銀
-//     W/R/Y → 925純銀、精鍍18K金
-//   若商品有鑽 → 加「、{鋯石描述}」(取用實際零件名稱,例:心形晶鑽3mm)
+//     W/R/Y/X → 925純銀,精鍍18K金
+//   若商品有鑽 → 加「,{鋯石描述}」(取用實際零件名稱,例:心形晶鑽3mm)
 // ─────────────────────────────────────────────
 window.detectProductMaterial = function(product) {
   if (!product) return null;
@@ -3899,7 +3899,7 @@ window.detectProductMaterial = function(product) {
   const plating = sku.charAt(sku.length - 3);
   const parts_ = [];
   if (plating === 'S') parts_.push('925純銀');
-  else if (plating === 'W' || plating === 'R' || plating === 'Y') {
+  else if (plating === 'W' || plating === 'R' || plating === 'Y' || plating === 'X') {
     parts_.push('925純銀');
     parts_.push('精鍍18K金');
   } else return null;
