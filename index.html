@@ -2544,12 +2544,12 @@ async function modalProduct(productId = null) {
         <span style="font-size:11px;color:var(--muted);font-weight:400">(可從貨號 + 零件自動判斷)</span>
         <button type="button" onclick="window.pmAutoDetectMaterial()" style="margin-left:8px;font-size:11px;padding:2px 8px;background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;border-radius:4px;cursor:pointer">🔄 自動判斷</button>
       </label>
-      <input class="form-control" id="pm-material" value="${product?.material||''}" list="pm-material-list" placeholder="例:925純銀,精鍍18K金,心形晶鑽3mm">
+      <input class="form-control" id="pm-material" value="${product?.material||''}" list="pm-material-list" placeholder="例:925純銀，精鍍18K金,心形晶鑽3mm">
       <datalist id="pm-material-list">
         <option value="925純銀">
-        <option value="925純銀,精鍍18K金">
-        <option value="925純銀,精鍍18K金,心形晶鑽3mm">
-        <option value="925純銀,精鍍18K金,圓形晶鑽2.5mm">
+        <option value="925純銀，精鍍18K金">
+        <option value="925純銀，精鍍18K金,心形晶鑽3mm">
+        <option value="925純銀，精鍍18K金,圓形晶鑽2.5mm">
       </datalist>
     </div>
 
@@ -3908,7 +3908,7 @@ window.detectProductMaterial = function(product) {
     [...zirconDescs].slice(0, 2).forEach(d => parts_.push(d));
   }
 
-  return parts_.join(',');
+  return parts_.join('，');
 };
 
 // ─────────────────────────────────────────────
