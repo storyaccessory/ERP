@@ -4181,11 +4181,13 @@ function modalViewProduct(productId) {
 
   // 填入 header
   const headerInfo = root.querySelector('#sp-header-info');
+  // 系列放最上面(小字)
+  if (ipLine) { const d = document.createElement('div'); d.className = 'sub'; d.style.marginBottom = '2px'; d.textContent = ipLine; headerInfo.appendChild(d); }
+  // 品名接下來(大字)
   const h3 = document.createElement('h3');
   h3.textContent = p.name;
   headerInfo.appendChild(h3);
-  if (ipLine) { const d = document.createElement('div'); d.className = 'sub'; d.textContent = ipLine; headerInfo.appendChild(d); }
-  if (p.sku)  { const d = document.createElement('div'); d.style.cssText = 'font-size:11px;color:var(--muted);margin-top:2px'; d.textContent = p.sku; headerInfo.appendChild(d); }
+  // 貨號不在標題顯示(避免重複,規格表已有)
 
   // 填入 body 用 innerHTML（分段，各段安全）
   const body = root.querySelector('#sp-body');
