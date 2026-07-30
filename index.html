@@ -2021,6 +2021,7 @@ function renderProducts() {
       <button class="btn btn-outline" onclick="modalImportProducts()" style="background:#e8f5f4;color:#00695c">↑ 批次匯入</button>
       <button class="btn btn-outline" onclick="modalRetroFillFromSku()" style="background:#fff8e1;color:#e65100" title="從貨號自動補品類/顏色">🔧 補填品類/顏色</button>
       <button class="btn btn-outline" onclick="modalRetroFillDefaultParts()" style="background:#e3f2fd;color:#1565c0" title="依分類補預設零件">🔩 補預設零件</button>
+      <button class="btn btn-outline" onclick="modalImportShopUrls()" style="background:#f3e5f5;color:#6a1b9a" title="批次匯入官網連結">🔗 匯入官網連結</button>
       <button class="btn btn-outline" id="export-products-btn">↓ 匯出 CSV</button>
     </div>
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px">顯示 ${filtered.length} / ${products.length} 件</div>
@@ -3141,6 +3142,71 @@ async function saveProduct(productId) {
 function closeSidePanel() {
   document.getElementById('side-panel-root')?.remove();
 }
+
+// ─────────────────────────────────────────────
+// 批次匯入商品官網連結(用貨號比對)
+// ─────────────────────────────────────────────
+window.modalImportShopUrls = function() {
+  showModal('🔗 批次匯入商品官網連結', `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.7">
+      <strong style="color:var(--accent-dark)">📋 格式:</strong>
+      <code style="background:#f5f5f5;padding:2px 6px;border-radius:4px">貨號  URL</code>
+      (tab 或逗號分隔,每行一筆)
+      <br><br>
+      <strong style="color:var(--accent-dark)">✅ 範例:</strong>
+      <div style="font-family:monospace;font-size:12px;background:#f5f5f5;padding:6px 10px;border-radius:4px;margin-top:4px">
+        KL1R1902R00	https://www.storyplus.com.tw/v2/official/SalePage/11296986<br>
+        AP1N2101W16	https://www.storyplus.com.tw/v2/official/SalePage/6559351
+      </div>
+      <div style="background:#fff8e1;border-left:3px solid #f57c00;padding:8px 12px;margin-top:10px;font-size:12px">
+        用<u>貨號</u>比對現有商品 → 找到就更新 shop_url,找不到就跳過
+      </div>
+    </div>
+    <textarea class="form-control" id="import-urls-text" rows="12"
+      placeholder="從 Excel 全選複製後貼進來(貨號 + URL 兩欄)"
+      style="font-family:monospace;font-size:12px;line-height:1.5"></textarea>
+    <div id="import-urls-result" style="margin-top:10px;font-size:12px"></div>
+  `, [
+    { label:'開始匯入', primary:true, onclick: async () => {
+      const text = document.getElementById('import-urls-text').value.trim();
+      if (!text) { showToast('請貼上資料','error'); return; }
+      const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
+      const resultEl = document.getElementById('import-urls-result');
+      resultEl.innerHTML = '<div style="color:var(--muted)">處理中… 0 / '+lines.length+'</div>';
+
+      let updated = 0, notFound = 0, errors = [];
+      for (let i = 0; i < lines.length; i++) {
+        const line = lines[i];
+        // 拆解:第一個空白/tab/逗號後面全部視為 URL(URL 可能含逗號)
+        const parts = line.split(/[\t]|,\s*(?=https?)|,\s*(?=www\.)/);
+        // 若沒有 tab,退回用空白拆
+        const cols = parts.length >= 2 ? parts : line.split(/\s+/);
+        if (cols.length < 2) { errors.push(`格式不對:${line.slice(0,50)}`); continue; }
+        const sku = cols[0].trim();
+        const url = cols.slice(1).join(' ').trim();
+        if (!sku || !url) { errors.push(`缺欄位:${line.slice(0,50)}`); continue; }
+
+        const { error } = await db.from('products').update({ shop_url: url }).eq('sku', sku);
+        if (error) { errors.push(`${sku}:${error.message}`); continue; }
+        // 檢查是否有更新到(可能貨號不存在)
+        const found = (state.data.products||[]).find(p => p.sku === sku);
+        if (found) updated++;
+        else notFound++;
+
+        if ((i+1) % 20 === 0) {
+          resultEl.innerHTML = `<div style="color:var(--muted)">處理中… ${i+1} / ${lines.length}</div>`;
+        }
+      }
+
+      await loadProducts();
+      const msg = `完成:更新 ${updated} 筆${notFound?`,${notFound} 筆貨號在系統中找不到`:''}${errors.length?`,${errors.length} 筆錯誤`:''}`;
+      resultEl.innerHTML = `<div style="color:${errors.length?'var(--warning)':'var(--success)'};font-weight:600">${msg}</div>`
+        + (errors.length ? `<div style="color:var(--danger);margin-top:6px;max-height:200px;overflow-y:auto;padding:6px 10px;background:#ffebee;border-radius:4px">${errors.slice(0,30).join('<br>')}</div>` : '');
+      renderApp();
+    }},
+    { label:'關閉', onclick: closeModal },
+  ]);
+};
 
 // ─────────────────────────────────────────────
 // 批次改零件單位(用篩選 or 手動勾)
