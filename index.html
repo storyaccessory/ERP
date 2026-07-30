@@ -4295,9 +4295,9 @@ async function modalEditCasting(id) {
   showModal(c ? '編輯鑄件' : '新增鑄件', `
     <div class="form-row form-row-2">
       <div class="form-group">
-        <label>商品型號(SKU)</label>
-        <input class="form-control" id="cs-sku" value="${c?.sku||''}" placeholder="例:KL1N2401-2-1">
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">內部識別碼,匯入時用來比對是新增還是更新</div>
+        <label>商品型號(SKU) <span style="color:var(--danger)">*</span></label>
+        <input class="form-control" id="cs-sku" value="${c?.sku||''}" placeholder="例:KL1N2401-2-1" required>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">必填,用來當唯一識別</div>
       </div>
       <div class="form-group">
         <label>鑄件名稱 <span style="color:var(--danger)">*</span></label>
@@ -4436,16 +4436,19 @@ async function modalEditCasting(id) {
         return;
       }
 
-      // ─── SKU 防重複檢查 ───
-      const sku = document.getElementById('cs-sku')?.value.trim() || null;
-      if (sku) {
-        const skuDup = existingCastings.find(x =>
-          (x.sku || '').trim() === sku && x.id !== id
-        );
-        if (skuDup) {
-          showToast(`已有相同商品型號「${sku}」的鑄件「${skuDup.name}」`, 'error');
-          return;
-        }
+      // ─── SKU 必填 + 防重複檢查 ───
+      const sku = document.getElementById('cs-sku')?.value.trim() || '';
+      if (!sku) {
+        showToast('請填商品型號(SKU)','error');
+        document.getElementById('cs-sku')?.focus();
+        return;
+      }
+      const skuDup = existingCastings.find(x =>
+        (x.sku || '').trim() === sku && x.id !== id
+      );
+      if (skuDup) {
+        showToast(`已有相同商品型號「${sku}」的鑄件「${skuDup.name}」`, 'error');
+        return;
       }
 
       const seriesId = document.getElementById('cs-series-id').value || null;
