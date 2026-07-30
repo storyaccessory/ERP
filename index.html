@@ -3040,13 +3040,13 @@ window.removeBomRow = function(id) {
   document.getElementById(id)?.remove();
 };
 
-// 圖片預覽 + 大小檢查
+// 圖片預覽(不擋大小 → 由上傳時自動壓縮)
 window.previewImg = function(input, previewId) {
   const file = input.files[0];
   if (!file) return;
-  if (file.size > 300 * 1024) {
-    showToast(`圖片過大（${(file.size/1024).toFixed(0)}KB），請壓縮至 300KB 以內`, 'error');
-    input.value = ''; return;
+  const origKB = Math.round(file.size / 1024);
+  if (origKB > 100) {
+    showToast(`📷 圖片 ${origKB}KB,上傳時會自動壓縮到 100KB 以下`, 'info', 2500);
   }
   const reader = new FileReader();
   reader.onload = e => {
@@ -3126,6 +3126,22 @@ async function uploadProductImage(file, productId, side) {
   // 壓縮後統一存為 .jpg(除非原本就是其他非圖片檔)
   const ext = isImage ? 'jpg' : (file.name.split('.').pop().toLowerCase() || 'bin');
   const path = `${productId}/${side}.${ext}`;
+
+  // ─── 先刪除該側所有舊檔(不同副檔名的殘留)──
+  // 例:舊 front.png、front.webp,新上傳 front.jpg,不同副檔名的舊檔會殘留
+  try {
+    const { data: existingFiles } = await db.storage.from('product-images').list(productId, { limit: 20 });
+    if (existingFiles?.length) {
+      const oldPaths = existingFiles
+        .filter(f => f.name.startsWith(`${side}.`) && f.name !== `${side}.${ext}`)
+        .map(f => `${productId}/${f.name}`);
+      if (oldPaths.length) {
+        await db.storage.from('product-images').remove(oldPaths);
+        console.log(`🗑 已刪除舊${side}圖:`, oldPaths);
+      }
+    }
+  } catch(e) { console.warn('清理舊圖失敗(忽略):', e); }
+
   const { error } = await db.storage.from('product-images').upload(path, uploadFile, { upsert: true });
   if (error) { showToast('圖片上傳失敗:' + error.message, 'error'); return null; }
   const { data } = db.storage.from('product-images').getPublicUrl(path);
