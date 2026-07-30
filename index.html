@@ -2524,7 +2524,34 @@ async function modalProduct(productId = null) {
         <input class="form-control" id="pm-ring-size" value="${product?.ring_size||''}" placeholder="例：#9、#11" style="display:none">
       </div>
     </div>
-    <div class="form-group"><label>官網連結</label><input class="form-control" id="pm-shop-url" value="${product?.shop_url||''}" placeholder="例:https://storyplus.com.tw/products/..."></div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>官網連結</label><input class="form-control" id="pm-shop-url" value="${product?.shop_url||''}" placeholder="例:https://storyplus.com.tw/products/..."></div>
+      <div class="form-group">
+        <label>📦 包裝 <span style="font-size:11px;color:var(--muted);font-weight:400">(顯示在商品規格給客人看)</span></label>
+        <input class="form-control" id="pm-packaging" value="${product?.packaging||''}" list="pm-packaging-list" placeholder="例:附品牌禮盒、精美紙盒、絨布袋">
+        <datalist id="pm-packaging-list">
+          <option value="附品牌禮盒">
+          <option value="精美紙盒">
+          <option value="絨布袋">
+          <option value="首飾收納盒">
+          <option value="不含包裝">
+        </datalist>
+      </div>
+    </div>
+
+    <div class="form-group">
+      <label>💎 材質
+        <span style="font-size:11px;color:var(--muted);font-weight:400">(可從貨號 + 零件自動判斷)</span>
+        <button type="button" onclick="window.pmAutoDetectMaterial()" style="margin-left:8px;font-size:11px;padding:2px 8px;background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;border-radius:4px;cursor:pointer">🔄 自動判斷</button>
+      </label>
+      <input class="form-control" id="pm-material" value="${product?.material||''}" list="pm-material-list" placeholder="例:925純銀,精鍍18K金,心形晶鑽3mm">
+      <datalist id="pm-material-list">
+        <option value="925純銀">
+        <option value="925純銀,精鍍18K金">
+        <option value="925純銀,精鍍18K金,心形晶鑽3mm">
+        <option value="925純銀,精鍍18K金,圓形晶鑽2.5mm">
+      </datalist>
+    </div>
 
     <!-- 💰 售價區 -->
     <div style="background:#f8f9fa;border-radius:6px;padding:12px;margin-bottom:12px">
@@ -3130,6 +3157,8 @@ async function saveProduct(productId) {
     chain_length: document.getElementById('pm-chain-length')?.style.display!=='none' ? (document.getElementById('pm-chain-length').value.trim()||null) : null,
     ring_size: document.getElementById('pm-ring-size')?.style.display!=='none' ? (document.getElementById('pm-ring-size').value.trim()||null) : null,
     shop_url: document.getElementById('pm-shop-url').value.trim() || null,
+    packaging: document.getElementById('pm-packaging')?.value.trim() || null,
+    material: document.getElementById('pm-material')?.value.trim() || null,
     alias: document.getElementById('pm-alias')?.value.trim() || null,
     retail_price: parseFloat(document.getElementById('pm-retail-price')?.value) || null,
     retail_price_currency: document.getElementById('pm-price-currency')?.value || 'TWD',
@@ -3801,6 +3830,87 @@ window.deletePriceHistory = async function(historyId, productId) {
   window.reloadProductPriceHistory && window.reloadProductPriceHistory(productId);
 };
 
+// 編輯視窗按「🔄 自動判斷」按鈕:用當前商品資料重跑材質判斷
+window.pmAutoDetectMaterial = function() {
+  const skuEl = document.getElementById('pm-sku');
+  const matEl = document.getElementById('pm-material');
+  if (!skuEl || !matEl) return;
+  const sku = skuEl.value.trim();
+  if (!sku) { showToast('請先填貨號','error'); return; }
+  // 從 state 找當前商品(含 product_parts)
+  const products = state.data.products || [];
+  const productId = document.querySelector('#save-product-btn')?.dataset?.productId
+    || document.querySelector('[data-current-product-id]')?.dataset?.currentProductId;
+  let currentProduct = productId ? products.find(p => p.id === productId) : null;
+  if (!currentProduct) {
+    // 新建的商品,還沒存,只用 sku 判斷,零件從當前 BOM 讀
+    const partIds = [];
+    document.querySelectorAll('#part-bom-list .bom-row input[type="hidden"]').forEach(el => {
+      if (el.value) partIds.push(el.value);
+    });
+    currentProduct = {
+      sku,
+      product_parts: partIds.map(id => ({ part_id: id })),
+    };
+  } else {
+    // 沿用 currentProduct 但貨號用當前輸入(用戶可能改了)
+    currentProduct = { ...currentProduct, sku };
+  }
+  const mat = window.detectProductMaterial(currentProduct);
+  if (!mat) {
+    showToast('無法從貨號判斷材質(倒數第三碼需為 S/W/R/Y)','error');
+    return;
+  }
+  matEl.value = mat;
+  matEl.style.borderColor = 'var(--success)';
+  setTimeout(() => matEl.style.borderColor = '', 1200);
+  showToast(`✅ 材質已帶入:${mat}`);
+};
+
+// ─────────────────────────────────────────────
+// 產品材質判斷:
+//   貨號倒數第三碼:
+//     S → 925純銀
+//     W/R/Y → 925純銀、精鍍18K金
+//   若商品有鑽 → 加「、{鋯石描述}」(取用實際零件名稱,例:心形晶鑽3mm)
+// ─────────────────────────────────────────────
+window.detectProductMaterial = function(product) {
+  if (!product) return null;
+  const sku = (product.sku || '').trim().toUpperCase();
+  if (sku.length < 3) return null;
+
+  // 倒數第三碼 = 電鍍代碼
+  const plating = sku.charAt(sku.length - 3);
+  const parts_ = [];
+  if (plating === 'S') parts_.push('925純銀');
+  else if (plating === 'W' || plating === 'R' || plating === 'Y') {
+    parts_.push('925純銀');
+    parts_.push('精鍍18K金');
+  } else return null;
+
+  // 有鑽 → 加「晶鑽」描述,優先用實際零件的顯示名稱
+  const productParts = product.product_parts || [];
+  const zirconDescs = new Set();
+  productParts.forEach(pp => {
+    const part = (state.data.parts||[]).find(pt => pt.id === pp.part_id);
+    const cat = pp.parts?.category || part?.category || '';
+    const name = pp.parts?.name || part?.name || '';
+    const displayName = pp.parts?.display_name || part?.display_name || '';
+    const spec = pp.parts?.spec || part?.spec || '';
+    if (cat === '鋯石' || /鑽/.test(name)) {
+      // 優先用 display_name,次選 name(去掉常見 mm 前綴變數字後綴)
+      const desc = displayName || name;
+      if (desc) zirconDescs.add(desc);
+    }
+  });
+  if (zirconDescs.size) {
+    // 只保留 1〜2 個代表性描述,避免太長
+    [...zirconDescs].slice(0, 2).forEach(d => parts_.push(d));
+  }
+
+  return parts_.join(',');
+};
+
 // ─────────────────────────────────────────────
 // 貨號解析:自動判斷品類 + 電鍍色 + 尺寸
 // 格式:[角色代碼][系列版本][品類代碼][4位數][電鍍色代碼][尺寸]
@@ -4094,11 +4204,13 @@ function modalViewProduct(productId) {
   bodyHtml += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:4px">';
   if (p.sku)         bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;width:72px;border:1px solid #e0f2f1;white-space:nowrap">貨號</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.sku}</td></tr>`;
   if (p.categories?.name) bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">品類</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.categories.name}</td></tr>`;
+  if (p.material)    bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">材質</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.material}</td></tr>`;
   if (partsForDisplay.length) bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">零配件</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-parts-display"></td></tr>`;
   if (p.color)       bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">顏色</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.color}</td></tr>`;
   if (p.size)        bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">尺寸</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-size"></td></tr>`;
   if (p.chain_length) bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">鍊長</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-chain-length"></td></tr>`;
   if (p.ring_size)    bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">戒圍</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-ring-size"></td></tr>`;
+  if (p.packaging)   bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">📦 包裝</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.packaging}</td></tr>`;
   bodyHtml += '</table>';
 
   // 狀態
