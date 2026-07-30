@@ -4199,15 +4199,16 @@ function modalViewProduct(productId) {
     bodyHtml += '</div>';
   }
 
-  // 規格表（類似圖片的表格樣式）
-  bodyHtml += '<div class="sp-section-title">商品規格</div>';
+  // 規格表(順序:貨號→材質→尺寸→顏色→鍊長→戒圍→包裝;品類拿掉;前往官網放標題右邊)
+  bodyHtml += `<div class="sp-section-title" style="display:flex;align-items:center;justify-content:space-between">
+    <span>商品規格</span>
+    ${shopUrl ? `<a href="${shopUrl}" target="_blank" style="font-size:12px;color:var(--accent-dark);font-weight:400;text-decoration:none;display:inline-flex;align-items:center;gap:4px">🔗 前往官網</a>` : ''}
+  </div>`;
   bodyHtml += '<table style="width:100%;border-collapse:collapse;font-size:13px;margin-bottom:4px">';
   if (p.sku)         bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;width:72px;border:1px solid #e0f2f1;white-space:nowrap">貨號</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.sku}</td></tr>`;
-  if (p.categories?.name) bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">品類</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.categories.name}</td></tr>`;
   if (p.material)    bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">材質</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.material}</td></tr>`;
-  if (partsForDisplay.length) bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">零配件</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-parts-display"></td></tr>`;
-  if (p.color)       bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">顏色</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.color}</td></tr>`;
   if (p.size)        bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">尺寸</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-size"></td></tr>`;
+  if (p.color)       bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">顏色</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.color}</td></tr>`;
   if (p.chain_length) bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">鍊長</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-chain-length"></td></tr>`;
   if (p.ring_size)    bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">戒圍</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-ring-size"></td></tr>`;
   if (p.packaging)   bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">包裝</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.packaging}</td></tr>`;
@@ -4215,9 +4216,6 @@ function modalViewProduct(productId) {
 
   // 狀態
   bodyHtml += `<div style="margin-bottom:10px"><span class="tag ${statusClass[p.status]||'tag-grey'}" style="font-size:12px;padding:4px 10px">${statusLabel[p.status]||p.status||'—'}</span></div>`;
-
-  // 官網連結
-  if (shopUrl) bodyHtml += `<div style="margin-bottom:10px"><a href="${shopUrl}" target="_blank" style="font-size:13px;color:var(--accent-dark);display:inline-flex;align-items:center;gap:4px">🔗 前往官網</a></div>`;
 
   // 鑄件
   if (castingRows) bodyHtml += '<div class="sp-section-title">鑄件組成</div>' + castingRows;
