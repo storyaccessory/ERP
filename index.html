@@ -819,10 +819,10 @@ async function loadOrders() {
 
 async function loadProducts() {
   const [{ data }, { data: cats }, { data: castings }, { data: parts }] = await Promise.all([
-    db.from('products').select(`*, ip_licenses(name), series(name, category_id, ip_categories(code, name)), categories(name), product_castings(qty, casting_id, castings(name, stock)), product_parts(qty, part_id, parts(name, spec, unit, stock))`).order('created_at', { ascending: false }),
+    db.from('products').select(`*, ip_licenses(name), series(name, category_id, ip_categories(code, name)), categories(name), product_castings(qty, casting_id, castings(name, stock)), product_parts(qty, part_id, parts(name, spec, unit, stock, show_spec_in_product, category, shape))`).order('created_at', { ascending: false }),
     db.from('categories').select('*').order('name'),
     db.from('castings').select('id, name, stock').order('name'),
-    db.from('parts').select('id, name, stock, unit, spec, category').order('name'),
+    db.from('parts').select('id, name, stock, unit, spec, category, shape, show_spec_in_product').order('name'),
   ]);
   state.data.products = data || [];
   state.data.categories = cats || [];
@@ -22825,7 +22825,13 @@ function renderCalendar() {
     };
     // 取名字:assignee_ids[0] / assigned_to → users 表 → 名(去掉姓,2 字)
     const _userName = id => (state.data.users||[]).find(u=>u.id===id)?.name || '';
-    const _firstName = full => full || '?';   // 全名顯示
+    // 只顯示名字後兩個字(拿掉姓氏)。名字 <=2 字則整個顯示。
+    const _firstName = full => {
+      if (!full) return '?';
+      const n = full.trim();
+      if (n.length <= 2) return n;
+      return n.slice(-2);  // 後兩個字
+    };
     // 顏色從「請假」分類設定讀;沒設定就用預設橘色
     const _leaveCat = Object.values(_calTypesAll).find(t => (t?.label||'').includes('請假'));
     const _leaveMain = _leaveCat?.color || '#ef6c00';
