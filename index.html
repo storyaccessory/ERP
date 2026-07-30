@@ -22382,12 +22382,11 @@ function renderGoldsmith() {
           <span style="margin-left:auto;font-size:10px;color:var(--muted)">×${totalQty}</span>
         </div>
         <div style="font-weight:600;color:var(--text);line-height:1.3;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${displayName}">${displayName}</div>
-        ${!isSmall ? `
-        <div style="display:flex;align-items:center;gap:4px;margin-top:3px;font-size:10px">
+        <div style="display:flex;align-items:center;gap:3px;margin-top:3px;font-size:10px;flex-wrap:wrap">
           ${worker ? `<span style="background:#e0f2f1;color:var(--accent-dark);padding:1px 5px;border-radius:8px">${worker}</span>` : `<span style="color:#ccc">未指派</span>`}
           ${prodStatus ? `<span style="background:${prodStatusCol}22;color:${prodStatusCol};padding:1px 5px;border-radius:8px;font-weight:600">${prodStatus}</span>` : ''}
-          ${canManage ? `<button onclick="event.stopPropagation();_gsQuickEditOrder('${o.id}')" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted);font-size:12px;padding:0 3px" title="編輯">✏</button>` : ''}
-        </div>` : ''}
+          ${canManage ? `<button onclick="event.stopPropagation();_gsQuickEditOrder('${o.id}')" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted);font-size:12px;padding:0 3px" title="編輯 / 看歷程">✏</button>` : ''}
+        </div>
       </div>`;
   };
 
@@ -22557,7 +22556,7 @@ async function _gsApplyMove(orderId, fromDate, toDate) {
   renderApp();
 }
 
-// 快速編輯:負責人、標記、狀態
+// 快速編輯:負責人、標記、狀態 + 排程歷程
 window._gsQuickEditOrder = function(orderId) {
   const o = (state.data.goldsmithOrders||[]).find(x => x.id === orderId);
   if (!o) return;
@@ -22565,9 +22564,9 @@ window._gsQuickEditOrder = function(orderId) {
     <div class="form-row form-row-2">
       <div class="form-group">
         <label>負責人</label>
-        <input class="form-control" id="gs-worker" value="${o.assigned_worker||''}" list="gs-worker-list" placeholder="蔚、翔、徐、共同…">
+        <input class="form-control" id="gs-worker" value="${o.assigned_worker||''}" list="gs-worker-list" placeholder="翔、蔚、芷、昕、團">
         <datalist id="gs-worker-list">
-          <option value="蔚"><option value="翔"><option value="徐"><option value="柔柔"><option value="共同"><option value="蔚瀅">
+          <option value="翔"><option value="蔚"><option value="芷"><option value="昕"><option value="團">
         </datalist>
       </div>
       <div class="form-group">
@@ -22590,6 +22589,17 @@ window._gsQuickEditOrder = function(orderId) {
         <option value="完成" ${o.production_status==='完成'?'selected':''}>完成</option>
       </select>
     </div>
+
+    <!-- 📜 排程歷程 -->
+    <div id="gs-history-wrap" style="background:#fff8e1;border-radius:6px;padding:10px 12px;margin-top:12px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:6px">
+        <div style="font-size:12px;font-weight:600;color:#e65100">📜 排程異動歷程</div>
+        <span style="font-size:11px;color:var(--muted)" id="gs-history-count">載入中…</span>
+      </div>
+      <div id="gs-history-list" style="font-size:12px;max-height:200px;overflow-y:auto">
+        <div style="color:var(--muted);text-align:center;padding:8px">載入中…</div>
+      </div>
+    </div>
   `, [
     { label:'儲存', primary:true, onclick: async () => {
       const update = {
@@ -22606,6 +22616,38 @@ window._gsQuickEditOrder = function(orderId) {
     }},
     { label:'取消', onclick: closeModal },
   ]);
+
+  // 載入歷程
+  setTimeout(async () => {
+    const { data: hist } = await db.from('restock_schedule_history')
+      .select('*')
+      .eq('restock_order_id', orderId)
+      .order('changed_at', { ascending: false })
+      .limit(50);
+    const listEl = document.getElementById('gs-history-list');
+    const countEl = document.getElementById('gs-history-count');
+    if (!listEl) return;
+    if (!hist || !hist.length) {
+      listEl.innerHTML = '<div style="color:var(--muted);text-align:center;padding:8px">尚無異動紀錄</div>';
+      if (countEl) countEl.textContent = '0 筆';
+      return;
+    }
+    if (countEl) countEl.textContent = `${hist.length} 筆`;
+    listEl.innerHTML = hist.map((h,i) => {
+      const dt = new Date(h.changed_at).toLocaleString('zh-TW',{month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit'});
+      const from = h.from_date || '待安排';
+      const to = h.to_date || '待安排';
+      const isLatest = i === 0;
+      return `<div style="padding:6px 0;border-bottom:${i<hist.length-1?'1px solid #ffe082':'none'}">
+        <div style="display:flex;align-items:center;gap:6px;margin-bottom:2px">
+          <span style="color:var(--muted);font-size:11px;white-space:nowrap">${dt}</span>
+          <span style="font-size:11px;font-weight:600;color:${isLatest?'#e65100':'#666'}">${h.changed_by_name || '—'}</span>
+          <span style="margin-left:auto;font-size:11px;background:#fff;padding:1px 6px;border-radius:3px;border:1px solid #ffe082">${from} → ${to}</span>
+        </div>
+        <div style="font-size:11px;color:#5d4037;padding-left:2px">📝 ${h.reason || '—'}</div>
+      </div>`;
+    }).join('');
+  }, 80);
 };
 
 // 月份切換
