@@ -22303,46 +22303,333 @@ window.deleteFoundry = async function(id) {
 };
 
 // ── Goldsmith Schedule ──
+// ═══════════════════════════════════════════
+// 金工排程看板(Kanban):待抓料 / 待安排 / 排程中
+// ═══════════════════════════════════════════
 async function loadGoldsmith() {
-  const { data } = await db.from('calendar_events').select('*').eq('event_type','goldsmith').order('start_date');
-  state.data.goldsmith = data || [];
+  // 抓所有還在流程中的補貨單(不含已完成)
+  const [{ data }, { data: holidaySetting }] = await Promise.all([
+    db.from('restock_orders')
+      .select(`*, restock_order_items(*, products(name, sku, series(name)))`)
+      .in('status', ['待抓料','待製作','製作中','缺零件','缺鑄件','已交件','送鍍'])
+      .order('order_date', { ascending: false }),
+    db.from('settings').select('value').eq('key','goldsmith_holidays').maybeSingle(),
+  ]);
+  state.data.goldsmithOrders = data || [];
+  if (holidaySetting?.value) {
+    try { state.data.goldsmithHolidays = JSON.parse(holidaySetting.value); } catch(e) { state.data.goldsmithHolidays = {}; }
+  } else {
+    state.data.goldsmithHolidays = {};
+  }
+}
+
+// 判斷是否有製作部主管權限(能拖曳排程)
+function _canManageGoldsmith() {
+  const p = state.profile;
+  if (!p) return false;
+  const email = p.email || state.user?.email || '';
+  if (p.role === 'admin' || email === 'cailing0516@gmail.com') return true;
+  // 製作部主管:role=manager 且 department 含「製作」
+  if (p.role === 'manager' && (p.department||'').includes('製作')) return true;
+  return false;
 }
 
 function renderGoldsmith() {
-  const jobs = state.data.goldsmith || [];
-  const now = new Date().toISOString().split('T')[0];
-  const active = jobs.filter(j=>j.end_date >= now || !j.end_date);
-  const done = jobs.filter(j=>j.end_date && j.end_date < now);
+  const orders = state.data.goldsmithOrders || [];
+  const canManage = _canManageGoldsmith();
+
+  // 分類:待抓料 / 待安排(待製作但沒排日期)/ 排程中(有排日期)
+  const pending = orders.filter(o => ['待抓料','缺零件','缺鑄件'].includes(o.status));
+  const ready   = orders.filter(o => o.status === '待製作' && !o.scheduled_date);
+  const scheduled = orders.filter(o => o.scheduled_date);
+
+  // 月曆:預設當月
+  if (!state.data.goldsmithMonth) {
+    const n = new Date();
+    state.data.goldsmithMonth = { y: n.getFullYear(), m: n.getMonth() };
+  }
+  const { y, m } = state.data.goldsmithMonth;
+  const firstDow = new Date(y, m, 1).getDay(); // 0=Sun
+  const daysInMonth = new Date(y, m+1, 0).getDate();
+  const monthName = `${y}年 ${m+1} 月`;
+
+  // 假日(週六日 + 手動標記)
+  const holidays = state.data.goldsmithHolidays || {};
+
+  // ── 渲染卡片 ──
+  const _card = (o, isSmall = false) => {
+    const items = o.restock_order_items || [];
+    const totalQty = items.reduce((s,i)=>s+((i.confirmed_qty??i.qty)||0), 0);
+    const firstItem = items[0];
+    const productName = firstItem?.products?.name || firstItem?.product_name || '?';
+    const seriesName = firstItem?.products?.series?.name || '';
+    const displayName = seriesName ? `${seriesName}-${productName}${items.length>1?`(+${items.length-1})`:''}` : productName;
+    const prio = o.priority || '一般';
+    const prioCol = prio === '急' ? '#e53935' : prio === '不急' ? '#78909c' : '#f57c00';
+    const worker = o.assigned_worker || '';
+    const prodStatus = o.production_status || '';
+    const prodStatusCol = { '交件':'#2e7d32', '送鍍':'#1565c0', '完成':'#6a1b9a', '待處理':'#f57c00' }[prodStatus] || '';
+    return `
+      <div class="gs-card" draggable="${canManage}"
+        data-order-id="${o.id}"
+        data-scheduled="${o.scheduled_date || ''}"
+        ondragstart="_gsDragStart(event,'${o.id}','${o.scheduled_date||''}')"
+        ondragend="_gsDragEnd(event)"
+        style="background:#fff;border:1px solid #d0e2df;border-radius:6px;padding:6px 8px;margin-bottom:5px;cursor:${canManage?'grab':'default'};font-size:11px;box-shadow:0 1px 2px rgba(0,0,0,.06);position:relative">
+        <div style="display:flex;align-items:center;gap:4px;margin-bottom:3px">
+          <span style="background:${prioCol};color:#fff;font-size:9px;padding:1px 5px;border-radius:8px;font-weight:700">${prio}</span>
+          <span style="font-size:10px;color:var(--muted);font-family:monospace">${o.order_no||''}</span>
+          <span style="margin-left:auto;font-size:10px;color:var(--muted)">×${totalQty}</span>
+        </div>
+        <div style="font-weight:600;color:var(--text);line-height:1.3;font-size:11px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${displayName}">${displayName}</div>
+        ${!isSmall ? `
+        <div style="display:flex;align-items:center;gap:4px;margin-top:3px;font-size:10px">
+          ${worker ? `<span style="background:#e0f2f1;color:var(--accent-dark);padding:1px 5px;border-radius:8px">${worker}</span>` : `<span style="color:#ccc">未指派</span>`}
+          ${prodStatus ? `<span style="background:${prodStatusCol}22;color:${prodStatusCol};padding:1px 5px;border-radius:8px;font-weight:600">${prodStatus}</span>` : ''}
+          ${canManage ? `<button onclick="event.stopPropagation();_gsQuickEditOrder('${o.id}')" style="margin-left:auto;background:none;border:none;cursor:pointer;color:var(--muted);font-size:12px;padding:0 3px" title="編輯">✏</button>` : ''}
+        </div>` : ''}
+      </div>`;
+  };
+
+  // ── 月曆格 ──
+  const monthGrid = [];
+  // 前導空格
+  for (let i = 0; i < firstDow; i++) monthGrid.push({ empty: true });
+  for (let d = 1; d <= daysInMonth; d++) {
+    const dateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const dow = new Date(y, m, d).getDay();
+    const isWeekend = dow === 0 || dow === 6;
+    const isHoliday = holidays[dateStr] || false;
+    const dayOrders = scheduled.filter(o => o.scheduled_date === dateStr);
+    const totalQty = dayOrders.reduce((s,o) => {
+      const items = o.restock_order_items || [];
+      return s + items.reduce((ss,i)=>ss+((i.confirmed_qty??i.qty)||0), 0);
+    }, 0);
+    monthGrid.push({
+      date: dateStr, day: d, dow, isWeekend, isHoliday,
+      orders: dayOrders, totalQty,
+    });
+  }
+
+  const cellHtml = c => {
+    if (c.empty) return `<div style="border:1px solid transparent;background:transparent"></div>`;
+    const bgCol = c.isHoliday ? '#ffebee' : c.isWeekend ? '#fafafa' : '#fff';
+    const dayCol = c.dow === 0 ? '#c62828' : c.dow === 6 ? '#1565c0' : 'var(--text)';
+    const canDrop = canManage && !c.isHoliday;
+    return `<div class="gs-day-cell"
+      data-date="${c.date}"
+      ${canDrop ? `ondragover="_gsDragOver(event,this)" ondragleave="_gsDragLeave(this)" ondrop="_gsDrop(event,'${c.date}')"` : ''}
+      style="border:1px solid #d0e2df;background:${bgCol};min-height:120px;padding:4px 5px;border-radius:5px;overflow:hidden;transition:background .15s">
+      <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;font-size:11px">
+        <span style="font-weight:${c.day===new Date().getDate() && m===new Date().getMonth() && y===new Date().getFullYear()?800:600};color:${dayCol}">${c.day}</span>
+        ${c.isHoliday ? '<span style="font-size:9px;color:#c62828;background:#fce4ec;padding:1px 4px;border-radius:3px">假日</span>' : ''}
+        <span style="margin-left:auto;font-size:9px;color:var(--muted)">${c.totalQty > 0 ? `${c.totalQty}件` : ''}</span>
+        ${canManage && !c.isHoliday ? `<button onclick="_gsToggleHoliday('${c.date}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:11px" title="標假日">🏖</button>` : ''}
+        ${canManage && c.isHoliday ? `<button onclick="_gsToggleHoliday('${c.date}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:11px" title="取消假日">↩</button>` : ''}
+      </div>
+      ${c.orders.map(o => _card(o, true)).join('')}
+    </div>`;
+  };
+
   return `
-    <div class="search-bar">
-      <button class="btn btn-primary" onclick="modalAddGoldsmithJob()">+ 新增金工排程</button>
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:6px">
+        <button class="btn btn-sm btn-outline" onclick="_gsChangeMonth(-1)">◀</button>
+        <div style="font-size:15px;font-weight:700;color:var(--accent-dark);min-width:110px;text-align:center">${monthName}</div>
+        <button class="btn btn-sm btn-outline" onclick="_gsChangeMonth(1)">▶</button>
+        <button class="btn btn-sm btn-outline" onclick="_gsGoToday()">今天</button>
+      </div>
+      <div style="margin-left:auto;font-size:12px;color:var(--muted)">
+        ${canManage ? '✅ 有排程權限' : '👀 只讀模式(僅製作部主管可拖曳)'}
+      </div>
     </div>
-    ${active.length===0&&done.length===0?`<div class="card"><div class="empty"><div class="empty-icon">🔨</div><p>尚無金工排程</p></div></div>`:''}
-    ${active.length>0?`
-    <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin-bottom:8px">進行中 / 待執行（${active.length}）</div>
-    ${active.map(j=>`<div class="card" style="margin-bottom:8px">
-      <div style="display:flex;justify-content:space-between;align-items:center">
-        <div>
-          <div style="font-size:14px;font-weight:600">${j.title}</div>
-          <div style="font-size:12px;color:var(--muted)">${j.description||''}</div>
+
+    <div style="display:grid;grid-template-columns:220px 220px 1fr;gap:12px">
+      <!-- 待抓料 -->
+      <div>
+        <div style="background:#fff8e1;border:1px solid #ffe082;border-radius:6px;padding:8px 10px;margin-bottom:6px">
+          <div style="font-size:13px;font-weight:700;color:#e65100">📦 待抓料</div>
+          <div style="font-size:11px;color:var(--muted)">${pending.length} 張 · 抓料完成才會到「待安排」</div>
         </div>
-        <div style="text-align:right;font-size:12px">
-          ${j.start_date?`<div>開始：${j.start_date}</div>`:''}
-          ${j.end_date?`<div style="color:${j.end_date<now?'var(--danger)':'var(--muted)'}">截止：${j.end_date}</div>`:''}
+        <div style="max-height:calc(100vh - 260px);overflow-y:auto">
+          ${pending.length === 0 ? '<div style="color:var(--muted);text-align:center;padding:20px;font-size:12px">目前沒有待抓料</div>' : pending.map(o => _card(o)).join('')}
         </div>
       </div>
-      <div style="margin-top:8px;display:flex;gap:6px">
-        <button class="btn btn-sm btn-outline" onclick="editGoldsmithJob('${j.id}')">編輯</button>
-        <button class="btn btn-sm btn-danger" onclick="deleteGoldsmithJob('${j.id}')">刪除</button>
+
+      <!-- 待安排 -->
+      <div>
+        <div style="background:#e3f2fd;border:1px solid #90caf9;border-radius:6px;padding:8px 10px;margin-bottom:6px">
+          <div style="font-size:13px;font-weight:700;color:#1565c0">🔧 待安排</div>
+          <div style="font-size:11px;color:var(--muted)">${ready.length} 張 · 拖到右邊日期排程</div>
+        </div>
+        <div id="gs-ready-list"
+          ${canManage ? 'ondragover="_gsDragOver(event,this)" ondragleave="_gsDragLeave(this)" ondrop="_gsDropToReady(event)"' : ''}
+          style="max-height:calc(100vh - 260px);overflow-y:auto;min-height:200px;padding:2px;border-radius:6px;transition:background .15s">
+          ${ready.length === 0 ? '<div style="color:var(--muted);text-align:center;padding:20px;font-size:12px">目前沒有待安排</div>' : ready.map(o => _card(o)).join('')}
+        </div>
       </div>
-    </div>`).join('')}`:''}
-    ${done.length>0?`
-    <details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px;color:var(--muted)">已完成（${done.length}）</summary>
-    <div style="margin-top:8px">${done.map(j=>`<div class="card" style="margin-bottom:8px;opacity:.7">
-      <div style="font-size:14px;font-weight:600">${j.title}</div>
-      <div style="font-size:12px;color:var(--muted)">${j.start_date||''} ～ ${j.end_date||''}</div>
-    </div>`).join('')}</div></details>`:''}`;
+
+      <!-- 月曆 -->
+      <div>
+        <div style="background:#e8f5f4;border:1px solid #b2dfdb;border-radius:6px;padding:8px 10px;margin-bottom:6px">
+          <div style="font-size:13px;font-weight:700;color:var(--accent-dark)">📅 排程 · ${scheduled.length} 張</div>
+          <div style="font-size:11px;color:var(--muted)">拖曳補貨單到日期格</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px;font-size:11px;font-weight:600;color:var(--muted);text-align:center;margin-bottom:4px">
+          <div>日</div><div>一</div><div>二</div><div>三</div><div>四</div><div>五</div><div>六</div>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:4px">
+          ${monthGrid.map(cellHtml).join('')}
+        </div>
+      </div>
+    </div>
+  `;
 }
+
+// ── 拖曳事件 ──
+window._gsDragStart = function(e, orderId, fromDate) {
+  e.dataTransfer.effectAllowed = 'move';
+  e.dataTransfer.setData('text/plain', JSON.stringify({ orderId, fromDate }));
+  e.target.style.opacity = '0.5';
+};
+window._gsDragEnd = function(e) {
+  e.target.style.opacity = '';
+  document.querySelectorAll('.gs-day-cell,#gs-ready-list').forEach(el => {
+    el.style.background = el.dataset.origBg || '';
+  });
+};
+window._gsDragOver = function(e, el) {
+  e.preventDefault();
+  if (!el.dataset.origBg) el.dataset.origBg = el.style.background || '';
+  el.style.background = '#c8e6c9';
+};
+window._gsDragLeave = function(el) {
+  el.style.background = el.dataset.origBg || '';
+};
+window._gsDrop = async function(e, toDate) {
+  e.preventDefault();
+  const raw = e.dataTransfer.getData('text/plain');
+  let data; try { data = JSON.parse(raw); } catch { return; }
+  const { orderId, fromDate } = data;
+  if (fromDate === toDate) return; // 沒動
+  await _gsApplyMove(orderId, fromDate || null, toDate);
+};
+window._gsDropToReady = async function(e) {
+  e.preventDefault();
+  const raw = e.dataTransfer.getData('text/plain');
+  let data; try { data = JSON.parse(raw); } catch { return; }
+  const { orderId, fromDate } = data;
+  if (!fromDate) return; // 本來就在待安排
+  await _gsApplyMove(orderId, fromDate, null);
+};
+
+// 執行搬移(有 fromDate 或 toDate 有一邊有值)
+async function _gsApplyMove(orderId, fromDate, toDate) {
+  // 若是「已排程」的異動,強制填原因
+  const needReason = fromDate !== null;
+  let reason = '首次排程';
+  if (needReason) {
+    reason = prompt(`調整排程需填寫原因(拖回待安排 或 換日期):\n\n從 ${fromDate || '待安排'} → ${toDate || '待安排'}`, '');
+    if (reason === null) return; // 使用者取消
+    if (!reason.trim()) { showToast('原因不能空白','error'); return; }
+  }
+
+  // 更新 restock_orders
+  const update = {
+    scheduled_date: toDate,
+    status: toDate ? '製作中' : '待製作',
+  };
+  const { error } = await db.from('restock_orders').update(update).eq('id', orderId);
+  if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+
+  // 寫歷程
+  await db.from('restock_schedule_history').insert({
+    restock_order_id: orderId,
+    from_date: fromDate,
+    to_date: toDate,
+    reason: reason.trim(),
+    changed_by: state.user?.id || null,
+    changed_by_name: state.profile?.name || state.user?.email || '',
+  });
+
+  showToast('✅ 已更新排程');
+  await loadGoldsmith();
+  renderApp();
+}
+
+// 快速編輯:負責人、標記、狀態
+window._gsQuickEditOrder = function(orderId) {
+  const o = (state.data.goldsmithOrders||[]).find(x => x.id === orderId);
+  if (!o) return;
+  showModal(`✏ ${o.order_no||''}`, `
+    <div class="form-row form-row-2">
+      <div class="form-group">
+        <label>負責人</label>
+        <input class="form-control" id="gs-worker" value="${o.assigned_worker||''}" list="gs-worker-list" placeholder="蔚、翔、徐、共同…">
+        <datalist id="gs-worker-list">
+          <option value="蔚"><option value="翔"><option value="徐"><option value="柔柔"><option value="共同"><option value="蔚瀅">
+        </datalist>
+      </div>
+      <div class="form-group">
+        <label>標記</label>
+        <select class="form-control" id="gs-priority">
+          <option value="急" ${o.priority==='急'?'selected':''}>急</option>
+          <option value="一般" ${(o.priority||'一般')==='一般'?'selected':''}>一般</option>
+          <option value="不急" ${o.priority==='不急'?'selected':''}>不急</option>
+        </select>
+      </div>
+    </div>
+    <div class="form-group">
+      <label>製作狀態</label>
+      <select class="form-control" id="gs-pstat">
+        <option value="">未設定</option>
+        <option value="待處理" ${o.production_status==='待處理'?'selected':''}>待處理</option>
+        <option value="製作中" ${o.production_status==='製作中'?'selected':''}>製作中</option>
+        <option value="交件" ${o.production_status==='交件'?'selected':''}>交件</option>
+        <option value="送鍍" ${o.production_status==='送鍍'?'selected':''}>送鍍</option>
+        <option value="完成" ${o.production_status==='完成'?'selected':''}>完成</option>
+      </select>
+    </div>
+  `, [
+    { label:'儲存', primary:true, onclick: async () => {
+      const update = {
+        assigned_worker: document.getElementById('gs-worker').value.trim() || null,
+        priority: document.getElementById('gs-priority').value,
+        production_status: document.getElementById('gs-pstat').value || null,
+      };
+      const { error } = await db.from('restock_orders').update(update).eq('id', orderId);
+      if (error) { showToast('儲存失敗:'+error.message,'error'); return; }
+      showToast('✅ 已更新');
+      closeModal();
+      await loadGoldsmith();
+      renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+// 月份切換
+window._gsChangeMonth = function(delta) {
+  const { y, m } = state.data.goldsmithMonth;
+  const d = new Date(y, m + delta, 1);
+  state.data.goldsmithMonth = { y: d.getFullYear(), m: d.getMonth() };
+  renderApp();
+};
+window._gsGoToday = function() {
+  const n = new Date();
+  state.data.goldsmithMonth = { y: n.getFullYear(), m: n.getMonth() };
+  renderApp();
+};
+
+// 假日標記(存本地)
+window._gsToggleHoliday = function(date) {
+  if (!state.data.goldsmithHolidays) state.data.goldsmithHolidays = {};
+  if (state.data.goldsmithHolidays[date]) delete state.data.goldsmithHolidays[date];
+  else state.data.goldsmithHolidays[date] = true;
+  // 持久化到 settings
+  db.from('settings').upsert({ key:'goldsmith_holidays', value: JSON.stringify(state.data.goldsmithHolidays) });
+  renderApp();
+};
 
 window.modalAddGoldsmithJob = function(existing=null) {
   const id = existing?.id;
