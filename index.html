@@ -2527,7 +2527,7 @@ async function modalProduct(productId = null) {
     <div class="form-row form-row-2">
       <div class="form-group"><label>官網連結</label><input class="form-control" id="pm-shop-url" value="${product?.shop_url||''}" placeholder="例:https://storyplus.com.tw/products/..."></div>
       <div class="form-group">
-        <label>📦 包裝 <span style="font-size:11px;color:var(--muted);font-weight:400">(顯示在商品規格給客人看)</span></label>
+        <label>包裝 <span style="font-size:11px;color:var(--muted);font-weight:400">(顯示在商品規格給客人看)</span></label>
         <input class="form-control" id="pm-packaging" value="${product?.packaging||''}" list="pm-packaging-list" placeholder="例:附品牌禮盒、精美紙盒、絨布袋">
         <datalist id="pm-packaging-list">
           <option value="附品牌禮盒">
@@ -4210,7 +4210,7 @@ function modalViewProduct(productId) {
   if (p.size)        bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">尺寸</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-size"></td></tr>`;
   if (p.chain_length) bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">鍊長</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-chain-length"></td></tr>`;
   if (p.ring_size)    bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">戒圍</td><td style="padding:7px 10px;border:1px solid #e0f2f1" id="sp-ring-size"></td></tr>`;
-  if (p.packaging)   bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">📦 包裝</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.packaging}</td></tr>`;
+  if (p.packaging)   bodyHtml += `<tr><td style="padding:7px 10px;background:#f0faf9;font-weight:600;color:#00695c;border:1px solid #e0f2f1;white-space:nowrap">包裝</td><td style="padding:7px 10px;border:1px solid #e0f2f1">${p.packaging}</td></tr>`;
   bodyHtml += '</table>';
 
   // 狀態
