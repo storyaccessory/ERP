@@ -22368,7 +22368,19 @@ function renderGoldsmith() {
     const prioCol = prio === '急' ? '#e53935' : prio === '不急' ? '#78909c' : '#f57c00';
     const worker = o.assigned_worker || '';
     const prodStatus = o.production_status || '';
-    const prodStatusCol = { '交件':'#2e7d32', '送鍍':'#1565c0', '完成':'#6a1b9a', '待處理':'#f57c00' }[prodStatus] || '';
+    // 狀態顏色對照(對應設定截圖):
+    // 🔴 紅 = 欠鑄
+    // 🔵 藍 = 缺零件/缺鍊/缺鑽
+    // 🟡 黃 = 待製作/組裝未點/製作中/待細拋/待組裝
+    // 🌸 粉 = 返工/送鍍
+    // ⚪ 白 = 交件/完成
+    const prodStatusCol = {
+      '欠鑄':'#c62828',
+      '缺零件':'#1565c0','缺鍊':'#1565c0','缺鑽':'#1565c0',
+      '待製作':'#f57c00','組裝未點':'#f57c00','製作中':'#f57c00','待細拋':'#f57c00','待組裝':'#f57c00',
+      '返工':'#c2185b','送鍍':'#c2185b',
+      '交件':'#616161','完成':'#616161',
+    }[prodStatus] || '';
     return `
       <div class="gs-card" draggable="${canManage}"
         data-order-id="${o.id}"
@@ -22582,11 +22594,29 @@ window._gsQuickEditOrder = function(orderId) {
       <label>製作狀態</label>
       <select class="form-control" id="gs-pstat">
         <option value="">未設定</option>
-        <option value="待處理" ${o.production_status==='待處理'?'selected':''}>待處理</option>
-        <option value="製作中" ${o.production_status==='製作中'?'selected':''}>製作中</option>
-        <option value="交件" ${o.production_status==='交件'?'selected':''}>交件</option>
-        <option value="送鍍" ${o.production_status==='送鍍'?'selected':''}>送鍍</option>
-        <option value="完成" ${o.production_status==='完成'?'selected':''}>完成</option>
+        <optgroup label="🔴 缺料">
+          <option value="欠鑄" ${o.production_status==='欠鑄'?'selected':''}>欠鑄</option>
+        </optgroup>
+        <optgroup label="🔵 缺件">
+          <option value="缺零件" ${o.production_status==='缺零件'?'selected':''}>缺零件</option>
+          <option value="缺鍊" ${o.production_status==='缺鍊'?'selected':''}>缺鍊</option>
+          <option value="缺鑽" ${o.production_status==='缺鑽'?'selected':''}>缺鑽</option>
+        </optgroup>
+        <optgroup label="🟡 製作中">
+          <option value="待製作" ${o.production_status==='待製作'?'selected':''}>待製作</option>
+          <option value="組裝未點" ${o.production_status==='組裝未點'?'selected':''}>組裝未點</option>
+          <option value="製作中" ${o.production_status==='製作中'?'selected':''}>製作中</option>
+          <option value="待細拋" ${o.production_status==='待細拋'?'selected':''}>待細拋</option>
+          <option value="待組裝" ${o.production_status==='待組裝'?'selected':''}>待組裝</option>
+        </optgroup>
+        <optgroup label="🌸 加工">
+          <option value="返工" ${o.production_status==='返工'?'selected':''}>返工</option>
+          <option value="送鍍" ${o.production_status==='送鍍'?'selected':''}>送鍍</option>
+        </optgroup>
+        <optgroup label="⚪ 已完成">
+          <option value="交件" ${o.production_status==='交件'?'selected':''}>交件</option>
+          <option value="完成" ${o.production_status==='完成'?'selected':''}>完成</option>
+        </optgroup>
       </select>
     </div>
 
