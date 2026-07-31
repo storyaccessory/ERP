@@ -23317,17 +23317,12 @@ function renderCalendar() {
           personChips.push({ name: fallback, slot, evId: ev.id });
         }
       });
-      const MAX = 2;
-      const show = personChips.slice(0, MAX);
-      const more = personChips.length > MAX ? personChips.length - MAX : 0;
-      const html = show.map(p =>
+      // 全部顯示 — 每個人的 chip 都列出來,不再折疊 +N
+      const html = personChips.map(p =>
         `<span title="${p.name} 請假 (${p.slot})" onclick="event.stopPropagation();calViewEvent('${p.evId}')"
           style="display:inline-flex;align-items:center;justify-content:center;height:18px;padding:0 7px;border-radius:9px;background:${_leaveMain};color:#fff;font-size:10px;font-weight:700;line-height:1;cursor:pointer;box-shadow:0 1px 2px rgba(0,0,0,.15);white-space:nowrap">${_firstName(p.name)}(${p.slot})</span>`
       ).join('');
-      const moreHtml = more > 0
-        ? `<span title="${personChips.slice(MAX).map(p=>p.name+'('+p.slot+')').join('、')} 也請假" onclick="event.stopPropagation()" style="display:inline-flex;align-items:center;height:18px;padding:0 5px;border-radius:9px;background:${_leaveMain};color:#fff;font-size:10px;font-weight:700;line-height:1">+${more}</span>`
-        : '';
-      return html + moreHtml;
+      return html;
     })();
 
     return `<div class="cal-cell" data-date="${ds}" style="border:1px solid ${cellBorder};border-radius:6px;padding:4px 5px;cursor:pointer;background:${cellBg};${isToday?'outline:2px solid #e53935;':''}${previewStyle}">
