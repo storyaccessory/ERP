@@ -2004,19 +2004,19 @@ function renderProducts() {
   );
   if (filterIP) base = base.filter(p => p.ip_licenses?.name === filterIP);
 
-  // 建樹:品類 → 系列
-  const tree = {}; // { 品類名 : { 系列名: count } }
+  // 建樹:IP 授權 → 系列
+  const tree = {}; // { IP授權名 : { 系列名: count } }
   base.forEach(p => {
-    const cat = p.categories?.name || '(未分類)';
+    const ipName = p.ip_licenses?.name || '(未指定IP)';
     const ser = p.series?.name || '(未指定系列)';
-    if (!tree[cat]) tree[cat] = { total: 0, series: {} };
-    tree[cat].total++;
-    tree[cat].series[ser] = (tree[cat].series[ser] || 0) + 1;
+    if (!tree[ipName]) tree[ipName] = { total: 0, series: {} };
+    tree[ipName].total++;
+    tree[ipName].series[ser] = (tree[ipName].series[ser] || 0) + 1;
   });
 
-  // 右邊顯示的清單
+  // 右邊顯示的清單:filterCat 現在是 IP 授權名(沿用 state key)
   let filtered = base;
-  if (filterCat) filtered = filtered.filter(p => (p.categories?.name || '(未分類)') === filterCat);
+  if (filterCat) filtered = filtered.filter(p => (p.ip_licenses?.name || '(未指定IP)') === filterCat);
   if (filterSeries) filtered = filtered.filter(p => (p.series?.name || '(未指定系列)') === filterSeries);
 
   const allIPs = [...new Set(products.map(p => p.ip_licenses?.name).filter(Boolean))];
@@ -2070,11 +2070,6 @@ function renderProducts() {
       <button class="btn btn-outline" id="export-products-btn">↓ 匯出 CSV</button>
     </div>
 
-    ${allIPs.length ? `<div class="chip-tabs" style="margin-bottom:10px">
-      <div class="chip ${!filterIP?'active':''}" data-ip="">全部角色 <span class="count">${products.length}</span></div>
-      ${allIPs.map(ip => `<div class="chip ${filterIP===ip?'active':''}" data-ip="${ip}">${ip} <span class="count">${products.filter(p=>p.ip_licenses?.name===ip).length}</span></div>`).join('')}
-    </div>` : ''}
-
     ${(filterCat || filterSeries) ? `<div style="margin-bottom:10px;padding:8px 12px;background:var(--accent-light);border-left:3px solid var(--accent);border-radius:5px;font-size:12px;color:var(--accent-dark)">
       篩選中:<strong>${filterCat || '全部'}</strong>${filterSeries ? ` · <strong>${filterSeries}</strong>` : ''}
       <span style="margin-left:10px;color:var(--muted)">共 ${filtered.length} 件</span>
@@ -2086,7 +2081,7 @@ function renderProducts() {
     <div style="display:grid;grid-template-columns:240px 1fr;gap:12px;align-items:start">
       <!-- 左:品類/系列 樹 -->
       <div class="card" style="padding:12px;max-height:calc(100vh - 240px);overflow-y:auto;position:sticky;top:16px">
-        <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">📚 品類 / 系列</div>
+        <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">🏷️ IP 授權 / 系列</div>
         ${catNames.length ? treeHtml : '<div style="font-size:12px;color:var(--muted);text-align:center;padding:20px">尚無商品</div>'}
       </div>
 
