@@ -1985,38 +1985,83 @@ function renderOrders() {
     </div>`;
 }
 
-// ── Products ──
+// ── Products ── 樹狀瀏覽:品類 → 系列
 function renderProducts() {
   const products = state.data.products || [];
   const filterIP = state.data.filterIP || '';
   const filterCat = state.data.filterProductCat || '';
+  const filterSeries = state.data.filterProductSeries || '';
   const searchQ = (state.data.productSearch || '').toLowerCase();
-  const allIPs = [...new Set(products.map(p => p.ip_licenses?.name).filter(Boolean))];
 
-  let filtered = products;
-  if (filterIP) filtered = filtered.filter(p => p.ip_licenses?.name === filterIP);
-  if (filterCat) filtered = filtered.filter(p => p.categories?.name === filterCat);
-  if (searchQ) filtered = filtered.filter(p =>
+  // 先套用搜尋 + IP 篩選(這兩個影響左右兩邊)
+  let base = products;
+  if (searchQ) base = base.filter(p =>
     p.name?.toLowerCase().includes(searchQ) ||
     p.sku?.toLowerCase().includes(searchQ) ||
     p.series?.name?.toLowerCase().includes(searchQ) ||
     (p.product_castings||[]).some(c=>c.castings?.name?.toLowerCase().includes(searchQ)) ||
     (p.product_parts||[]).some(c=>c.parts?.name?.toLowerCase().includes(searchQ))
   );
+  if (filterIP) base = base.filter(p => p.ip_licenses?.name === filterIP);
+
+  // 建樹:品類 → 系列
+  const tree = {}; // { 品類名 : { 系列名: count } }
+  base.forEach(p => {
+    const cat = p.categories?.name || '(未分類)';
+    const ser = p.series?.name || '(未指定系列)';
+    if (!tree[cat]) tree[cat] = { total: 0, series: {} };
+    tree[cat].total++;
+    tree[cat].series[ser] = (tree[cat].series[ser] || 0) + 1;
+  });
+
+  // 右邊顯示的清單
+  let filtered = base;
+  if (filterCat) filtered = filtered.filter(p => (p.categories?.name || '(未分類)') === filterCat);
+  if (filterSeries) filtered = filtered.filter(p => (p.series?.name || '(未指定系列)') === filterSeries);
+
+  const allIPs = [...new Set(products.map(p => p.ip_licenses?.name).filter(Boolean))];
+
+  // 樹狀 HTML
+  const catNames = Object.keys(tree).sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+  const treeHtml = catNames.map(cat => {
+    const isActiveCat = filterCat === cat;
+    const seriesList = Object.entries(tree[cat].series).sort((a,b)=>a[0].localeCompare(b[0],'zh-Hant'));
+    return `
+      <div style="margin-bottom:2px">
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:${isActiveCat?700:600};background:${isActiveCat?'var(--accent-light)':'transparent'};color:${isActiveCat?'var(--accent-dark)':'var(--text)'}"
+          onclick="_productsSelectCat('${cat.replace(/'/g,"\\'")}')"
+          onmouseover="if(!${isActiveCat})this.style.background='#f5f5f5'"
+          onmouseout="if(!${isActiveCat})this.style.background='transparent'">
+          <span style="font-size:10px;color:var(--muted)">${isActiveCat?'▼':'▶'}</span>
+          <span style="flex:1">${cat}</span>
+          <span style="font-size:11px;color:var(--muted);font-weight:400">${tree[cat].total}</span>
+        </div>
+        ${isActiveCat ? `
+          <div style="padding-left:18px;margin:3px 0 6px">
+            <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;color:${!filterSeries?'var(--accent-dark)':'var(--muted)'};font-weight:${!filterSeries?600:400};background:${!filterSeries?'#e8f5f4':'transparent'}"
+              onclick="_productsSelectSeries('')">
+              <span>📋</span><span style="flex:1">全部</span><span style="font-size:11px;color:var(--muted)">${tree[cat].total}</span>
+            </div>
+            ${seriesList.map(([sName,cnt]) => {
+              const active = filterSeries === sName;
+              return `<div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;background:${active?'#e8f5f4':'transparent'};color:${active?'var(--accent-dark)':'var(--text)'};font-weight:${active?600:400}"
+                onclick="_productsSelectSeries('${sName.replace(/'/g,"\\'")}')"
+                onmouseover="if(!${active})this.style.background='#fafafa'"
+                onmouseout="if(!${active})this.style.background='transparent'">
+                <span style="width:5px;height:5px;border-radius:50%;background:${active?'var(--accent)':'#ccc'}"></span>
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${sName}">${sName}</span>
+                <span style="font-size:11px;color:var(--muted)">${cnt}</span>
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+      </div>`;
+  }).join('');
 
   return `
-    <div class="chip-tabs">
-      <div class="chip ${!filterIP?'active':''}" data-ip="">全部 <span class="count">${products.length}</span></div>
-      ${allIPs.map(ip => `<div class="chip ${filterIP===ip?'active':''}" data-ip="${ip}">${ip} <span class="count">${products.filter(p=>p.ip_licenses?.name===ip).length}</span></div>`).join('')}
-    </div>
-    <div class="search-bar">
-      <input class="search-input" id="product-search" placeholder="搜尋品名、貨號、系列、零配件…" value="${state.data.productSearch||''}"
+    <div class="search-bar" style="margin-bottom:12px">
+      <input class="search-input" id="product-search" placeholder="🔍 搜尋品名、貨號、系列、零配件…" value="${state.data.productSearch||''}"
         oninput="_searchHandler('productSearch','product-search',event)"
         oncompositionend="_searchHandler('productSearch','product-search',event)">
-      <select class="form-control" style="width:110px" id="cat-filter">
-        <option value="">全部分類</option>
-        ${(state.data.categories||[]).map(c => `<option ${filterCat===c.name?'selected':''}>${c.name}</option>`).join('')}
-      </select>
       <button class="btn btn-primary" id="add-product-btn">+ 新增商品</button>
       <button class="btn btn-outline" onclick="modalImportProducts()" style="background:#e8f5f4;color:#00695c">↑ 批次匯入</button>
       <button class="btn btn-outline" onclick="modalRetroFillFromSku()" style="background:#fff8e1;color:#e65100" title="從貨號自動補品類/顏色">🔧 補填品類/顏色</button>
@@ -2024,9 +2069,29 @@ function renderProducts() {
       <button class="btn btn-outline" onclick="modalImportShopUrls()" style="background:#f3e5f5;color:#6a1b9a" title="批次匯入官網連結">🔗 匯入官網連結</button>
       <button class="btn btn-outline" id="export-products-btn">↓ 匯出 CSV</button>
     </div>
-    <div style="font-size:12px;color:var(--muted);margin-bottom:10px">顯示 ${filtered.length} / ${products.length} 件</div>
+
+    ${allIPs.length ? `<div class="chip-tabs" style="margin-bottom:10px">
+      <div class="chip ${!filterIP?'active':''}" data-ip="">全部角色 <span class="count">${products.length}</span></div>
+      ${allIPs.map(ip => `<div class="chip ${filterIP===ip?'active':''}" data-ip="${ip}">${ip} <span class="count">${products.filter(p=>p.ip_licenses?.name===ip).length}</span></div>`).join('')}
+    </div>` : ''}
+
+    ${(filterCat || filterSeries) ? `<div style="margin-bottom:10px;padding:8px 12px;background:var(--accent-light);border-left:3px solid var(--accent);border-radius:5px;font-size:12px;color:var(--accent-dark)">
+      篩選中:<strong>${filterCat || '全部'}</strong>${filterSeries ? ` · <strong>${filterSeries}</strong>` : ''}
+      <span style="margin-left:10px;color:var(--muted)">共 ${filtered.length} 件</span>
+      <button onclick="state.data.filterProductCat='';state.data.filterProductSeries='';renderApp()" style="margin-left:10px;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px">✕ 清除</button>
+    </div>` : `<div style="font-size:12px;color:var(--muted);margin-bottom:10px">顯示 ${filtered.length} / ${products.length} 件</div>`}
+
     ${batchBar('products', filtered)}
-    <div class="card">
+
+    <div style="display:grid;grid-template-columns:240px 1fr;gap:12px;align-items:start">
+      <!-- 左:品類/系列 樹 -->
+      <div class="card" style="padding:12px;max-height:calc(100vh - 240px);overflow-y:auto;position:sticky;top:16px">
+        <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">📚 品類 / 系列</div>
+        ${catNames.length ? treeHtml : '<div style="font-size:12px;color:var(--muted);text-align:center;padding:20px">尚無商品</div>'}
+      </div>
+
+      <!-- 右:商品列表 -->
+      <div class="card" style="padding:0;overflow:hidden">
       <div class="table-wrap">
         <table>
           <thead><tr>
@@ -2132,8 +2197,25 @@ function renderProducts() {
           </tbody>
         </table>
       </div>
+      </div>
     </div>`;
 }
+
+// 樹狀選單事件
+window._productsSelectCat = function(cat) {
+  if (state.data.filterProductCat === cat) {
+    state.data.filterProductCat = '';
+    state.data.filterProductSeries = '';
+  } else {
+    state.data.filterProductCat = cat;
+    state.data.filterProductSeries = '';
+  }
+  renderApp();
+};
+window._productsSelectSeries = function(sName) {
+  state.data.filterProductSeries = sName;
+  renderApp();
+};
 
 // 圖片放大預覽
 function showImgModal(url, title) {
