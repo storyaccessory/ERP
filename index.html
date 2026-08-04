@@ -725,6 +725,9 @@ async function loadPageData(page) {
 }
 
 async function loadDashboard() {
+  // 載入餐費預算(從 Supabase,跨裝置同步)
+  if (typeof loadMealBudgets === 'function') await loadMealBudgets();
+
   const today = new Date().toISOString().split('T')[0];
   const threeDays = new Date(Date.now() + 3*86400000).toISOString().split('T')[0];
 
@@ -1223,6 +1226,9 @@ async function loadDev() {
 }
 
 async function loadAccounting() {
+  // 載入餐費預算(從 Supabase,跨裝置同步)
+  if (typeof loadMealBudgets === 'function') await loadMealBudgets();
+
   const now = new Date();
   const defaultYm = now.getFullYear().toString() + String(now.getMonth()+1).padStart(2,'0');
   const ym = state.data.accounting?.ym || defaultYm;
@@ -11412,24 +11418,62 @@ function renderAccounting() {
 
 // ── 餐費每人每月目標金額（管理員可在此修改） ──────────────────────────
 // 餐費預算：可按員工個別設定，預設 3000/月
+// ─── 餐費預算(改存 Supabase,跨裝置同步)─────────
+// 讀取邏輯:優先 state.data.mealBudgets(從 Supabase 載入),沒有就 fallback localStorage
 function getMealBudgetForEmployee(name) {
-  var budgets = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
+  var budgets = state.data?.mealBudgets || JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
   if (budgets[name] !== undefined) return parseInt(budgets[name]);
-  return parseInt(localStorage.getItem('meal_budget_default') || '3000');
+  var def = state.data?.mealBudgetDefault ?? parseInt(localStorage.getItem('meal_budget_default') || '3000');
+  return parseInt(def);
 }
-function setMealBudgetForEmployee(name, val) {
-  var budgets = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
+async function setMealBudgetForEmployee(name, val) {
+  // 讀當前
+  if (!state.data.mealBudgets) state.data.mealBudgets = {};
   var n = parseInt(val);
-  budgets[name] = isNaN(n) ? 3000 : Math.max(0, n);  // 允許 0
-  localStorage.setItem('meal_budgets_per_employee', JSON.stringify(budgets));
+  state.data.mealBudgets[name] = isNaN(n) ? 3000 : Math.max(0, n);
+  // 存 Supabase
+  await db.from('settings').upsert({ key: 'meal_budgets_per_employee', value: JSON.stringify(state.data.mealBudgets) });
+  // 同步 localStorage(向後相容)
+  localStorage.setItem('meal_budgets_per_employee', JSON.stringify(state.data.mealBudgets));
 }
 function getDefaultMealBudget() {
-  return parseInt(localStorage.getItem('meal_budget_default') || '3000');
+  return parseInt(state.data?.mealBudgetDefault ?? localStorage.getItem('meal_budget_default') ?? '3000');
 }
-function setDefaultMealBudget(val) {
+async function setDefaultMealBudget(val) {
   var n = parseInt(val);
-  localStorage.setItem('meal_budget_default', String(isNaN(n) ? 3000 : Math.max(0, n)));  // 允許 0
+  var v = isNaN(n) ? 3000 : Math.max(0, n);
+  state.data.mealBudgetDefault = v;
+  await db.from('settings').upsert({ key: 'meal_budget_default', value: String(v) });
+  localStorage.setItem('meal_budget_default', String(v));
 }
+// 從 Supabase 載入餐費預算(app 啟動時呼叫)
+async function loadMealBudgets() {
+  const [{ data: perEmp }, { data: def }] = await Promise.all([
+    db.from('settings').select('value').eq('key','meal_budgets_per_employee').maybeSingle(),
+    db.from('settings').select('value').eq('key','meal_budget_default').maybeSingle(),
+  ]);
+  if (perEmp?.value) {
+    try { state.data.mealBudgets = JSON.parse(perEmp.value); } catch(e) { state.data.mealBudgets = {}; }
+  } else {
+    // Supabase 沒有 → 自動從 localStorage 遷移
+    const local = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
+    if (Object.keys(local).length) {
+      state.data.mealBudgets = local;
+      await db.from('settings').upsert({ key: 'meal_budgets_per_employee', value: JSON.stringify(local) });
+      console.log('✅ 已把餐費預算從 localStorage 遷移到 Supabase');
+    } else {
+      state.data.mealBudgets = {};
+    }
+  }
+  if (def?.value) {
+    state.data.mealBudgetDefault = parseInt(def.value);
+  } else {
+    const localDef = parseInt(localStorage.getItem('meal_budget_default') || '3000');
+    state.data.mealBudgetDefault = localDef;
+    await db.from('settings').upsert({ key: 'meal_budget_default', value: String(localDef) });
+  }
+}
+window.loadMealBudgets = loadMealBudgets;
 var MEAL_BUDGET_DEFAULT = 3000; // kept for compat
 
 // ── 台灣銀行分行代碼對照表（7碼：銀行3碼+分行3碼+檢查碼0）──────────────────
