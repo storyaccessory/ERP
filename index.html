@@ -8017,13 +8017,20 @@ window._arSyncFirstInvoiceDate = function() {
   const dt = document.getElementById(`ar-inv-dt-${i}`)?.value || '';
   if (hiddenNo) hiddenNo.value = no;
   if (hiddenDt) hiddenDt.value = dt;
-  // 同步:第一列日期變動 → 重算付款期限
+  // 同步:第一列日期變動 → 重算付款期限(發票日 + 2 個月,天數不夠自動截到月底)
   if (dt) {
     const d = new Date(dt);
     if (!isNaN(d)) {
-      const y = d.getMonth() >= 10 ? d.getFullYear()+1 : d.getFullYear();
-      const m = String(((d.getMonth()+2)%12)+1).padStart(2,'0');
-      const due = y+'-'+m+'-'+String(d.getDate()).padStart(2,'0');
+      const targetYear  = d.getFullYear();
+      const targetMonth = d.getMonth() + 2; // 0-indexed(可能溢出 11 → JS Date 自動進位到下一年)
+      // 用 new Date(y,m+1,0) 取得該月最後一天
+      const lastDayOfTargetMonth = new Date(targetYear, targetMonth + 1, 0).getDate();
+      const targetDay = Math.min(d.getDate(), lastDayOfTargetMonth);
+      const dueDateObj = new Date(targetYear, targetMonth, targetDay);
+      const y = dueDateObj.getFullYear();
+      const m = String(dueDateObj.getMonth() + 1).padStart(2,'0');
+      const day = String(dueDateObj.getDate()).padStart(2,'0');
+      const due = `${y}-${m}-${day}`;
       const dueEl = document.getElementById('ar-due-date');
       if (dueEl) dueEl.value = due;
     }
@@ -8435,7 +8442,18 @@ async function modalAddAR(existing) {
           const m = v.match(/(\d{4}-\d{2}-\d{2})/);
           return m ? m[1] : null;
         })(),
-        payment_due_date: document.getElementById('ar-due-date').value || null,
+        payment_due_date: (() => {
+          const v = document.getElementById('ar-due-date').value || '';
+          if (!v) return null;
+          // 防呆:驗證日期字串是否為有效日期(避免 09-31 等無效日)
+          const d = new Date(v);
+          if (isNaN(d.getTime())) return null;
+          // 若原字串跟解析回去的日期不一致(如 09-31 會被解析成 10-01),截到該月底
+          const [yy, mm, dd] = v.split('-').map(Number);
+          const lastDay = new Date(yy, mm, 0).getDate();
+          const safeDay = String(Math.min(dd, lastDay)).padStart(2, '0');
+          return `${yy}-${String(mm).padStart(2,'0')}-${safeDay}`;
+        })(),
         amount,
         item_desc: document.getElementById('ar-desc').value.trim(),
         subject: document.getElementById('ar-subject').value.trim(),
