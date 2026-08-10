@@ -2010,37 +2010,56 @@ function renderProducts() {
   );
   if (filterIP) base = base.filter(p => p.ip_licenses?.name === filterIP);
 
-  // 建樹:IP 授權 → 系列
-  const tree = {}; // { IP授權名 : { 系列名: count } }
+  // 建樹:頂層 IP 分類(聯名授權/原創珠寶/專屬訂製/影視文創)→ 系列
+  // 從 ipCatMap 追根:series.category_id → 逐層 parent_id 追到頂層
+  const catMap = state.data.ipCatMap || {};
+  const getTopLevelName = (catId) => {
+    if (!catId || !catMap[catId]) return null;
+    let cur = catMap[catId];
+    let guard = 10;
+    while (cur?.parent_id && guard-- > 0) cur = catMap[cur.parent_id];
+    return cur?.name || null;
+  };
+
+  const tree = {}; // { 頂層分類名 : { 系列名: count } }
   base.forEach(p => {
-    const ipName = p.ip_licenses?.name || '(未指定IP)';
+    const top = getTopLevelName(p.series?.category_id) || '(未分類)';
     const ser = p.series?.name || '(未指定系列)';
-    if (!tree[ipName]) tree[ipName] = { total: 0, series: {} };
-    tree[ipName].total++;
-    tree[ipName].series[ser] = (tree[ipName].series[ser] || 0) + 1;
+    if (!tree[top]) tree[top] = { total: 0, series: {} };
+    tree[top].total++;
+    tree[top].series[ser] = (tree[top].series[ser] || 0) + 1;
   });
 
-  // 右邊顯示的清單:filterCat 現在是 IP 授權名(沿用 state key)
+  // 右邊顯示的清單:filterCat 是頂層分類名
   let filtered = base;
-  if (filterCat) filtered = filtered.filter(p => (p.ip_licenses?.name || '(未指定IP)') === filterCat);
+  if (filterCat) filtered = filtered.filter(p => (getTopLevelName(p.series?.category_id) || '(未分類)') === filterCat);
   if (filterSeries) filtered = filtered.filter(p => (p.series?.name || '(未指定系列)') === filterSeries);
 
   const allIPs = [...new Set(products.map(p => p.ip_licenses?.name).filter(Boolean))];
 
-  // 樹狀 HTML
-  const catNames = Object.keys(tree).sort((a,b)=>a.localeCompare(b,'zh-Hant'));
+  // 樹狀 HTML(未分類永遠排最後,提醒同事補)
+  const catNames = Object.keys(tree).sort((a,b) => {
+    if (a === '(未分類)') return 1;
+    if (b === '(未分類)') return -1;
+    return a.localeCompare(b, 'zh-Hant');
+  });
   const treeHtml = catNames.map(cat => {
     const isActiveCat = filterCat === cat;
+    const isUncat = cat === '(未分類)';
     const seriesList = Object.entries(tree[cat].series).sort((a,b)=>a[0].localeCompare(b[0],'zh-Hant'));
+    // 未分類:橘色警告底色,吸引同事補資料
+    const bgActive = isUncat ? '#fff8e1' : 'var(--accent-light)';
+    const bgDefault = isUncat ? '#fff8e1' : 'transparent';
+    const colActive = isUncat ? '#e65100' : 'var(--accent-dark)';
+    const colDefault = isUncat ? '#e65100' : 'var(--text)';
     return `
       <div style="margin-bottom:2px">
-        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:${isActiveCat?700:600};background:${isActiveCat?'var(--accent-light)':'transparent'};color:${isActiveCat?'var(--accent-dark)':'var(--text)'}"
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:${isActiveCat?700:600};background:${isActiveCat?bgActive:bgDefault};color:${isActiveCat?colActive:colDefault};${isUncat?'border-left:3px solid #f57c00':''}"
           onclick="_productsSelectCat('${cat.replace(/'/g,"\\'")}')"
-          onmouseover="if(!${isActiveCat})this.style.background='#f5f5f5'"
-          onmouseout="if(!${isActiveCat})this.style.background='transparent'">
-          <span style="font-size:10px;color:var(--muted)">${isActiveCat?'▼':'▶'}</span>
-          <span style="flex:1">${cat}</span>
-          <span style="font-size:11px;color:var(--muted);font-weight:400">${tree[cat].total}</span>
+          title="${isUncat?'⚠ 這些商品沒設定 IP 分類,點開後編輯商品指派系列':''}">
+          <span style="font-size:10px">${isActiveCat?'▼':'▶'}</span>
+          <span style="flex:1">${isUncat?'⚠ 未分類(待補)':cat}</span>
+          <span style="font-size:11px;color:${isUncat?'#e65100':'var(--muted)'};font-weight:${isUncat?700:400}">${tree[cat].total}</span>
         </div>
         ${isActiveCat ? `
           <div style="padding-left:18px;margin:3px 0 6px">
