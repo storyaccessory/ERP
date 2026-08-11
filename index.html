@@ -21373,10 +21373,25 @@ function renderShipments() {
 
   const COL_W = 58;
 
+  // 產生月份選單:從 202104 到目前月份,倒序(最新在上面)
+  const monthOptions = (() => {
+    const opts = [];
+    const now = new Date();
+    let y = now.getFullYear(), m = now.getMonth() + 1;
+    while (y > 2021 || (y === 2021 && m >= 4)) {
+      const val = `${y}-${String(m).padStart(2,'0')}`;
+      opts.push({ val, label: `${y} 年 ${m} 月` });
+      m--; if (m < 1) { m = 12; y--; }
+    }
+    return opts;
+  })();
+
   return `
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;flex-wrap:wrap">
       <button class="btn btn-outline btn-sm" onclick="window.shipmentNavTo('${prevYm}')">‹ 上月</button>
-      <span style="font-weight:700;font-size:15px">${year} 年 ${mon} 月</span>
+      <select class="form-control" style="width:140px;font-weight:700" onchange="window.shipmentNavTo(this.value)">
+        ${monthOptions.map(o => `<option value="${o.val}" ${o.val===ym?'selected':''}>${o.label}</option>`).join('')}
+      </select>
       <button class="btn btn-outline btn-sm" onclick="window.shipmentNavTo('${nextYm}')">下月 ›</button>
       <button class="btn btn-outline btn-sm" onclick="window.shipmentNavTo('${_localToday().slice(0,7)}')">本月</button>
       <span style="margin-left:auto;font-size:13px;color:var(--muted)">本月合計 <b style="color:var(--accent-dark);font-size:15px">${grandTotal}</b> 件</span>
