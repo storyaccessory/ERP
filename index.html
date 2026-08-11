@@ -2010,39 +2010,55 @@ function renderProducts() {
   );
   if (filterIP) base = base.filter(p => p.ip_licenses?.name === filterIP);
 
-  // 建樹:三層 —— 頂層 IP 分類 → 角色 → 系列
-  // 從 ipCatMap 追:series.category_id 通常就是「角色」層(布丁狗、大耳狗...)
+  // 建樹:四層 —— 大分類 → 中分類 → 角色 → 系列
+  // series.category_id 是「角色」層,從角色追根:大→中→角色
   const catMap = state.data.ipCatMap || {};
-  const getTopLevelName = (catId) => {
-    if (!catId || !catMap[catId]) return null;
+  // 回傳從根到 catId 的完整路徑
+  const getCatPathArr = (catId) => {
+    const path = [];
+    if (!catId || !catMap[catId]) return path;
     let cur = catMap[catId];
     let guard = 10;
-    while (cur?.parent_id && guard-- > 0) cur = catMap[cur.parent_id];
-    return cur?.name || null;
+    while (cur && guard-- > 0) {
+      path.unshift(cur);
+      cur = cur.parent_id ? catMap[cur.parent_id] : null;
+    }
+    return path;
   };
-  const getCharacterName = (catId) => {
-    if (!catId || !catMap[catId]) return null;
-    return catMap[catId]?.name || null;
+  const getLevelName = (path, level) => path[level]?.name || null;
+  // 對每筆商品算出 [大, 中, 角色]
+  const getLevels = (p) => {
+    const path = getCatPathArr(p.series?.category_id);
+    return {
+      top: getLevelName(path, 0) || '(未分類)',
+      mid: getLevelName(path, 1) || '(未指定中分類)',
+      chr: getLevelName(path, 2) || getLevelName(path, path.length-1) || '(未指定角色)',
+      ser: p.series?.name || '(未指定系列)',
+    };
   };
+
+  const filterMid = state.data.filterProductMid || '';
   const filterChar = state.data.filterProductChar || '';
 
-  const tree = {}; // { 頂層 : { total, chars: { 角色 : { total, series: { 系列: count } } } } }
+  // 4 層樹:{大 : {total, mids: {中 : {total, chars: {角色 : {total, series: {系列: count}}}}}}}
+  const tree = {};
   base.forEach(p => {
-    const top = getTopLevelName(p.series?.category_id) || '(未分類)';
-    const chr = getCharacterName(p.series?.category_id) || '(未指定角色)';
-    const ser = p.series?.name || '(未指定系列)';
-    if (!tree[top]) tree[top] = { total: 0, chars: {} };
+    const {top, mid, chr, ser} = getLevels(p);
+    if (!tree[top]) tree[top] = { total: 0, mids: {} };
     tree[top].total++;
-    if (!tree[top].chars[chr]) tree[top].chars[chr] = { total: 0, series: {} };
-    tree[top].chars[chr].total++;
-    tree[top].chars[chr].series[ser] = (tree[top].chars[chr].series[ser] || 0) + 1;
+    if (!tree[top].mids[mid]) tree[top].mids[mid] = { total: 0, chars: {} };
+    tree[top].mids[mid].total++;
+    if (!tree[top].mids[mid].chars[chr]) tree[top].mids[mid].chars[chr] = { total: 0, series: {} };
+    tree[top].mids[mid].chars[chr].total++;
+    tree[top].mids[mid].chars[chr].series[ser] = (tree[top].mids[mid].chars[chr].series[ser] || 0) + 1;
   });
 
-  // 右邊顯示的清單:三層 filter
+  // 右邊清單:四層 filter
   let filtered = base;
-  if (filterCat) filtered = filtered.filter(p => (getTopLevelName(p.series?.category_id) || '(未分類)') === filterCat);
-  if (filterChar) filtered = filtered.filter(p => (getCharacterName(p.series?.category_id) || '(未指定角色)') === filterChar);
-  if (filterSeries) filtered = filtered.filter(p => (p.series?.name || '(未指定系列)') === filterSeries);
+  if (filterCat)    filtered = filtered.filter(p => getLevels(p).top === filterCat);
+  if (filterMid)    filtered = filtered.filter(p => getLevels(p).mid === filterMid);
+  if (filterChar)   filtered = filtered.filter(p => getLevels(p).chr === filterChar);
+  if (filterSeries) filtered = filtered.filter(p => getLevels(p).ser === filterSeries);
 
   const allIPs = [...new Set(products.map(p => p.ip_licenses?.name).filter(Boolean))];
 
@@ -2052,73 +2068,72 @@ function renderProducts() {
     if (b === '(未分類)') return -1;
     return a.localeCompare(b, 'zh-Hant');
   });
+  const sortKeys = (obj, lastKey) => Object.keys(obj).sort((a,b)=>{
+    if (a === lastKey) return 1;
+    if (b === lastKey) return -1;
+    return a.localeCompare(b,'zh-Hant');
+  });
+  const esc = s => s.replace(/'/g,"\\'").replace(/"/g,'&quot;');
+
   const treeHtml = catNames.map(cat => {
     const isActiveCat = filterCat === cat;
     const isUncat = cat === '(未分類)';
     const bgActive = isUncat ? '#fff8e1' : 'var(--accent-light)';
     const bgDefault = isUncat ? '#fff8e1' : 'transparent';
     const colActive = isUncat ? '#e65100' : 'var(--accent-dark)';
-    const colDefault = isUncat ? '#e65100' : 'var(--text)';
-    const chars = tree[cat].chars || {};
-    const charNames = Object.keys(chars).sort((a,b)=>{
-      if (a === '(未指定角色)') return 1;
-      if (b === '(未指定角色)') return -1;
-      return a.localeCompare(b, 'zh-Hant');
-    });
+    const mids = tree[cat].mids || {};
+    const midNames = sortKeys(mids, '(未指定中分類)');
     return `
       <div style="margin-bottom:2px">
-        <!-- Level 1: 頂層分類 -->
-        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:${isActiveCat?700:600};background:${isActiveCat?bgActive:bgDefault};color:${isActiveCat?colActive:colDefault};${isUncat?'border-left:3px solid #f57c00':''}"
-          onclick="_productsSelectCat('${cat.replace(/'/g,"\\'")}')"
-          title="${isUncat?'⚠ 這些商品沒設定 IP 分類,點開後編輯商品指派系列':''}">
+        <!-- L1:大分類 -->
+        <div style="display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:5px;cursor:pointer;font-size:13px;font-weight:${isActiveCat?700:600};background:${isActiveCat?bgActive:bgDefault};color:${isActiveCat?colActive:(isUncat?'#e65100':'var(--text)')};${isUncat?'border-left:3px solid #f57c00':''}"
+          onclick="_productsSelectCat('${esc(cat)}')" title="${isUncat?'⚠ 這些商品沒設定 IP 分類':''}">
           <span style="font-size:10px">${isActiveCat?'▼':'▶'}</span>
           <span style="flex:1">${isUncat?'⚠ 未分類(待補)':cat}</span>
           <span style="font-size:11px;color:${isUncat?'#e65100':'var(--muted)'};font-weight:${isUncat?700:400}">${tree[cat].total}</span>
         </div>
-
-        ${isActiveCat ? `
-          <div style="padding-left:14px;margin:3px 0 6px">
-            <!-- Level 2:全部 -->
-            <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;color:${!filterChar?'var(--accent-dark)':'var(--muted)'};font-weight:${!filterChar?600:400};background:${!filterChar?'#e8f5f4':'transparent'}"
-              onclick="_productsSelectChar('')">
-              <span>📋</span><span style="flex:1">全部角色</span><span style="font-size:11px;color:var(--muted)">${tree[cat].total}</span>
-            </div>
-
-            <!-- Level 2:角色 -->
-            ${charNames.map(chr => {
-              const isActiveChar = filterChar === chr;
-              const isUncatChar = chr === '(未指定角色)';
-              const seriesList = Object.entries(chars[chr].series).sort((a,b)=>a[0].localeCompare(b[0],'zh-Hant'));
-              return `
-              <div style="margin-top:2px">
-                <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;background:${isActiveChar?'#e8f5f4':'transparent'};color:${isActiveChar?'var(--accent-dark)':(isUncatChar?'#e65100':'var(--text)')};font-weight:${isActiveChar?600:400}"
-                  onclick="_productsSelectChar('${chr.replace(/'/g,"\\'")}')">
-                  <span style="font-size:9px;color:var(--muted)">${isActiveChar?'▼':'▶'}</span>
-                  <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${chr}">${chr}</span>
-                  <span style="font-size:11px;color:var(--muted)">${chars[chr].total}</span>
-                </div>
-                <!-- Level 3:系列 -->
-                ${isActiveChar ? `
-                  <div style="padding-left:16px;margin:2px 0">
-                    <div style="display:flex;align-items:center;gap:6px;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px;color:${!filterSeries?'var(--accent-dark)':'var(--muted)'};font-weight:${!filterSeries?600:400};background:${!filterSeries?'#f0faf9':'transparent'}"
-                      onclick="_productsSelectSeries('')">
-                      <span>·</span><span style="flex:1">全部系列</span><span style="font-size:10px;color:var(--muted)">${chars[chr].total}</span>
+        ${isActiveCat ? `<div style="padding-left:12px;margin:3px 0 6px">
+          ${midNames.map(mid => {
+            const isActiveMid = filterMid === mid;
+            const chars = mids[mid].chars || {};
+            const charNames = sortKeys(chars, '(未指定角色)');
+            return `<div style="margin-bottom:2px">
+              <!-- L2:中分類 -->
+              <div style="display:flex;align-items:center;gap:6px;padding:4px 8px;border-radius:4px;cursor:pointer;font-size:12px;background:${isActiveMid?'#e8f5f4':'transparent'};color:${isActiveMid?'var(--accent-dark)':'var(--text)'};font-weight:${isActiveMid?600:500}"
+                onclick="_productsSelectMid('${esc(mid)}')">
+                <span style="font-size:9px;color:var(--muted)">${isActiveMid?'▼':'▶'}</span>
+                <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${mid}">${mid}</span>
+                <span style="font-size:11px;color:var(--muted)">${mids[mid].total}</span>
+              </div>
+              ${isActiveMid ? `<div style="padding-left:14px;margin:2px 0">
+                ${charNames.map(chr => {
+                  const isActiveChar = filterChar === chr;
+                  const seriesList = Object.entries(chars[chr].series).sort((a,b)=>a[0].localeCompare(b[0],'zh-Hant'));
+                  return `<div style="margin-bottom:1px">
+                    <!-- L3:角色 -->
+                    <div style="display:flex;align-items:center;gap:5px;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:12px;background:${isActiveChar?'#e8f5f4':'transparent'};color:${isActiveChar?'var(--accent-dark)':'var(--text)'};font-weight:${isActiveChar?600:400}"
+                      onclick="_productsSelectChar('${esc(chr)}')">
+                      <span style="font-size:8px;color:var(--muted)">${isActiveChar?'▼':'▶'}</span>
+                      <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${chr}">${chr}</span>
+                      <span style="font-size:10px;color:var(--muted)">${chars[chr].total}</span>
                     </div>
-                    ${seriesList.map(([sName,cnt]) => {
-                      const active = filterSeries === sName;
-                      return `<div style="display:flex;align-items:center;gap:6px;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:11px;background:${active?'#e8f5f4':'transparent'};color:${active?'var(--accent-dark)':'var(--text)'};font-weight:${active?600:400}"
-                        onclick="_productsSelectSeries('${sName.replace(/'/g,"\\'")}')"
-                        onmouseover="if(!${active})this.style.background='#fafafa'"
-                        onmouseout="if(!${active})this.style.background='transparent'">
-                        <span style="width:4px;height:4px;border-radius:50%;background:${active?'var(--accent)':'#ccc'}"></span>
-                        <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${sName}">${sName}</span>
-                        <span style="font-size:10px;color:var(--muted)">${cnt}</span>
-                      </div>`;
-                    }).join('')}
-                  </div>` : ''}
-              </div>`;
-            }).join('')}
-          </div>` : ''}
+                    ${isActiveChar ? `<div style="padding-left:14px;margin:1px 0">
+                      ${seriesList.map(([sName,cnt]) => {
+                        const active = filterSeries === sName;
+                        return `<div style="display:flex;align-items:center;gap:6px;padding:2px 8px;border-radius:4px;cursor:pointer;font-size:11px;background:${active?'#e8f5f4':'transparent'};color:${active?'var(--accent-dark)':'var(--text)'};font-weight:${active?600:400}"
+                          onclick="_productsSelectSeries('${esc(sName)}')">
+                          <span style="width:4px;height:4px;border-radius:50%;background:${active?'var(--accent)':'#ccc'}"></span>
+                          <span style="flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${sName}">${sName}</span>
+                          <span style="font-size:10px;color:var(--muted)">${cnt}</span>
+                        </div>`;
+                      }).join('')}
+                    </div>` : ''}
+                  </div>`;
+                }).join('')}
+              </div>` : ''}
+            </div>`;
+          }).join('')}
+        </div>` : ''}
       </div>`;
   }).join('');
 
@@ -2135,10 +2150,10 @@ function renderProducts() {
       <button class="btn btn-outline" id="export-products-btn">↓ 匯出 CSV</button>
     </div>
 
-    ${(filterCat || filterChar || filterSeries) ? `<div style="margin-bottom:10px;padding:8px 12px;background:var(--accent-light);border-left:3px solid var(--accent);border-radius:5px;font-size:12px;color:var(--accent-dark)">
-      篩選中:<strong>${filterCat || '全部'}</strong>${filterChar ? ` › <strong>${filterChar}</strong>` : ''}${filterSeries ? ` › <strong>${filterSeries}</strong>` : ''}
+    ${(filterCat || filterMid || filterChar || filterSeries) ? `<div style="margin-bottom:10px;padding:8px 12px;background:var(--accent-light);border-left:3px solid var(--accent);border-radius:5px;font-size:12px;color:var(--accent-dark)">
+      篩選中:<strong>${filterCat || '全部'}</strong>${filterMid ? ` › <strong>${filterMid}</strong>` : ''}${filterChar ? ` › <strong>${filterChar}</strong>` : ''}${filterSeries ? ` › <strong>${filterSeries}</strong>` : ''}
       <span style="margin-left:10px;color:var(--muted)">共 ${filtered.length} 件</span>
-      <button onclick="state.data.filterProductCat='';state.data.filterProductChar='';state.data.filterProductSeries='';renderApp()" style="margin-left:10px;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px">✕ 清除</button>
+      <button onclick="state.data.filterProductCat='';state.data.filterProductMid='';state.data.filterProductChar='';state.data.filterProductSeries='';renderApp()" style="margin-left:10px;background:#fff;border:1px solid var(--border);border-radius:4px;padding:2px 8px;cursor:pointer;font-size:11px">✕ 清除</button>
     </div>` : `<div style="font-size:12px;color:var(--muted);margin-bottom:10px">顯示 ${filtered.length} / ${products.length} 件</div>`}
 
     ${batchBar('products', filtered)}
@@ -2262,26 +2277,29 @@ function renderProducts() {
 }
 
 // 樹狀選單事件
+function _clearProdFilters() {
+  state.data.filterProductCat = '';
+  state.data.filterProductMid = '';
+  state.data.filterProductChar = '';
+  state.data.filterProductSeries = '';
+}
 window._productsSelectCat = function(cat) {
-  if (state.data.filterProductCat === cat) {
-    state.data.filterProductCat = '';
-    state.data.filterProductChar = '';
-    state.data.filterProductSeries = '';
-  } else {
-    state.data.filterProductCat = cat;
-    state.data.filterProductChar = '';
-    state.data.filterProductSeries = '';
-  }
+  const same = state.data.filterProductCat === cat;
+  _clearProdFilters();
+  if (!same) state.data.filterProductCat = cat;
+  renderApp();
+};
+window._productsSelectMid = function(mid) {
+  const same = state.data.filterProductMid === mid;
+  state.data.filterProductChar = '';
+  state.data.filterProductSeries = '';
+  state.data.filterProductMid = same ? '' : mid;
   renderApp();
 };
 window._productsSelectChar = function(chr) {
-  if (state.data.filterProductChar === chr) {
-    state.data.filterProductChar = '';
-    state.data.filterProductSeries = '';
-  } else {
-    state.data.filterProductChar = chr;
-    state.data.filterProductSeries = '';
-  }
+  const same = state.data.filterProductChar === chr;
+  state.data.filterProductSeries = '';
+  state.data.filterProductChar = same ? '' : chr;
   renderApp();
 };
 window._productsSelectSeries = function(sName) {
