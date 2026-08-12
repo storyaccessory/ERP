@@ -1406,9 +1406,31 @@ function _isBossForCalPrivacy() {
   const email = p?.email || state.user?.email || '';
   return p?.role === 'admin' || email === 'cailing0516@gmail.com';
 }
+// 老闆是否要看私人事件(從 localStorage 讀取,預設 true 看)
+function _bossSeesPrivateEvents() {
+  const v = localStorage.getItem('boss_see_private_events');
+  return v === null ? true : v === 'true';
+}
+window._bossSeesPrivateEvents = _bossSeesPrivateEvents;
+window._toggleBossSeesPrivateEvents = function() {
+  const cur = _bossSeesPrivateEvents();
+  localStorage.setItem('boss_see_private_events', String(!cur));
+  showToast(`已切換為:${!cur?'✅ 顯示':'🚫 隱藏'}私人事件,重新載入中…`);
+  // 重新載入行事曆事件
+  if (typeof loadCalendarEvents === 'function') loadCalendarEvents().then(() => renderApp());
+  else renderApp();
+};
+
 // 套用到 supabase 查詢:非私人 OR 我建立的
 function _addCalPrivacyFilter(q) {
-  if (_isBossForCalPrivacy()) return q;
+  // 老闆:視偏好設定決定
+  if (_isBossForCalPrivacy()) {
+    if (_bossSeesPrivateEvents()) return q; // 看全部(含所有人私人)
+    // 選擇不看私人 → 走跟員工一樣的規則
+    const myId = state.user?.id;
+    if (!myId) return q.eq('is_private', false);
+    return q.or(`is_private.eq.false,created_by.eq.${myId}`);
+  }
   const myId = state.user?.id;
   if (!myId) return q.eq('is_private', false);
   return q.or(`is_private.eq.false,created_by.eq.${myId}`);
@@ -23652,6 +23674,14 @@ function renderCalendar() {
             <button onclick="state.data.calView='list';renderApp()" title="清單"
               style="padding:6px 10px;font-size:14px;border:none;cursor:pointer;transition:.15s;background:${calView==='list'?'var(--accent)':'#f5f5f5'};color:${calView==='list'?'#fff':'#888'}">☰</button>
           </div>
+          ${window._isBossForCalPrivacy && window._isBossForCalPrivacy() ? (() => {
+            const seeing = window._bossSeesPrivateEvents();
+            return `<button onclick="window._toggleBossSeesPrivateEvents()"
+              title="老闆權限:切換是否看員工的私人事件"
+              style="padding:6px 10px;font-size:12px;font-weight:600;border:1px solid ${seeing?'#f57c00':'var(--border)'};border-radius:8px;cursor:pointer;background:${seeing?'#fff8e1':'#f5f5f5'};color:${seeing?'#e65100':'#666'};white-space:nowrap">
+              ${seeing?'🔓 顯示私人':'🔒 隱藏私人'}
+            </button>`;
+          })() : ''}
         </div>
         ${calView === 'month' ? `
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">
