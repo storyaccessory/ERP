@@ -21019,14 +21019,11 @@ window.modalEditBooking = async function(bookingId) {
     <div style="margin-top:14px;padding:14px;background:#fff8e1;border:1px solid #ffe082;border-radius:8px">
       <div style="font-weight:700;color:#e65100;margin-bottom:10px;font-size:13px">💰 消費資訊（來店後填寫）</div>
 
-      <!-- 發票上傳 + AI 辨識 -->
+      <!-- 發票 AI 辨識（不儲存圖片，只帶入金額與號碼） -->
       <div class="form-group">
-        <label style="font-size:12px">🧾 上傳發票（AI 自動辨識金額與號碼）</label>
+        <label style="font-size:12px">🧾 發票 AI 辨識（僅辨識，圖片不保留）</label>
         <input type="file" id="eb-invoice-file" accept="image/*" class="form-control" style="padding:6px">
         <div id="eb-invoice-status" style="display:none;margin-top:6px;padding:6px 8px;font-size:12px;border-radius:4px"></div>
-        <div id="eb-invoice-preview" style="display:${b.invoice_url?'block':'none'};margin-top:6px">
-          <img id="eb-invoice-img" src="${b.invoice_url||''}" style="max-width:200px;max-height:200px;border:1px solid var(--border);border-radius:6px;cursor:pointer" onclick="window.open(this.src,'_blank')">
-        </div>
       </div>
 
       <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
@@ -21069,25 +21066,13 @@ window.modalEditBooking = async function(bookingId) {
       const amount         = parseFloat(document.getElementById('eb-amount').value) || null;
       const invoice_no     = document.getElementById('eb-invoice-no').value.trim() || null;
       const payment_methods = Array.from(document.querySelectorAll('.eb-pm:checked')).map(el=>el.value).join(',') || null;
-      // 上傳發票圖片(若有新選)
-      let invoice_url = b.invoice_url || null;
-      const invFile = document.getElementById('eb-invoice-file')?.files?.[0];
-      if (invFile) {
-        const compressed = await compressImage(invFile, 150);
-        const filename = `booking_${bookingId}_${Date.now()}.jpg`;
-        const { error: upErr } = await db.storage.from('postage-invoices').upload(filename, compressed, { contentType:'image/jpeg', upsert:true });
-        if (!upErr) {
-          const { data: urlData } = db.storage.from('postage-invoices').getPublicUrl(filename);
-          invoice_url = urlData?.publicUrl || invoice_url;
-        }
-      }
       if (!booking_date)   { showToast('請選擇日期','error'); return; }
       if (!customer_name)  { showToast('請填入姓名','error'); return; }
       const { error } = await db.from('experience_bookings').update({
         booking_date, time_slot, customer_name, phone, attendees,
         source, status, request: request||null,
         product_link: product_link||null, notes: notes||null, staff_id,
-        amount, invoice_no, payment_methods, invoice_url,
+        amount, invoice_no, payment_methods,
       }).eq('id', bookingId);
       if (error) { showToast('儲存失敗：'+error.message,'error'); return; }
       showToast('預約已更新 ✅'); closeModal(); await loadBooking(); renderApp();
@@ -21129,13 +21114,8 @@ window.modalEditBooking = async function(bookingId) {
         const statusEl = document.getElementById('eb-invoice-status');
         statusEl.style.display = 'block';
         statusEl.style.background = '#e3f2fd'; statusEl.style.color = '#1565c0';
-        statusEl.textContent = '⏳ 壓縮中…';
+        statusEl.textContent = '⏳ 處理中…';
         const compressed = await compressImage(file, 150);
-        // 預覽
-        const preview = document.getElementById('eb-invoice-preview');
-        const img = document.getElementById('eb-invoice-img');
-        img.src = URL.createObjectURL(compressed);
-        preview.style.display = 'block';
 
         if (typeof getClaudeApiKey !== 'function' || !getClaudeApiKey()) {
           statusEl.style.background = '#fff8e1'; statusEl.style.color = '#e65100';
