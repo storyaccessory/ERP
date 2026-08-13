@@ -11026,8 +11026,10 @@ window._openRepairModal = async function(orderId) {
       </div>`).join('')}
     </div>` : ''}
 
-    <script>window._rpPrices=${JSON.stringify(prices)}; window._rpItems=${JSON.stringify(items)};</script>
   `;
+  // 存在 window 供動態列渲染使用(不能寫在 HTML 裡,會被當成 </script> 提前關閉)
+  window._rpPrices = prices;
+  window._rpItems  = JSON.parse(JSON.stringify(items));
 
   // 依狀態決定按鈕
   const btns = [];
