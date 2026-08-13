@@ -11027,7 +11027,7 @@ window._openRepairModal = async function(orderId) {
     </div>` : ''}
 
   `;
-  // 存在 window 供動態列渲染使用(不能寫在 HTML 裡,會被當成 </script> 提前關閉)
+  // 存在 window 供動態列渲染使用(不能寫在 HTML 字串裡)
   window._rpPrices = prices;
   window._rpItems  = JSON.parse(JSON.stringify(items));
 
