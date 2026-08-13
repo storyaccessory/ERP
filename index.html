@@ -10821,50 +10821,455 @@ function modalAdjStockCasting(id) { modalStockAction('casting', id); }
 // ── Repair ──
 function renderRepair() {
   const repairs = state.data.repair || [];
-  const statusColor = { '待報價':'tag-orange','已報價':'tag-blue','待收件':'tag-grey','製作中':'tag-teal','已完成':'tag-green','已寄回':'tag-grey','取消':'tag-red' };
+  const activeStatus = state.data._repairStatusFilter || '進行中';
+  const search = (state.data._repairSearch || '').toLowerCase();
+  const _ep = effectiveProfile() || {};
+  const isManager = ['admin','manager'].includes(_ep.role)
+    || _ep.email === 'cailing0516@gmail.com'
+    || state.user?.email === 'cailing0516@gmail.com';
+
+  let filtered = repairs;
+  if (activeStatus === '進行中')      filtered = filtered.filter(r => !['已寄回','取消'].includes(r.status));
+  else if (activeStatus === '草稿')    filtered = filtered.filter(r => (r.quote_status||'草稿') === '草稿');
+  else if (activeStatus === '待審核')  filtered = filtered.filter(r => r.quote_status === '待審核');
+  else if (activeStatus === '已寄出')  filtered = filtered.filter(r => r.quote_status === '已寄出');
+  else if (activeStatus === '已完成')  filtered = filtered.filter(r => ['已寄回'].includes(r.status));
+  // else 全部
+  if (search) {
+    filtered = filtered.filter(r =>
+      (r.order_no||'').toLowerCase().includes(search) ||
+      (r.customer_name||'').toLowerCase().includes(search) ||
+      (r.customer_phone||'').toLowerCase().includes(search) ||
+      (r.product_name||'').toLowerCase().includes(search));
+  }
+  filtered = [...filtered].sort((a,b) => (b.created_at||'').localeCompare(a.created_at||''));
+
+  const stats = {
+    draft:   repairs.filter(r=>(r.quote_status||'草稿')==='草稿').length,
+    pending: repairs.filter(r=>r.quote_status==='待審核').length,
+    sent:    repairs.filter(r=>r.quote_status==='已寄出').length,
+    making:  repairs.filter(r=>r.status==='製作中').length,
+  };
 
   return `
     <div class="cards cards-4" style="margin-bottom:16px">
-      <div class="card"><div class="card-title">待報價</div><div class="card-value warning">${repairs.filter(r=>r.status==='待報價').length}</div></div>
-      <div class="card"><div class="card-title">待收件</div><div class="card-value">${repairs.filter(r=>r.status==='待收件').length}</div></div>
-      <div class="card"><div class="card-title">製作中</div><div class="card-value accent">${repairs.filter(r=>r.status==='製作中').length}</div></div>
-      <div class="card"><div class="card-title">本月完成</div><div class="card-value success">${repairs.filter(r=>r.status==='已完成').length}</div></div>
+      <div class="card"><div class="card-title">📝 草稿</div><div class="card-value">${stats.draft}</div></div>
+      <div class="card" style="cursor:pointer" data-repair-status="待審核"><div class="card-title">⏳ 待審核</div><div class="card-value warning">${stats.pending}</div></div>
+      <div class="card"><div class="card-title">📮 已寄報價</div><div class="card-value accent">${stats.sent}</div></div>
+      <div class="card"><div class="card-title">🔧 製作中</div><div class="card-value success">${stats.making}</div></div>
+    </div>
+    <div class="tabs">
+      ${['進行中','草稿','待審核','已寄出','已完成','全部'].map(s =>
+        `<div class="tab ${activeStatus===s?'active':''}" data-repair-status="${s}">${s}</div>`).join('')}
     </div>
     <div class="search-bar">
-      <input class="search-input" placeholder="搜尋客戶、單號…">
-      <button class="btn btn-primary" id="add-repair-btn">+ 新增維修單</button>
-      <button class="btn btn-outline" id="manage-repair-prices-btn">⚙ 維修報價表</button>
+      <input class="search-input" id="_repair-search" placeholder="搜尋 單號 / 客戶 / 電話 / 商品…" value="${search}">
+      <button class="btn btn-primary" data-action="add-repair">+ 新增維修單</button>
+      <button class="btn btn-outline" data-action="manage-repair-prices">⚙ 維修報價表</button>
     </div>
     <div class="card">
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th>單號</th><th>客戶</th><th>平台</th><th>商品</th><th>金額</th>
-            <th>商品收到</th><th>款項入帳</th><th>狀態</th><th>操作</th>
+            <th>單號</th><th>客戶</th><th>商品</th><th>金額</th>
+            <th>報價狀態</th><th>維修狀態</th><th>收件/收款</th><th>建立</th><th>操作</th>
           </tr></thead>
           <tbody>
-          ${repairs.length === 0 ? `<tr><td colspan="9"><div class="empty"><div class="empty-icon">🔧</div><p>尚無維修單</p></div></td></tr>` :
-            repairs.map(r => `<tr>
-              <td><strong>${r.order_no}</strong></td>
-              <td>${r.customer_name}</td>
-              <td>${r.platform||'—'}</td>
-              <td style="font-size:12px">${r.product_name||'—'}</td>
-              <td>$${(r.total_amount||0).toLocaleString()}</td>
-              <td>${r.item_received?'<span class="tag tag-green">✓</span>':'<span class="tag tag-grey">—</span>'}</td>
-              <td>${r.payment_received?'<span class="tag tag-green">✓</span>':'<span class="tag tag-grey">—</span>'}</td>
-              <td><span class="tag ${statusColor[r.status]||'tag-grey'}">${r.status}</span></td>
-              <td>
-                <div class="action-btns">
-                  <button class="btn-table" data-action="edit-repair" data-id="${r.id}">編輯</button>
-                  ${r.status==='製作中'?`<button class="btn-table" style="background:var(--accent-light);color:var(--accent-dark)" data-action="complete-repair" data-id="${r.id}">完成</button>`:''}
-                </div>
-              </td>
-            </tr>`).join('')}
+          ${filtered.length===0 ? `<tr><td colspan="9"><div class="empty"><div class="empty-icon">🔧</div><p>沒有符合的維修單</p></div></td></tr>` :
+            filtered.map(r => {
+              const total = _repairCalcTotal(r);
+              return `<tr style="cursor:pointer" onclick="window._openRepairModal('${r.id}')">
+                <td><strong>${r.order_no||'—'}</strong></td>
+                <td>${r.customer_name||'—'}<div style="font-size:11px;color:var(--muted)">${r.customer_phone||''}</div></td>
+                <td style="font-size:12px">${r.product_name||'—'}</td>
+                <td>$${total.toLocaleString()}</td>
+                <td>${_repairQuoteBadge(r.quote_status||'草稿')}</td>
+                <td>${_repairStatusBadge(r.status)}</td>
+                <td style="font-size:11px">${r.item_received?'📦':'⬜'} ${r.payment_received?'💰':'⬜'}</td>
+                <td style="font-size:11px;color:var(--muted)">${(r.created_at||'').slice(0,10)}</td>
+                <td onclick="event.stopPropagation()">
+                  <div class="action-btns">
+                    <button class="btn-table" onclick="window._openRepairModal('${r.id}')">開啟</button>
+                    ${isManager && r.quote_status==='待審核' ? `<button class="btn-table" style="background:#e8f5e9;color:#2e7d32" onclick="window._repairApprove('${r.id}')">✓ 核准</button>` : ''}
+                  </div>
+                </td>
+              </tr>`;
+            }).join('')}
           </tbody>
         </table>
       </div>
     </div>`;
 }
+
+// ── 維修 helpers ──
+function _repairCalcTotal(r) {
+  const items = Array.isArray(r.quote_items) ? r.quote_items : [];
+  const itemsSum = items.filter(i=>!i.is_free).reduce((s,i)=>s + (Number(i.subtotal) || (Number(i.price)||0)*(Number(i.qty)||1)), 0);
+  return Math.max(0, itemsSum + (Number(r.shipping_fee)||0) - (Number(r.discount)||0));
+}
+function _repairQuoteBadge(s) {
+  const c = { '草稿':'tag-grey','待審核':'tag-orange','已核准':'tag-blue','已寄出':'tag-teal','客人確認':'tag-green','客人拒絕':'tag-red','需重報':'tag-orange' };
+  return `<span class="tag ${c[s]||'tag-grey'}">${s}</span>`;
+}
+function _repairStatusBadge(s) {
+  const c = { '待報價':'tag-orange','待收件':'tag-grey','已收件':'tag-blue','製作中':'tag-teal','已完成':'tag-green','已寄回':'tag-grey','取消':'tag-red' };
+  return `<span class="tag ${c[s]||'tag-grey'}">${s||'—'}</span>`;
+}
+function _repairGenOrderNo() {
+  const now = new Date();
+  const yyyymmdd = now.getFullYear().toString() + String(now.getMonth()+1).padStart(2,'0') + String(now.getDate()).padStart(2,'0');
+  const rand = Math.random().toString(36).slice(2,6).toUpperCase();
+  return `R${yyyymmdd}-${rand}`;
+}
+async function _repairLog(orderId, action, fromStatus, toStatus, notes, extraData) {
+  await db.from('repair_workflow_log').insert({
+    repair_order_id: orderId, action,
+    from_status: fromStatus||null, to_status: toStatus||null,
+    by_user: state.user?.id || null,
+    by_user_name: effectiveProfile()?.name || state.user?.email || '未知',
+    notes: notes||null, data: extraData||null,
+  });
+}
+
+// ── 開啟維修單 modal(新建 or 編輯) ──
+window._openRepairModal = async function(orderId) {
+  const prices = state.data.repairPrices || [];
+  let r;
+  if (orderId) {
+    r = (state.data.repair||[]).find(x=>x.id===orderId);
+    if (!r) { const {data} = await db.from('repair_orders').select('*').eq('id',orderId).single(); r = data; }
+    if (!r) { showToast('找不到維修單','error'); return; }
+  } else {
+    // 新建
+    r = { id:null, order_no: _repairGenOrderNo(), quote_status:'草稿', status:'待報價', quote_items: [], shipping_fee: 80, discount: 0 };
+  }
+  // 讀取歷史
+  let logs = [];
+  if (r.id) {
+    const { data } = await db.from('repair_workflow_log').select('*').eq('repair_order_id', r.id).order('created_at', { ascending: false });
+    logs = data || [];
+  }
+  const _ep = effectiveProfile() || {};
+  const isManager = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
+  const qStatus = r.quote_status || '草稿';
+  const items = Array.isArray(r.quote_items) ? r.quote_items : [];
+  const total = _repairCalcTotal(r);
+  const locked = ['待審核','已寄出','客人確認'].includes(qStatus);  // 送審後 or 已寄出後不能改內容(除非退回)
+
+  const html = `
+    <!-- 狀態列 -->
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:10px 12px;background:#f8f9fa;border-radius:6px;margin-bottom:12px">
+      <div><strong style="font-size:14px">${r.order_no}</strong></div>
+      <div>${_repairQuoteBadge(qStatus)} ${_repairStatusBadge(r.status)}</div>
+    </div>
+
+    <!-- 客戶資訊 -->
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin-bottom:6px">👤 客戶資訊</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label>客戶姓名 *</label><input class="form-control" id="rp-name" value="${r.customer_name||''}" ${locked?'disabled':''}></div>
+      <div class="form-group"><label>電話</label><input class="form-control" id="rp-phone" value="${r.customer_phone||''}" ${locked?'disabled':''}></div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="form-group"><label>Email</label><input class="form-control" id="rp-email" value="${r.customer_email||''}" ${locked?'disabled':''}></div>
+      <div class="form-group"><label>LINE</label><input class="form-control" id="rp-line" value="${r.customer_line||''}" ${locked?'disabled':''}></div>
+      <div class="form-group"><label>購買平台</label>
+        <select class="form-control" id="rp-platform" ${locked?'disabled':''}>
+          ${['','蝦皮','官網','門市','FB','IG','其他'].map(p=>`<option value="${p}" ${p===(r.platform||'')?'selected':''}>${p||'—'}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <!-- 商品/問題 -->
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:12px 0 6px">💎 商品與問題</div>
+    <div class="form-group"><label>商品名稱</label><input class="form-control" id="rp-product" value="${r.product_name||''}" ${locked?'disabled':''}></div>
+    <div class="form-group"><label>問題描述</label><textarea class="form-control" id="rp-issue" rows="2" ${locked?'disabled':''}>${r.issue_description||''}</textarea></div>
+
+    <!-- 報價項目 -->
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:12px 0 6px">🧾 報價項目</div>
+    <div id="rp-items-wrap" style="border:1px solid var(--border);border-radius:6px;padding:8px;background:#fafafa">
+      <div id="rp-items"></div>
+      ${!locked ? `<button class="btn btn-sm btn-outline" onclick="window._rpAddItem()" style="margin-top:6px">+ 加項目</button>` : ''}
+    </div>
+
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px;margin-top:10px">
+      <div class="form-group"><label>運費</label><input type="number" class="form-control" id="rp-ship" value="${r.shipping_fee||0}" ${locked?'disabled':''} onchange="window._rpRecalc()"></div>
+      <div class="form-group"><label>折扣${!isManager?' 🔒':''}</label><input type="number" class="form-control" id="rp-discount" value="${r.discount||0}" ${locked||!isManager?'disabled':''} onchange="window._rpRecalc()"></div>
+      <div class="form-group"><label>合計</label>
+        <div style="padding:10px 12px;background:var(--accent-light);color:var(--accent-dark);font-weight:700;font-size:18px;border-radius:6px;text-align:right" id="rp-total">$${total.toLocaleString()}</div>
+      </div>
+    </div>
+
+    <!-- 內部備註 -->
+    <div class="form-group" style="margin-top:10px"><label>內部備註（客人看不到）</label>
+      <textarea class="form-control" id="rp-notes" rows="2" ${locked?'disabled':''}>${r.quote_notes||''}</textarea>
+    </div>
+
+    <!-- 收件/收款 -->
+    ${['客人確認','已寄出','待收件','已收件','製作中','已完成'].includes(qStatus) || r.item_received || r.payment_received ? `
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:12px 0 6px">📦 收件/收款</div>
+    <div style="display:flex;gap:16px;padding:10px;background:#f5f5f5;border-radius:6px">
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="rp-item-recv" ${r.item_received?'checked':''}> 📦 已收到商品
+      </label>
+      <label style="display:flex;align-items:center;gap:6px;cursor:pointer">
+        <input type="checkbox" id="rp-pay-recv" ${r.payment_received?'checked':''}> 💰 已收到款項
+      </label>
+    </div>` : ''}
+
+    <!-- 歷史紀錄 -->
+    ${logs.length ? `
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:12px 0 6px">📋 流程紀錄</div>
+    <div style="max-height:150px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+      ${logs.map(l => `<div style="padding:6px 10px;border-bottom:1px solid var(--border);font-size:11px">
+        <div><strong>${l.action}</strong> ${l.from_status?`(${l.from_status} → ${l.to_status})`:''} <span style="color:var(--muted)">by ${l.by_user_name||'—'}</span></div>
+        <div style="color:var(--muted)">${new Date(l.created_at).toLocaleString('zh-TW',{hour12:false})}${l.notes?` · ${l.notes}`:''}</div>
+      </div>`).join('')}
+    </div>` : ''}
+
+    <script>window._rpPrices=${JSON.stringify(prices)}; window._rpItems=${JSON.stringify(items)};</script>
+  `;
+
+  // 依狀態決定按鈕
+  const btns = [];
+  if (qStatus === '草稿') {
+    btns.push({ label:'💾 儲存草稿', onclick: async () => await window._rpSave(r.id, '草稿') });
+    btns.push({ label:'📤 送出審核', primary:true, onclick: async () => await window._rpSubmit(r.id) });
+  } else if (qStatus === '待審核') {
+    if (isManager) {
+      btns.push({ label:'✓ 核准並可寄出', primary:true, onclick: async () => await window._rpApproveInModal(r.id) });
+      btns.push({ label:'↩ 退回修改', onclick: async () => await window._rpReject(r.id) });
+    }
+    // 非主管:不加審核按鈕(自動顯示狀態徽章)
+  } else if (qStatus === '已核准') {
+    btns.push({ label:'📮 標記已寄給客人', primary:true, onclick: async () => await window._rpMarkSent(r.id) });
+  } else if (qStatus === '已寄出') {
+    btns.push({ label:'✓ 客人確認', primary:true, onclick: async () => await window._rpCustomerConfirm(r.id) });
+    btns.push({ label:'✗ 客人拒絕', onclick: async () => await window._rpCustomerReject(r.id) });
+  }
+
+  // 收件/收款 保存 + 進度動作
+  if (['客人確認','已寄出'].includes(qStatus) || r.item_received || r.payment_received) {
+    btns.push({ label:'💾 儲存收件/收款', onclick: async () => await window._rpSaveRecv(r.id) });
+  }
+  if (r.item_received && r.payment_received && r.status !== '製作中' && r.status !== '已完成' && r.status !== '已寄回') {
+    btns.push({ label:'🔧 開始製作', onclick: async () => await window._rpStart(r.id) });
+  }
+  if (r.status === '製作中') {
+    btns.push({ label:'✅ 完成製作', primary:true, onclick: async () => await window._rpComplete(r.id) });
+  }
+  if (r.status === '已完成') {
+    btns.push({ label:'📮 標記已寄回', primary:true, onclick: async () => await window._rpMarkReturned(r.id) });
+  }
+
+  // 重新報價(進廠檢查後發現金額要改)
+  if (['已寄出','客人確認'].includes(qStatus) || r.item_received) {
+    btns.push({ label:'🔄 重新報價', onclick: async () => await window._rpRequote(r.id) });
+  }
+
+  btns.push({ label:'關閉', onclick: closeModal });
+
+  showModal(`🔧 維修單 ${r.order_no}`, html + `<input type="hidden" id="rp-order-no" value="${r.order_no}">`, btns, { wide: true });
+
+  // 渲染項目
+  setTimeout(() => window._rpRenderItems(), 30);
+};
+
+// ── 動態項目列渲染 ──
+window._rpRenderItems = function() {
+  const box = document.getElementById('rp-items'); if (!box) return;
+  const prices = window._rpPrices || [];
+  const items = window._rpItems || [];
+  const locked = document.getElementById('rp-name')?.disabled;
+  if (items.length === 0) { box.innerHTML = '<div style="color:var(--muted);font-size:12px;padding:6px">尚無報價項目</div>'; window._rpRecalc(); return; }
+  box.innerHTML = items.map((it,idx) => `
+    <div style="display:grid;grid-template-columns:2fr 80px 60px 80px 30px 30px;gap:6px;align-items:center;padding:4px 0">
+      <input class="form-control" style="font-size:12px" placeholder="項目名稱" value="${(it.name||'').replace(/"/g,'&quot;')}" ${locked?'disabled':''} onchange="window._rpItems[${idx}].name=this.value">
+      <input type="number" class="form-control" style="font-size:12px;text-align:right" value="${it.price||0}" ${locked?'disabled':''} onchange="window._rpItems[${idx}].price=parseFloat(this.value)||0;window._rpRenderItems();">
+      <input type="number" class="form-control" style="font-size:12px;text-align:right" value="${it.qty||1}" ${locked?'disabled':''} onchange="window._rpItems[${idx}].qty=parseInt(this.value)||1;window._rpRenderItems();">
+      <div style="text-align:right;font-weight:600;font-size:13px;color:${it.is_free?'#999':'var(--accent-dark)'};${it.is_free?'text-decoration:line-through':''}">$${((it.price||0)*(it.qty||1)).toLocaleString()}</div>
+      <label title="免費/贈送" style="text-align:center"><input type="checkbox" ${it.is_free?'checked':''} ${locked?'disabled':''} onchange="window._rpItems[${idx}].is_free=this.checked;window._rpRenderItems();" title="免費"></label>
+      ${!locked ? `<button style="border:none;background:none;color:var(--danger);cursor:pointer;font-size:16px" onclick="window._rpItems.splice(${idx},1);window._rpRenderItems();">×</button>` : '<span></span>'}
+    </div>
+  `).join('');
+  window._rpRecalc();
+};
+window._rpAddItem = function() {
+  const prices = window._rpPrices || [];
+  // 開一個小選單
+  const opts = prices.map(p=>`<option value="${p.id}" data-name="${p.item_name}" data-price="${p.price}">${p.item_name} - $${p.price}</option>`).join('');
+  const selHtml = `
+    <div style="padding:10px">
+      <div class="form-group"><label>從報價表選擇</label>
+        <select class="form-control" id="_rp-pick">
+          <option value="">— 或手動輸入 —</option>${opts}
+        </select>
+      </div>
+      <div class="form-group"><label>項目名稱</label><input class="form-control" id="_rp-item-name"></div>
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><label>單價</label><input type="number" class="form-control" id="_rp-item-price" value="0"></div>
+        <div class="form-group"><label>數量</label><input type="number" class="form-control" id="_rp-item-qty" value="1"></div>
+      </div>
+    </div>`;
+  showModal('加報價項目', selHtml, [
+    { label:'加入', primary:true, onclick: () => {
+      const name = document.getElementById('_rp-item-name').value.trim();
+      const price = parseFloat(document.getElementById('_rp-item-price').value)||0;
+      const qty = parseInt(document.getElementById('_rp-item-qty').value)||1;
+      if (!name) { showToast('請填項目名稱','error'); return; }
+      window._rpItems.push({ name, price, qty, is_free:false });
+      closeModal();
+      window._rpRenderItems();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+  setTimeout(() => {
+    const sel = document.getElementById('_rp-pick');
+    sel.onchange = () => {
+      const o = sel.selectedOptions[0];
+      if (!o || !o.dataset.name) return;
+      document.getElementById('_rp-item-name').value = o.dataset.name;
+      document.getElementById('_rp-item-price').value = o.dataset.price;
+    };
+  }, 30);
+};
+window._rpRecalc = function() {
+  const items = window._rpItems || [];
+  const sum = items.filter(i=>!i.is_free).reduce((s,i)=>s + (Number(i.price)||0)*(Number(i.qty)||1), 0);
+  const ship = parseFloat(document.getElementById('rp-ship')?.value)||0;
+  const disc = parseFloat(document.getElementById('rp-discount')?.value)||0;
+  const total = Math.max(0, sum + ship - disc);
+  const el = document.getElementById('rp-total');
+  if (el) el.textContent = '$' + total.toLocaleString();
+};
+
+// ── 存檔 / 建立 ──
+window._rpCollectFields = function() {
+  const items = (window._rpItems||[]).map(it => ({ ...it, subtotal: (Number(it.price)||0)*(Number(it.qty)||1) }));
+  return {
+    order_no: document.getElementById('rp-order-no')?.value || _repairGenOrderNo(),
+    customer_name: document.getElementById('rp-name')?.value.trim() || null,
+    customer_phone: document.getElementById('rp-phone')?.value.trim() || null,
+    customer_email: document.getElementById('rp-email')?.value.trim() || null,
+    customer_line: document.getElementById('rp-line')?.value.trim() || null,
+    platform: document.getElementById('rp-platform')?.value || null,
+    product_name: document.getElementById('rp-product')?.value.trim() || null,
+    issue_description: document.getElementById('rp-issue')?.value.trim() || null,
+    quote_items: items,
+    shipping_fee: parseFloat(document.getElementById('rp-ship')?.value)||0,
+    discount: parseFloat(document.getElementById('rp-discount')?.value)||0,
+    quote_notes: document.getElementById('rp-notes')?.value.trim() || null,
+  };
+};
+window._rpSave = async function(orderId, keepStatus) {
+  const fields = window._rpCollectFields();
+  const total = _repairCalcTotal({ ...fields });
+  if (!fields.customer_name) { showToast('請填客戶姓名','error'); return; }
+  fields.total_amount = total;
+  if (!orderId) {
+    fields.quote_status = keepStatus || '草稿';
+    fields.status = '待報價';
+    fields.quote_created_by = state.user?.id || null;
+    fields.customer_token = crypto.randomUUID().replace(/-/g,'').slice(0,24);
+    const { data, error } = await db.from('repair_orders').insert(fields).select().single();
+    if (error) { showToast('建立失敗:'+error.message,'error'); return; }
+    await _repairLog(data.id, '建立維修單', null, '草稿', null, { total });
+    showToast('已建立 ✅'); closeModal(); await loadRepair(); renderApp();
+    return data.id;
+  } else {
+    const { error } = await db.from('repair_orders').update(fields).eq('id', orderId);
+    if (error) { showToast('儲存失敗:'+error.message,'error'); return; }
+    await _repairLog(orderId, '更新草稿', null, null, null, { total });
+    showToast('已儲存'); closeModal(); await loadRepair(); renderApp();
+    return orderId;
+  }
+};
+window._rpSubmit = async function(orderId) {
+  const items = window._rpItems||[];
+  if (items.length === 0) { showToast('請至少加一項報價','error'); return; }
+  let id = orderId;
+  if (!id) {
+    id = await window._rpSave(null, '草稿');
+    if (!id) return;
+    // reopen and submit — 已 closeModal, 直接改狀態
+  } else {
+    const fields = window._rpCollectFields();
+    fields.total_amount = _repairCalcTotal({ ...fields });
+    await db.from('repair_orders').update(fields).eq('id', id);
+  }
+  await db.from('repair_orders').update({ quote_status:'待審核' }).eq('id', id);
+  await _repairLog(id, '送出審核', '草稿', '待審核', null);
+  showToast('已送出審核 ⏳'); closeModal(); await loadRepair(); renderApp();
+};
+window._repairApprove = async function(orderId) {
+  await window._rpApproveInModal(orderId);
+};
+window._rpApproveInModal = async function(orderId) {
+  const note = prompt('核准說明(選填):', '') || '';
+  await db.from('repair_orders').update({
+    quote_status:'已核准',
+    quote_approved_by: state.user?.id || null,
+    quote_approved_at: new Date().toISOString(),
+    approval_notes: note || null,
+  }).eq('id', orderId);
+  await _repairLog(orderId, '核准', '待審核', '已核准', note);
+  showToast('已核准 ✅');
+  closeModal(); await loadRepair(); renderApp();
+};
+window._rpReject = async function(orderId) {
+  const reason = prompt('退回原因 *:'); if (!reason?.trim()) return;
+  await db.from('repair_orders').update({ quote_status:'草稿', reject_reason: reason.trim() }).eq('id', orderId);
+  await _repairLog(orderId, '退回', '待審核', '草稿', reason.trim());
+  showToast('已退回修改'); closeModal(); await loadRepair(); renderApp();
+};
+window._rpMarkSent = async function(orderId) {
+  await db.from('repair_orders').update({ quote_status:'已寄出', quote_sent_at: new Date().toISOString(), status:'待收件' }).eq('id', orderId);
+  await _repairLog(orderId, '寄出報價', '已核准', '已寄出', null);
+  showToast('已標記為寄出 📮'); closeModal(); await loadRepair(); renderApp();
+};
+window._rpCustomerConfirm = async function(orderId) {
+  await db.from('repair_orders').update({ quote_status:'客人確認', customer_confirmed_at: new Date().toISOString() }).eq('id', orderId);
+  await _repairLog(orderId, '客人確認', '已寄出', '客人確認', null);
+  showToast('已標記為客人確認 ✅'); closeModal(); await loadRepair(); renderApp();
+};
+window._rpCustomerReject = async function(orderId) {
+  const reason = prompt('拒絕原因(選填):') || '';
+  await db.from('repair_orders').update({ quote_status:'客人拒絕', status:'取消', reject_reason: reason||null }).eq('id', orderId);
+  await _repairLog(orderId, '客人拒絕', '已寄出', '客人拒絕', reason);
+  showToast('已標記為客人拒絕'); closeModal(); await loadRepair(); renderApp();
+};
+window._rpSaveRecv = async function(orderId) {
+  const itemRecv = document.getElementById('rp-item-recv')?.checked || false;
+  const payRecv  = document.getElementById('rp-pay-recv')?.checked || false;
+  const upd = { item_received: itemRecv, payment_received: payRecv };
+  if (itemRecv && payRecv) upd.status = '已收件';
+  else if (itemRecv) upd.status = '已收件';
+  await db.from('repair_orders').update(upd).eq('id', orderId);
+  await _repairLog(orderId, '更新收件/收款', null, upd.status||null, `📦${itemRecv?'✓':'×'} 💰${payRecv?'✓':'×'}`);
+  showToast('已更新'); closeModal(); await loadRepair(); renderApp();
+};
+window._rpStart = async function(orderId) {
+  await db.from('repair_orders').update({ status:'製作中' }).eq('id', orderId);
+  await _repairLog(orderId, '開始製作', '已收件', '製作中', null);
+  showToast('已開始製作 🔧'); closeModal(); await loadRepair(); renderApp();
+};
+window._rpComplete = async function(orderId) {
+  await db.from('repair_orders').update({ status:'已完成' }).eq('id', orderId);
+  await _repairLog(orderId, '完成製作', '製作中', '已完成', null);
+  showToast('已完成 ✅'); closeModal(); await loadRepair(); renderApp();
+};
+window._rpMarkReturned = async function(orderId) {
+  const trackingNo = prompt('回寄物流單號(選填):') || '';
+  await db.from('repair_orders').update({ status:'已寄回', return_shipping_no: trackingNo||null, return_shipping_at: new Date().toISOString() }).eq('id', orderId);
+  await _repairLog(orderId, '寄回商品', '已完成', '已寄回', trackingNo);
+  showToast('已標記寄回 📮'); closeModal(); await loadRepair(); renderApp();
+};
+window._rpRequote = async function(orderId) {
+  const reason = prompt('重新報價原因(如:實品與描述不符,需增加維修項目) *:');
+  if (!reason?.trim()) return;
+  await db.from('repair_orders').update({ quote_status:'草稿', reject_reason: reason.trim() }).eq('id', orderId);
+  await _repairLog(orderId, '進廠檢查需重報', null, '草稿', reason.trim());
+  showToast('已轉為草稿,請重新報價後再送審 🔄'); closeModal(); await loadRepair(); renderApp();
+};
 
 // ── Dev Projects ──
 function renderDev() {
@@ -25780,6 +26185,17 @@ function bindEvents() {
     el.onclick = () => { state.data.acctTab = el.dataset.acctTab; renderApp(); };
   });
 
+  // 維修狀態 tab
+  document.querySelectorAll('[data-repair-status]').forEach(el => {
+    el.onclick = () => { state.data._repairStatusFilter = el.dataset.repairStatus; renderApp(); };
+  });
+  // 維修搜尋
+  document.getElementById('_repair-search')?.addEventListener('input', (e) => {
+    state.data._repairSearch = e.target.value;
+    clearTimeout(window.__rpSearchT);
+    window.__rpSearchT = setTimeout(() => renderApp(), 200);
+  });
+
   // 會計月份快捷按鈕
   document.querySelectorAll('.btn-ym-quick[data-ym-mode]').forEach(btn => {
     btn.addEventListener('click', async () => {
@@ -26723,6 +27139,24 @@ async function handleAction(action, id, dataset) {
       if (t) modalAddTodo(t);
       break;
     }
+
+    case 'add-repair':
+      window._openRepairModal(null);
+      break;
+
+    case 'edit-repair':
+      window._openRepairModal(id);
+      break;
+
+    case 'manage-repair-prices':
+      state.data.settingsTab = '維修報價表';
+      state.currentPage = 'settings';
+      renderApp();
+      break;
+
+    case 'complete-repair':
+      window._rpComplete(id);
+      break;
 
     case 'done-todo':
       await db.from('todos').update({ status:'完成', completed_at: new Date().toISOString() }).eq('id', id);
