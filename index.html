@@ -1416,9 +1416,11 @@ window._toggleBossSeesPrivateEvents = function() {
   const cur = _bossSeesPrivateEvents();
   localStorage.setItem('boss_see_private_events', String(!cur));
   showToast(`已切換為:${!cur?'✅ 顯示':'🚫 隱藏'}私人事件,重新載入中…`);
-  // 重新載入行事曆事件
-  if (typeof loadCalendarEvents === 'function') loadCalendarEvents().then(() => renderApp());
-  else renderApp();
+  // 重新載入相關頁面資料(行事曆 or 儀表板)
+  const jobs = [];
+  if (typeof loadCalendarEvents === 'function') jobs.push(loadCalendarEvents());
+  if (typeof loadDashboard === 'function') jobs.push(loadDashboard());
+  Promise.all(jobs).then(() => renderApp());
 };
 
 // 套用到 supabase 查詢:非私人 OR 我建立的
@@ -20607,6 +20609,43 @@ window.modalEditBooking = async function(bookingId) {
     <div class="form-group"><label>內部備注</label>
       <input class="form-control" id="eb-notes" value="${(b.notes||'').replace(/"/g,'&quot;')}" placeholder="客人不會看到">
     </div>
+
+    <!-- ── 💰 消費資訊（來店後填寫）─────────────────────── -->
+    <div style="margin-top:14px;padding:14px;background:#fff8e1;border:1px solid #ffe082;border-radius:8px">
+      <div style="font-weight:700;color:#e65100;margin-bottom:10px;font-size:13px">💰 消費資訊（來店後填寫）</div>
+
+      <!-- 發票上傳 + AI 辨識 -->
+      <div class="form-group">
+        <label style="font-size:12px">🧾 上傳發票（AI 自動辨識金額與號碼）</label>
+        <input type="file" id="eb-invoice-file" accept="image/*" class="form-control" style="padding:6px">
+        <div id="eb-invoice-status" style="display:none;margin-top:6px;padding:6px 8px;font-size:12px;border-radius:4px"></div>
+        <div id="eb-invoice-preview" style="display:${b.invoice_url?'block':'none'};margin-top:6px">
+          <img id="eb-invoice-img" src="${b.invoice_url||''}" style="max-width:200px;max-height:200px;border:1px solid var(--border);border-radius:6px;cursor:pointer" onclick="window.open(this.src,'_blank')">
+        </div>
+      </div>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+        <div class="form-group"><label style="font-size:12px">消費金額</label>
+          <input type="number" class="form-control" id="eb-amount" value="${b.amount||''}" placeholder="AI 辨識帶入">
+        </div>
+        <div class="form-group"><label style="font-size:12px">發票號碼</label>
+          <input class="form-control" id="eb-invoice-no" value="${b.invoice_no||''}" placeholder="AI 辨識帶入" style="font-family:monospace">
+        </div>
+      </div>
+
+      <div class="form-group" style="margin-bottom:0">
+        <label style="font-size:12px">付款方式（可複選）</label>
+        <div style="display:flex;gap:16px;padding:8px 0">
+          ${['現金','刷卡','LinePay'].map(m => {
+            const checked = (b.payment_methods||'').split(',').map(s=>s.trim()).includes(m);
+            return `<label style="display:flex;align-items:center;gap:6px;cursor:pointer;font-size:13px">
+              <input type="checkbox" class="eb-pm" value="${m}" ${checked?'checked':''} style="width:16px;height:16px;cursor:pointer">
+              <span>${m==='現金'?'💵':m==='刷卡'?'💳':'📱'} ${m}</span>
+            </label>`;
+          }).join('')}
+        </div>
+      </div>
+    </div>
   `, [
     { label:'💾 儲存修改', primary:true, onclick: async () => {
       const ebIsPickup     = document.getElementById('eb-type-pickup').dataset.active === '1';
@@ -20621,12 +20660,29 @@ window.modalEditBooking = async function(bookingId) {
       const product_link   = ebIsPickup ? null : document.getElementById('eb-product-link').value.trim();
       const notes          = document.getElementById('eb-notes').value.trim();
       const staff_id       = document.getElementById('eb-staff').value || null;
+      // 消費資訊
+      const amount         = parseFloat(document.getElementById('eb-amount').value) || null;
+      const invoice_no     = document.getElementById('eb-invoice-no').value.trim() || null;
+      const payment_methods = Array.from(document.querySelectorAll('.eb-pm:checked')).map(el=>el.value).join(',') || null;
+      // 上傳發票圖片(若有新選)
+      let invoice_url = b.invoice_url || null;
+      const invFile = document.getElementById('eb-invoice-file')?.files?.[0];
+      if (invFile) {
+        const compressed = await compressImage(invFile, 150);
+        const filename = `booking_${bookingId}_${Date.now()}.jpg`;
+        const { error: upErr } = await db.storage.from('postage-invoices').upload(filename, compressed, { contentType:'image/jpeg', upsert:true });
+        if (!upErr) {
+          const { data: urlData } = db.storage.from('postage-invoices').getPublicUrl(filename);
+          invoice_url = urlData?.publicUrl || invoice_url;
+        }
+      }
       if (!booking_date)   { showToast('請選擇日期','error'); return; }
       if (!customer_name)  { showToast('請填入姓名','error'); return; }
       const { error } = await db.from('experience_bookings').update({
         booking_date, time_slot, customer_name, phone, attendees,
         source, status, request: request||null,
         product_link: product_link||null, notes: notes||null, staff_id,
+        amount, invoice_no, payment_methods, invoice_url,
       }).eq('id', bookingId);
       if (error) { showToast('儲存失敗：'+error.message,'error'); return; }
       showToast('預約已更新 ✅'); closeModal(); await loadBooking(); renderApp();
@@ -20658,7 +20714,52 @@ window.modalEditBooking = async function(bookingId) {
   // 初始化 active 狀態
   setTimeout(() => {
     const pBtn = document.getElementById('eb-type-pickup');
-    if (pBtn) pBtn.dataset.active = isPickup ? '1' : '0';
+    if (pBtn) pBtn.dataset.active = initPickup ? '1' : '0';
+
+    // ── 發票圖片上傳 → AI 辨識（金額 + 發票號碼） ─────────────
+    const invFile = document.getElementById('eb-invoice-file');
+    if (invFile) {
+      invFile.addEventListener('change', async e => {
+        const file = e.target.files[0]; if (!file) return;
+        const statusEl = document.getElementById('eb-invoice-status');
+        statusEl.style.display = 'block';
+        statusEl.style.background = '#e3f2fd'; statusEl.style.color = '#1565c0';
+        statusEl.textContent = '⏳ 壓縮中…';
+        const compressed = await compressImage(file, 150);
+        // 預覽
+        const preview = document.getElementById('eb-invoice-preview');
+        const img = document.getElementById('eb-invoice-img');
+        img.src = URL.createObjectURL(compressed);
+        preview.style.display = 'block';
+
+        if (typeof getClaudeApiKey !== 'function' || !getClaudeApiKey()) {
+          statusEl.style.background = '#fff8e1'; statusEl.style.color = '#e65100';
+          statusEl.textContent = '⚠️ 未設定 Claude API Key,請手動填入金額與發票號碼';
+          return;
+        }
+        statusEl.textContent = '🤖 AI 辨識發票中…';
+        try {
+          const parsed = await parseInvoiceWithClaude(compressed);
+          if (!parsed) {
+            statusEl.style.background='#ffebee'; statusEl.style.color='#c62828';
+            statusEl.textContent='❌ 辨識失敗,請手動填入'; return;
+          }
+          const filled = [];
+          if (parsed.amount)     { document.getElementById('eb-amount').value = parsed.amount; filled.push(`金額 $${Number(parsed.amount).toLocaleString()}`); }
+          if (parsed.invoice_no) { document.getElementById('eb-invoice-no').value = parsed.invoice_no; filled.push(`發票號碼 ${parsed.invoice_no}`); }
+          if (filled.length) {
+            statusEl.style.background = '#e8f5e9'; statusEl.style.color = '#2e7d32';
+            statusEl.textContent = `✅ AI 辨識:${filled.join('、')}`;
+          } else {
+            statusEl.style.background = '#fff8e1'; statusEl.style.color = '#e65100';
+            statusEl.textContent = '⚠️ 辨識不完整,請手動確認';
+          }
+        } catch(err) {
+          statusEl.style.background = '#ffebee'; statusEl.style.color = '#c62828';
+          statusEl.textContent = `❌ 辨識失敗:${err.message}`;
+        }
+      });
+    }
   }, 50);
 };
 
