@@ -18953,6 +18953,22 @@ async function approveRequest(id) {
     const update = { ...(req.change_data||{}) };
     const { error } = await db.from('calendar_events').update(update).eq('id', req.item_id);
     if (error) { showToast('套用行事曆變更失敗:'+error.message, 'error'); return; }
+  } else if (req.request_type === 'calendar_delete') {
+    // 執行實際刪除(依 scope)
+    const scope = req.change_data?.scope || 'one';
+    const templateId = req.change_data?.template_id;
+    const startDate = req.change_data?.start_date;
+    let error;
+    if (scope === 'one' || !templateId) {
+      ({ error } = await db.from('calendar_events').delete().eq('id', req.item_id));
+    } else if (scope === 'future' && templateId) {
+      ({ error } = await db.from('calendar_events').delete()
+        .eq('template_id', templateId).gte('start_date', startDate));
+    } else if (scope === 'all' && templateId) {
+      await db.from('calendar_events').delete().eq('template_id', templateId);
+      ({ error } = await db.from('calendar_events').delete().eq('id', templateId));
+    }
+    if (error) { showToast('刪除失敗:'+error.message, 'error'); return; }
   }
   await db.from('approval_requests').update({ status:'approved', reviewed_at: new Date().toISOString() }).eq('id', id);
   showToast('✅ 已核准');
@@ -24555,7 +24571,68 @@ async function modalCalEvent(existing=null) {
       </div>
     </div>` : ''}
   `, [
-    ...(id ? [{ label:'刪除', onclick: async () => {
+    ...(id ? [{ label: _canEditCalEvent(existing) ? '刪除' : '🗑️ 送出刪除申請', onclick: async () => {
+      const canDel = _canEditCalEvent(existing);
+      // 非老闆:改為送審(calendar_delete)
+      if (!canDel) {
+        if (!existing?.template_id) {
+          if (!confirm(`送出刪除申請?\n「${existing?.title||'此事項'}」\n主管核准後才會真的刪除`)) return;
+          const { error } = await db.from('approval_requests').insert({
+            request_type: 'calendar_delete',
+            item_type: 'calendar_event',
+            item_id: id,
+            item_name: existing?.title || '行事曆事項',
+            current_data: { title: existing?.title, start_date: existing?.start_date },
+            change_data: { scope: 'one' },
+            note: '員工申請刪除',
+            status: 'pending',
+            requested_by: state.user?.id || null,
+          });
+          if (error) { showToast('送審失敗:'+error.message, 'error'); return; }
+          showToast('✅ 刪除申請已送出,等待主管審核');
+          closeModal(); return;
+        }
+        // 週期事項:員工也要選範圍才送審
+        closeModal();
+        showModal('刪除週期事項(需送審)', `
+          <div style="font-size:13px;color:var(--muted);margin-bottom:14px">「${existing.title}」是週期事項,請選擇要申請刪除的範圍(主管核准後生效):</div>
+          <div style="display:flex;flex-direction:column;gap:10px">
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:#fafafa">
+              <input type="radio" name="del-scope" value="one" checked style="margin-top:2px;accent-color:var(--danger)">
+              <div><div style="font-weight:600;font-size:13px">只刪除這一筆</div></div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:#fafafa">
+              <input type="radio" name="del-scope" value="future" style="margin-top:2px;accent-color:var(--danger)">
+              <div><div style="font-weight:600;font-size:13px">此筆及之後所有</div></div>
+            </label>
+            <label style="display:flex;align-items:flex-start;gap:10px;padding:12px;border:1px solid var(--border);border-radius:8px;cursor:pointer;background:#fff5f5">
+              <input type="radio" name="del-scope" value="all" style="margin-top:2px;accent-color:var(--danger)">
+              <div><div style="font-weight:600;font-size:13px;color:var(--danger)">全部週期事項</div></div>
+            </label>
+          </div>
+        `, [
+          { label:'送出刪除申請', primary: true, onclick: async () => {
+            const scope = document.querySelector('input[name="del-scope"]:checked')?.value || 'one';
+            const { error } = await db.from('approval_requests').insert({
+              request_type: 'calendar_delete',
+              item_type: 'calendar_event',
+              item_id: id,
+              item_name: existing?.title || '行事曆事項',
+              current_data: { title: existing?.title, start_date: existing?.start_date, template_id: existing?.template_id },
+              change_data: { scope, template_id: existing?.template_id, start_date: existing?.start_date },
+              note: `員工申請刪除週期事項(範圍:${scope})`,
+              status: 'pending',
+              requested_by: state.user?.id || null,
+            });
+            if (error) { showToast('送審失敗:'+error.message, 'error'); return; }
+            showToast('✅ 刪除申請已送出,等待主管審核');
+            closeModal();
+          }},
+          { label:'取消', onclick: closeModal },
+        ]);
+        return;
+      }
+      // 老闆:原本的直接刪除流程
       if (!existing?.template_id) {
         // 非週期事項：直接確認刪除
         if (!confirm('確定刪除此事項？')) return;
@@ -25273,10 +25350,10 @@ window.calViewEvent = async function(id) {
         modalCalEvent({ ...ev, _prefill: true, id: null, start_date: _localToday(), end_date: _localToday() });
       }
     },
-    { label: canEdit ? '編輯' : '🔒 需主管審核', onclick: () => {
+    { label: canEdit ? '編輯' : '✏️ 編輯（送審）', onclick: () => {
         if (!canEdit) {
-          showToast('修改既有事項需主管 蔡采玲 審核（新增不受限）', 'error');
-          return;
+          // 員工可以開啟編輯 modal，存檔時會自動送審給主管
+          showToast('您的修改將送主管 蔡采玲 審核', 'info');
         }
         closeModal();
         if (ev.template_id) {
