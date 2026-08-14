@@ -25443,6 +25443,42 @@ function _modalHasForm() {
   return !!(slot && slot.querySelector('input:not([type="hidden"]), select, textarea'));
 }
 
+// 打開 modal 時記錄所有欄位的原始值,關閉時用來比對是否真的有改
+function _snapshotModalForm() {
+  const slot = document.getElementById('modal-body-slot');
+  if (!slot) return {};
+  const snap = {};
+  slot.querySelectorAll('input:not([type="hidden"]), select, textarea').forEach((el, i) => {
+    const key = el.id || el.name || `__idx${i}`;
+    snap[key] = (el.type === 'checkbox' || el.type === 'radio') ? el.checked : (el.value ?? '');
+  });
+  return snap;
+}
+// 比對現況跟 snapshot 是否有改
+function _modalHasChanges(snap) {
+  const slot = document.getElementById('modal-body-slot');
+  if (!slot || !snap) return false;
+  const els = slot.querySelectorAll('input:not([type="hidden"]), select, textarea');
+  let i = 0;
+  for (const el of els) {
+    const key = el.id || el.name || `__idx${i}`;
+    const cur = (el.type === 'checkbox' || el.type === 'radio') ? el.checked : (el.value ?? '');
+    if (!(key in snap)) {
+      // 動態新增的欄位:非空/被勾就算改動
+      if (cur !== '' && cur !== false && cur !== 0) return true;
+    } else if (snap[key] !== cur) {
+      return true;
+    }
+    i++;
+  }
+  // 檢查是否有欄位被刪除(如動態列表被刪 row)
+  const currentKeys = new Set(Array.from(els).map((el, idx) => el.id || el.name || `__idx${idx}`));
+  for (const k of Object.keys(snap)) {
+    if (!currentKeys.has(k) && snap[k] !== '' && snap[k] !== false && snap[k] !== 0) return true;
+  }
+  return false;
+}
+
 // ── 將核心函式掛到 window，讓 HTML inline onclick 可以呼叫 ──
 window.closeModal    = closeModal;
 window.db            = db;
@@ -25479,8 +25515,12 @@ function showModal(title, body, footer = '', opts = {}) {
   if (body instanceof Element) {
     overlay.querySelector('#modal-body-slot').appendChild(body);
   }
+  // 拍照原始值(等 DOM 完全建構),之後用來判斷是否真的有改動
+  let _initialSnap = null;
+  setTimeout(() => { _initialSnap = _snapshotModalForm(); }, 0);
   const _tryClose = () => {
-    if (_modalHasForm()) {
+    // 只在「真的有改動」時才跳提醒;無改動 or 無欄位 → 直接關
+    if (_initialSnap && _modalHasChanges(_initialSnap)) {
       _confirmLeave(() => overlay.remove());
     } else {
       overlay.remove();
