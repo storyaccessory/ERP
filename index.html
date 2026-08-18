@@ -5988,7 +5988,9 @@ async function modalNewProductRestock() {
         ${state.data._productRestockRows.map((r, i) => {
           const pt = products.find(p=>p.id===r.product_id);
           const label = pt ? pt.name : '';
-          const hasRingSizes = pt?.available_ring_sizes && pt.available_ring_sizes.trim();
+          // 戒指判斷:名稱含「戒指」或商品有設 available_ring_sizes
+          const isRing = pt && ((pt.name||'').includes('戒指') || (pt.available_ring_sizes||'').trim());
+          const ringRange = (pt?.available_ring_sizes||'').trim() || '9-18';
           return `<tr id="pr-row-${i}">
             <td style="padding:4px 6px">
               <div style="position:relative">
