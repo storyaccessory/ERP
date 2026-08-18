@@ -5994,10 +5994,10 @@ async function modalNewProductRestock() {
                 <input type="hidden" id="pr-id-${i}" value="${r.product_id||''}">
                 <div id="pr-drop-${i}" style="display:none;position:absolute;z-index:200;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.12)"></div>
                 ${isRing ? `<div style="margin-top:3px;display:flex;align-items:center;gap:4px">
-                  <span style="font-size:11px;color:#00695c">💍 戒圍:</span>
-                  <input type="number" class="form-control" id="pr-size-${i}" value="${r.ring_size||''}" min="6" max="24" placeholder="號"
+                  <span style="font-size:11px;color:#00695c;font-weight:600">💍 戒圍 <span style="color:var(--danger)">*</span>:</span>
+                  <input type="number" class="form-control" id="pr-size-${i}" value="${r.ring_size||''}" min="6" max="24" placeholder="必填"
                     title="可下戒圍:${ringRange}"
-                    style="width:65px;font-size:11px;padding:2px 6px;text-align:center;background:#e8f5f4"
+                    style="width:65px;font-size:11px;padding:2px 6px;text-align:center;background:${r.ring_size?'#e8f5f4':'#ffebee'};border:1px solid ${r.ring_size?'#b2dfdb':'#ef9a9a'}"
                     oninput="prRowRingSize(${i},this.value)">
                   <span style="font-size:10px;color:var(--muted)">(${ringRange})</span>
                 </div>` : ''}
@@ -6177,6 +6177,17 @@ async function modalNewProductRestock() {
       // 必填驗證：申請量、現有庫存、欠客數量
       const missing = filled.filter(r => !r.qty || r.current_stock==='' || r.current_stock===null || r.owed_qty==='' || r.owed_qty===null);
       if (missing.length) { showToast(`請填寫所有商品的申請量、現有庫存、欠客數量`, 'error'); return; }
+      // 戒指必填戒圍
+      const missingSize = filled.filter(r => {
+        const p = products.find(x => x.id === r.product_id);
+        const isRing = p && ((p.name||'').includes('戒指') || (p.available_ring_sizes||'').trim());
+        return isRing && (!r.ring_size || r.ring_size === '');
+      });
+      if (missingSize.length) {
+        const names = missingSize.map(r => products.find(x=>x.id===r.product_id)?.name || '').filter(Boolean).join('、');
+        showToast(`戒指商品必須填戒圍:${names}`, 'error', 5000);
+        return;
+      }
 
       const type = document.querySelector('input[name="pr-type"]:checked')?.value || 'restock';
       const projName = document.getElementById('pr-project-name')?.value.trim() || '';
