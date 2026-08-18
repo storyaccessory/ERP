@@ -2720,13 +2720,6 @@ async function modalProduct(productId = null) {
         <input class="form-control" id="pm-ring-size" value="${product?.ring_size||''}" placeholder="例：#9、#11" style="display:none">
       </div>
     </div>
-    <div class="form-row form-row-1">
-      <div class="form-group">
-        <label>💍 可下戒圍 <span style="font-size:11px;color:var(--muted);font-weight:400">(戒指才填,留白代表非戒指)</span></label>
-        <input class="form-control" id="pm-ring-sizes" value="${product?.available_ring_sizes||''}" placeholder="例:9-18 / 9,10 / 9,11,13">
-        <div style="font-size:11px;color:var(--muted);margin-top:4px">範圍用 9-18,跳號用逗號 9,10,11;下單時客服會依此顯示可選戒圍</div>
-      </div>
-    </div>
     <div class="form-row form-row-2">
       <div class="form-group"><label>官網連結</label><input class="form-control" id="pm-shop-url" value="${product?.shop_url||''}" placeholder="例:https://storyplus.com.tw/products/..."></div>
       <div class="form-group">
@@ -3375,7 +3368,6 @@ async function saveProduct(productId) {
     size: document.getElementById('pm-size').value.trim() || null,
     chain_length: document.getElementById('pm-chain-length')?.style.display!=='none' ? (document.getElementById('pm-chain-length').value.trim()||null) : null,
     ring_size: document.getElementById('pm-ring-size')?.style.display!=='none' ? (document.getElementById('pm-ring-size').value.trim()||null) : null,
-    available_ring_sizes: document.getElementById('pm-ring-sizes')?.value.trim() || null,
     shop_url: document.getElementById('pm-shop-url').value.trim() || null,
     packaging: document.getElementById('pm-packaging')?.value.trim() || null,
     material: document.getElementById('pm-material')?.value.trim() || null,
