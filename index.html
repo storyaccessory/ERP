@@ -9765,9 +9765,9 @@ window.modalNewCastingRestock = async function modalNewCastingRestock() {
                 <option value="">— 選擇鑄件 —</option>
                 ${(state.data.castings||[]).map(c=>`<option value="${c.id}" ${it.casting_id===c.id?'selected':''}>${c.name}</option>`).join('')}
                </select>`
-            : `<span style="font-size:13px">${it.casting_name}</span>${(it.mold_yield||1)>1?`<span style="font-size:13px;color:var(--text);margin-left:2px">(${it.mold_yield})</span>`:''}`
+            : `<span style="font-size:13px">${(it.casting_name||'').replace(/_#[\d\-,]+/g,'').trim()}</span>${(it.mold_yield||1)>1?`<span style="font-size:13px;color:var(--text);margin-left:2px">(${it.mold_yield})</span>`:''}`
           }
-          ${it.ring_size!=null?`<span style="font-size:11px;background:#e8f5f4;color:#00695c;border-radius:3px;padding:1px 5px;margin-left:4px">戒 #${it.ring_size}</span>`:''}
+          ${it.item_type==='remelt' && it.remelt_size!=null ? `<span style="font-size:13px;color:#c62828;font-weight:700;margin-left:4px">_#${it.remelt_size}</span>` : ''}
         </td>
         <td style="text-align:center;font-size:12px">${isManual?'—':`${it.stock??'—'} / <strong>${it.safety_stock||'—'}</strong>`}</td>
         <td style="text-align:center;color:var(--danger);font-weight:700">${isManual?'—':`-${it.short_qty}`}</td>
@@ -9778,10 +9778,7 @@ window.modalNewCastingRestock = async function modalNewCastingRestock() {
           </select>
         </td>
         <td style="text-align:center">
-          ${it.item_type==='remelt'
-            ? `<input type="number" min="1" max="30" style="width:60px;font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;text-align:center" placeholder="#尺寸" value="${it.remelt_size||''}" oninput="restockDraftRemeltSize(${i},this.value)">`
-            : `<input type="number" min="1" style="width:56px;font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;text-align:center" value="${it.wax_qty||1}" oninput="restockDraftWax(${i},this.value)"> 支${(it.mold_yield||1)>1?`<div style="font-size:11px;color:var(--success);margin-top:2px;font-weight:600">= ${(it.wax_qty||1) * (it.mold_yield||1)} 件</div>`:''}`
-          }
+          <input type="number" min="1" style="width:56px;font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;text-align:center" value="${it.wax_qty||1}" oninput="restockDraftWax(${i},this.value)"> 支${(it.mold_yield||1)>1?`<div style="font-size:11px;color:var(--success);margin-top:2px;font-weight:600">= ${(it.wax_qty||1) * (it.mold_yield||1)} 件</div>`:''}
         </td>
         <td style="text-align:right;font-size:12px">${it.mold_fee?'$'+it.mold_fee:'—'}</td>
         <td>
@@ -9806,7 +9803,7 @@ window.modalNewCastingRestock = async function modalNewCastingRestock() {
         <th style="padding:6px 4px;text-align:center">在庫/安庫</th>
         <th style="padding:6px 4px;text-align:center">缺少</th>
         <th style="padding:6px 4px;text-align:center">類型</th>
-        <th style="padding:6px 4px;text-align:center">支臘/尺寸</th>
+        <th style="padding:6px 4px;text-align:center">數量</th>
         <th style="padding:6px 4px;text-align:right">模具工錢</th>
         <th style="padding:6px 4px">備註</th>
         <th style="padding:6px 4px;width:24px"></th>
@@ -9846,10 +9843,10 @@ window.modalNewCastingRestock = async function modalNewCastingRestock() {
       const draft = (state.data._restockDraft||[]).filter(it=>it.included);
       if (!draft.length) { showToast('請至少選取一筆','error'); return; }
 
-      // 改蠟項目需填尺寸
+      // 改蠟項目需填尺寸(通常已自動帶入)
       const remeltNeedSize = draft.filter(it=>it.item_type==='remelt'&&!it.remelt_size);
       if (remeltNeedSize.length) {
-        showToast(`請填寫改蠟目標尺寸：${remeltNeedSize.map(it=>it.casting_name).join('、')}`, 'error', 5000);
+        showToast(`改蠟項目缺目標尺寸:${remeltNeedSize.map(it=>it.casting_name).join('、')}`, 'error', 5000);
         return;
       }
 
@@ -9983,20 +9980,27 @@ window.restockDraftToggleAll = function(checked) {
   _redrawDraftTable();
 };
 window.restockDraftType = function(i, val) {
-  if (state.data._restockDraft?.[i]) state.data._restockDraft[i].item_type = val;
+  if (!state.data._restockDraft?.[i]) return;
   const it = state.data._restockDraft[i];
-  const row = document.getElementById(`rdi-${i}`);
-  if (!row) return;
-  const tds = row.querySelectorAll('td');
-  const sel = tds[4]?.querySelector('select');
-  const waxCell = tds[5];
-  if (sel) { sel.style.background = val==='remelt'?'#fff8e1':'#f0faf9'; sel.style.color = val==='remelt'?'#e65100':'#00695c'; }
-  if (waxCell) {
-    if (val === 'remelt') {
-      waxCell.innerHTML = `<input type="number" min="1" max="30" style="width:60px;font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;text-align:center" placeholder="#尺寸" value="${it.remelt_size||''}" oninput="restockDraftRemeltSize(${i},this.value)">`;
-    } else {
-      waxCell.innerHTML = `<input type="number" min="1" style="width:60px;font-size:12px;border:1px solid var(--border);border-radius:4px;padding:2px 4px;text-align:center" value="${it.wax_qty||1}" oninput="restockDraftWax(${i},this.value)"> 支`;
+  it.item_type = val;
+  if (val === 'remelt') {
+    // 沒有目標戒圍 → 手動輸入
+    if (!it.remelt_size) {
+      const size = prompt('請輸入改蠟目標戒圍(數字):');
+      const n = parseInt(size);
+      if (isNaN(n)) { it.item_type = 'wax'; return; }
+      it.remelt_size = n;
+      it.note = `⚠️ 手動改蠟到 #${n}`;
     }
+  } else {
+    it.remelt_size = null;
+    it.note = '';
+  }
+  // 全表重繪(讓紅字戒圍在名稱後面出現/消失)
+  if (typeof _redrawDraftTable === 'function') _redrawDraftTable();
+  else if (typeof window._castingRestockRenderDraftTable === 'function') {
+    const wrap = document.getElementById('restock-draft-sections');
+    if (wrap) wrap.innerHTML = window._castingRestockRenderDraftTable();
   }
 };
 window.restockDraftWax = function(i, val) {
