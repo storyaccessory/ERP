@@ -9765,7 +9765,7 @@ window.modalNewCastingRestock = async function modalNewCastingRestock() {
                 <option value="">— 選擇鑄件 —</option>
                 ${(state.data.castings||[]).map(c=>`<option value="${c.id}" ${it.casting_id===c.id?'selected':''}>${c.name}</option>`).join('')}
                </select>`
-            : `<span style="font-size:13px">${(it.casting_name||'').replace(/_#[\d\-,]+/g,'').trim()}</span>${(it.mold_yield||1)>1?`<span style="font-size:13px;color:var(--text);margin-left:2px">(${it.mold_yield})</span>`:''}`
+            : `<span style="font-size:13px">${it.item_type==='remelt' ? (it.casting_name||'').replace(/_#[\d\-,]+/g,'').trim() : (it.casting_name||'')}</span>${(it.mold_yield||1)>1?`<span style="font-size:13px;color:var(--text);margin-left:2px">(${it.mold_yield})</span>`:''}`
           }
           ${it.item_type==='remelt' && it.remelt_size!=null ? `<span style="font-size:13px;color:#c62828;font-weight:700;margin-left:4px">_#${it.remelt_size}</span>` : ''}
         </td>
