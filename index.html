@@ -5484,10 +5484,11 @@ function renderRestock() {
               onclick="prStatusPopup(event,'${r.id}')">▾ ${r.status}</span>`
           : `<span class="tag ${SC[r.status]||'tag-grey'}" style="font-size:10px">${r.status}</span>`;
 
+        const ringSizeSuffix = it.ring_size ? `<span style="color:#00695c;font-weight:600">_#${it.ring_size}</span>` : '';
         return `<tr style="border-top:1px solid var(--border)">
           <td style="padding:7px 8px;max-width:270px">
             <div style="font-size:11px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${r.order_no||''}</div>
-            <div style="font-size:13px;word-break:break-all">${displayName}</div>
+            <div style="font-size:13px;word-break:break-all">${displayName}${ringSizeSuffix}</div>
           </td>
           <td style="padding:7px 4px;text-align:center">${statusTag}</td>
           <td style="padding:7px 2px;text-align:center">${qtyCell}</td>
