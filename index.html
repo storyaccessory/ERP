@@ -6423,40 +6423,46 @@ function autoGenerateCastingRestockItems() {
   const castings = state.data.castings || [];
   const products = state.data.products || [];
 
-  // ── 來源一：低於安全庫存的鑄件缺口 ──
-  // casting_id → { safetyShort }
-  const safetyShortMap = {};
+  // ── 複合鍵需求表:key = `${cid}::${itemType}::${targetSize||''}` ──
+  // value = { cid, itemType, targetSize, need, orderDetails, isSafety }
+  const needMap = {};
+  const composeKey = (cid, itemType, targetSize) => `${cid}::${itemType}::${targetSize==null?'':targetSize}`;
+  const addNeed = (cid, itemType, targetSize, lack, r, needQty) => {
+    if (lack <= 0) return;
+    const key = composeKey(cid, itemType, targetSize);
+    if (!needMap[key]) needMap[key] = { cid, itemType, targetSize: targetSize||null, need: 0, orderDetails: [], isSafety: false };
+    needMap[key].need += lack;
+    if (r?.order_no) {
+      const size = targetSize;
+      const detailLabel = size ? `${r.order_no}(#${size})` : r.order_no;
+      const existing = needMap[key].orderDetails.find(d => d.order_no === r.order_no);
+      if (existing) existing.qty += needQty;
+      else needMap[key].orderDetails.push({ order_no: r.order_no, qty: needQty });
+    }
+  };
+
+  // ── 來源一：低於安全庫存 → (cid, 'wax', null) ──
   castings.forEach(c => {
     const short = (c.safety_stock||0) - (c.stock||0);
-    if (short > 0) safetyShortMap[c.id] = short;
+    if (short > 0) {
+      const key = composeKey(c.id, 'wax', null);
+      if (!needMap[key]) needMap[key] = { cid: c.id, itemType: 'wax', targetSize: null, need: 0, orderDetails: [], isSafety: false };
+      needMap[key].need += short;
+      needMap[key].isSafety = true;
+    }
   });
 
-  // ── 來源二：抓料清單（待抓料/缺鑄件/缺零件）中欠的鑄件需求 ──
-  // casting_id → { need, orderDetails, forceRemelt?, forceTargetSize? }
-  const pickupNeedMap = {};
+  // ── 來源二：抓料清單 ──
   const restockOrders = (state.data.restock || []).filter(r => ['待抓料','缺鑄件','缺零件'].includes(r.status));
-
-  // 加需求 helper
-  const addPickupNeed = (cid, lack, r, need, forceRemelt = false, forceTargetSize = null) => {
-    if (!pickupNeedMap[cid]) pickupNeedMap[cid] = { need: 0, orderDetails: [], forceRemelt: false, forceTargetSize: null };
-    pickupNeedMap[cid].need += lack;
-    if (forceRemelt) {
-      pickupNeedMap[cid].forceRemelt = true;
-      pickupNeedMap[cid].forceTargetSize = forceTargetSize;
-    }
-    const existing = pickupNeedMap[cid].orderDetails.find(d => d.order_no === r.order_no);
-    if (existing) existing.qty += need;
-    else if (r.order_no) pickupNeedMap[cid].orderDetails.push({ order_no: r.order_no, qty: need });
-  };
 
   restockOrders.forEach(r => {
     (r.restock_order_items || []).forEach(it => {
       const qty = it.confirmed_qty ?? it.qty ?? 1;
-      const targetRingSize = it.ring_size;  // 補貨單指定的戒圍
+      const targetRingSize = it.ring_size;
       const product = products.find(p => p.id === it.product_id);
       const castingList = it.products?.product_castings || product?.product_castings || [];
 
-      // 分兩組:戒指模具(有 mold_sizes)、其他配件(無 mold_sizes、每個都要)
+      // 分兩組:戒指模具(有 mold_sizes)、其他配件
       const ringMolds = [];
       const alwaysComponents = [];
       castingList.forEach(pc => {
@@ -6468,86 +6474,69 @@ function autoGenerateCastingRestockItems() {
         else alwaysComponents.push({ pc, casting, cid });
       });
 
-      // ── 其他配件:每個都要 ──
+      // 其他配件:每個都要,加到 (cid, 'wax', null)
       alwaysComponents.forEach(({ pc, casting, cid }) => {
         const need = (pc.qty||1) * qty;
         const stock = casting.stock || 0;
         const lack = Math.max(0, need - stock);
-        if (lack > 0) addPickupNeed(cid, lack, r, need);
+        addNeed(cid, 'wax', null, lack, r, need);
       });
 
-      // ── 戒指模具:依戒圍擇一 ──
+      // 戒指模具:依戒圍擇一
       if (ringMolds.length > 0) {
         if (targetRingSize == null) {
-          // 沒指定戒圍 → 全部加入(向下相容,以前的資料)
+          // 沒戒圍 → 每個都加(舊資料相容)
           ringMolds.forEach(({ pc, casting, cid }) => {
             const need = (pc.qty||1) * qty;
             const stock = casting.stock || 0;
             const lack = Math.max(0, need - stock);
-            if (lack > 0) addPickupNeed(cid, lack, r, need);
+            addNeed(cid, 'wax', null, lack, r, need);
           });
         } else {
           // 找涵蓋此戒圍的模具
           let picked = ringMolds.find(({casting}) => window._moldCoversSize(casting.mold_sizes, targetRingSize) === true);
-          let needRemelt = false;
+          let itemType = 'wax';
+          let composedTargetSize = null;
           if (!picked) {
-            // 沒有直接涵蓋 → 找最接近的做改蠟
+            // 找最接近的做改蠟
             let bestDist = Infinity;
             ringMolds.forEach(rm => {
               const d = window._distToMoldRange(rm.casting.mold_sizes, targetRingSize);
               if (d < bestDist) { bestDist = d; picked = rm; }
             });
-            needRemelt = true;
+            itemType = 'remelt';
+            composedTargetSize = targetRingSize;
           }
           if (picked) {
             const { pc, casting, cid } = picked;
             const need = (pc.qty||1) * qty;
             const stock = casting.stock || 0;
             const lack = Math.max(0, need - stock);
-            if (lack > 0) addPickupNeed(cid, lack, r, need, needRemelt, needRemelt ? targetRingSize : null);
+            addNeed(cid, itemType, composedTargetSize, lack, r, need);
           }
         }
       }
     });
   });
 
-  // ── 合併兩來源，聯集所有需要補貨的鑄件 ──
-  const allIds = new Set([...Object.keys(safetyShortMap), ...Object.keys(pickupNeedMap)]);
-
+  // ── 建立 items 陣列(每個複合鍵一筆) ──
   const items = [];
-  allIds.forEach(cid => {
-    const c = castings.find(x => x.id === cid);
+  Object.values(needMap).forEach(n => {
+    const c = castings.find(x => x.id === n.cid);
     if (!c) return;
-
-    const safetyShort  = safetyShortMap[cid] || 0;
-    const pickupNeed   = pickupNeedMap[cid]?.need || 0;
-    const orderDetails = pickupNeedMap[cid]?.orderDetails || [];
-
-    // 總缺口 = 安全庫存缺口 + 抓料補貨欠數（兩者相加）
-    const short_qty = safetyShort + pickupNeed;
-
     const yield_ = c.mold_yield || 1;
-    const waxNeeded = Math.ceil(short_qty / yield_);
+    const waxNeeded = Math.ceil(n.need / yield_);
     const ringSize = parseRingSize(c.name);
 
-    // 備註不再自動填（由 renderDraftRow 動態顯示）
-
-    // 依「模具涵蓋戒圍」自動判斷是否需要改蠟
-    let autoType = 'wax';
-    let autoRemeltSize = null;
     let autoNote = '';
-    // 優先用補貨單指定的戒圍(forceRemelt)
-    const forceRemelt = pickupNeedMap[cid]?.forceRemelt;
-    const forceTargetSize = pickupNeedMap[cid]?.forceTargetSize;
-    if (forceRemelt && forceTargetSize != null) {
-      autoType = 'remelt';
-      autoRemeltSize = forceTargetSize;
-      autoNote = `⚠️ 目標戒圍 ${forceTargetSize} 不在模具範圍(${c.mold_sizes||'未設'}),自動改蠟`;
-    } else if (ringSize != null && c.mold_sizes) {
+    if (n.itemType === 'remelt' && n.targetSize != null) {
+      autoNote = `⚠️ 目標戒圍 ${n.targetSize} 不在模具範圍(${c.mold_sizes||'未設'}),自動改蠟`;
+    } else if (n.itemType === 'wax' && ringSize != null && c.mold_sizes) {
+      // 鑄件自身名稱有戒圍,但模具範圍不涵蓋 → 也標改蠟(維持舊行為)
       const covered = window._moldCoversSize(c.mold_sizes, ringSize);
       if (covered === false) {
-        autoType = 'remelt';
-        autoRemeltSize = ringSize;
+        n.itemType = 'remelt';
+        n.targetSize = ringSize;
         autoNote = `⚠️ 戒圍 ${ringSize} 不在模具範圍(${c.mold_sizes})`;
       }
     }
@@ -6560,24 +6549,29 @@ function autoGenerateCastingRestockItems() {
       ip_color: c.series?.ip_categories?.color || '#90a4ae',
       stock: c.stock || 0,
       safety_stock: c.safety_stock || 0,
-      short_qty,
-      safety_short:   safetyShort,
-      pickup_need:    pickupNeed,
-      order_details:  orderDetails,
+      short_qty: n.need,
+      safety_short: n.isSafety ? n.need : 0,
+      pickup_need: n.isSafety ? 0 : n.need,
+      order_details: n.orderDetails,
       mold_yield: yield_,
       wax_qty: waxNeeded,
       mold_fee: c.mold_fee || 0,
       ring_size: ringSize,
       mold_sizes: c.mold_sizes || null,
-      item_type: autoType,
-      remelt_size: autoRemeltSize,
+      item_type: n.itemType,
+      remelt_size: n.targetSize,
       note: autoNote,
       included: true,
     });
   });
 
-  // 依鑄件名稱排序
-  items.sort((a, b) => a.casting_name.localeCompare(b.casting_name, 'zh-TW'));
+  // 排序:先依鑄件名稱,再依 item_type(下臘先,改蠟後),再依目標戒圍
+  items.sort((a, b) => {
+    const n = a.casting_name.localeCompare(b.casting_name, 'zh-TW');
+    if (n !== 0) return n;
+    if (a.item_type !== b.item_type) return a.item_type === 'wax' ? -1 : 1;
+    return (a.remelt_size||0) - (b.remelt_size||0);
+  });
   return items;
 }
 
