@@ -824,8 +824,8 @@ async function loadProducts() {
   const [{ data }, { data: cats }, { data: castings }, { data: parts }] = await Promise.all([
     db.from('products').select(`*, ip_licenses(name), series(name, category_id, ip_categories(code, name)), categories(name), product_castings(qty, casting_id, castings(name, stock)), product_parts(qty, part_id, parts(name, spec, unit, stock, show_spec_in_product, category, shape))`).order('created_at', { ascending: false }),
     db.from('categories').select('*').order('name'),
-    db.from('castings').select('id, name, stock').order('name'),
-    db.from('parts').select('id, name, stock, unit, spec, category, shape, show_spec_in_product').order('name'),
+    db.from('castings').select('*, ip_licenses(name), series(name, category_id, ip_categories(code, name, color)), product_castings(qty, products(id, name, sku, status))').order('name'),
+    db.from('parts').select('*').order('name'),
   ]);
   state.data.products = data || [];
   state.data.categories = cats || [];
