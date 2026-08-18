@@ -6151,6 +6151,8 @@ async function modalNewProductRestock() {
       }
     }
     updateOrderNoPreview();
+    // 重繪 row 讓戒圍輸入框出現(若商品有 available_ring_sizes)
+    rerenderRows();
   };
   window.prRowQty = (i,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i].qty = parseInt(v)||1; };
   window.prRowRingSize = (i,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i].ring_size = v ? parseInt(v) : ''; };
