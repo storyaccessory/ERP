@@ -2720,6 +2720,13 @@ async function modalProduct(productId = null) {
         <input class="form-control" id="pm-ring-size" value="${product?.ring_size||''}" placeholder="例：#9、#11" style="display:none">
       </div>
     </div>
+    <div class="form-row form-row-1">
+      <div class="form-group">
+        <label>💍 可下戒圍 <span style="font-size:11px;color:var(--muted);font-weight:400">(戒指才填,留白代表非戒指)</span></label>
+        <input class="form-control" id="pm-ring-sizes" value="${product?.available_ring_sizes||''}" placeholder="例:9-18 / 9,10 / 9,11,13">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">範圍用 9-18,跳號用逗號 9,10,11;下單時客服會依此顯示可選戒圍</div>
+      </div>
+    </div>
     <div class="form-row form-row-2">
       <div class="form-group"><label>官網連結</label><input class="form-control" id="pm-shop-url" value="${product?.shop_url||''}" placeholder="例:https://storyplus.com.tw/products/..."></div>
       <div class="form-group">
@@ -3368,6 +3375,7 @@ async function saveProduct(productId) {
     size: document.getElementById('pm-size').value.trim() || null,
     chain_length: document.getElementById('pm-chain-length')?.style.display!=='none' ? (document.getElementById('pm-chain-length').value.trim()||null) : null,
     ring_size: document.getElementById('pm-ring-size')?.style.display!=='none' ? (document.getElementById('pm-ring-size').value.trim()||null) : null,
+    available_ring_sizes: document.getElementById('pm-ring-sizes')?.value.trim() || null,
     shop_url: document.getElementById('pm-shop-url').value.trim() || null,
     packaging: document.getElementById('pm-packaging')?.value.trim() || null,
     material: document.getElementById('pm-material')?.value.trim() || null,
@@ -4525,7 +4533,7 @@ async function modalEditCasting(id) {
       ${renderIPTreeForCasting(c)}
     </div>
 
-    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px">
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px">
       <div class="form-group">
         <label>品類</label>
         <select class="form-control" id="cs-type">
@@ -4535,6 +4543,11 @@ async function modalEditCasting(id) {
       <div class="form-group">
         <label>現有庫存</label>
         <input class="form-control" id="cs-stock" type="number" min="0" value="${c?.stock||0}">
+      </div>
+      <div class="form-group">
+        <label>💍 模具涵蓋戒圍 <span style="font-size:11px;color:var(--muted);font-weight:400">(戒指才填)</span></label>
+        <input class="form-control" id="cs-mold-sizes" value="${c?.mold_sizes||''}" placeholder="例:9 / 9,10 / 9-18">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">留白=非戒指;範圍用 9-18;跳號用 9,11,13</div>
       </div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr 1fr;gap:12px">
@@ -4714,6 +4727,7 @@ async function modalEditCasting(id) {
           unit_price:   newUnitPrice,
           mold_fee:     newMoldFee,
           mold_yield:   parseInt(document.getElementById('cs-mold-yield').value)||1,
+          mold_sizes:   document.getElementById('cs-mold-sizes')?.value.trim() || null,
           notes:        document.getElementById('cs-notes').value.trim()||null,
           ...costFields,
         };
@@ -4731,6 +4745,7 @@ async function modalEditCasting(id) {
           unit_price:   newUnitPrice,
           mold_fee:     newMoldFee,
           mold_yield:   parseInt(document.getElementById('cs-mold-yield').value)||1,
+          mold_sizes:   document.getElementById('cs-mold-sizes')?.value.trim() || null,
           notes:        document.getElementById('cs-notes').value.trim()||null,
           ...costFields,
         };
@@ -4897,6 +4912,10 @@ function modalViewCasting(castingId) {
         <div style="font-size:11px;color:var(--muted);margin-bottom:4px">庫存狀態</div>
         <span class="tag ${statusLabel[1]}" style="font-size:13px;padding:4px 10px">${statusLabel[0]}</span>
       </div>
+      ${c.mold_sizes ? `<div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:4px">💍 模具涵蓋戒圍</div>
+        <span class="tag tag-blue" style="font-size:13px;padding:4px 10px">${c.mold_sizes}</span>
+      </div>` : ''}
     </div>
 
     <!-- 庫存數量 + 工錢 + 補貨計算 -->
@@ -5930,7 +5949,7 @@ async function modalNewProductRestock() {
   const products = state.data.products || [];
 
   // 用 state 暫存動態新增的商品行
-  state.data._productRestockRows = [{ product_id: '', qty: 1, current_stock: '', owed_qty: '', pending_qty: '', note: '' }];
+  state.data._productRestockRows = [{ product_id: '', qty: 1, ring_size: '', current_stock: '', owed_qty: '', pending_qty: '', note: '' }];
 
   // 計算待製作數量 = 金工室尚未交件的數量
   // 條件：覆核通過 / 製作中 的補貨單，confirmed_qty - delivered_qty
@@ -5969,6 +5988,7 @@ async function modalNewProductRestock() {
         ${state.data._productRestockRows.map((r, i) => {
           const pt = products.find(p=>p.id===r.product_id);
           const label = pt ? pt.name : '';
+          const hasRingSizes = pt?.available_ring_sizes && pt.available_ring_sizes.trim();
           return `<tr id="pr-row-${i}">
             <td style="padding:4px 6px">
               <div style="position:relative">
@@ -5978,6 +5998,14 @@ async function modalNewProductRestock() {
                   style="font-size:12px">
                 <input type="hidden" id="pr-id-${i}" value="${r.product_id||''}">
                 <div id="pr-drop-${i}" style="display:none;position:absolute;z-index:200;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.12)"></div>
+                ${hasRingSizes ? `<div style="margin-top:3px;display:flex;align-items:center;gap:4px">
+                  <span style="font-size:11px;color:#00695c">💍 戒圍:</span>
+                  <input type="number" class="form-control" id="pr-size-${i}" value="${r.ring_size||''}" min="6" max="24" placeholder="號"
+                    title="可下戒圍:${pt.available_ring_sizes}"
+                    style="width:65px;font-size:11px;padding:2px 6px;text-align:center;background:#e8f5f4"
+                    oninput="prRowRingSize(${i},this.value)">
+                  <span style="font-size:10px;color:var(--muted)">(${pt.available_ring_sizes})</span>
+                </div>` : ''}
               </div>
             </td>
             <td style="padding:4px">
@@ -6125,6 +6153,7 @@ async function modalNewProductRestock() {
     updateOrderNoPreview();
   };
   window.prRowQty = (i,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i].qty = parseInt(v)||1; };
+  window.prRowRingSize = (i,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i].ring_size = v ? parseInt(v) : ''; };
   window.prRowField = (i,key,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i][key] = parseFloat(v)||0; };
   window.prRowNote = (i,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i].note = v; };
   window.prRowRemove = (i) => {
@@ -6177,6 +6206,7 @@ async function modalNewProductRestock() {
           restock_id: order.id,
           product_id: r.product_id,
           qty: r.qty||1,
+          ring_size: r.ring_size !== '' && r.ring_size != null ? parseInt(r.ring_size) : null,
           current_stock: r.current_stock!=='' ? (parseInt(r.current_stock)||0) : null,
           owed_qty: r.owed_qty!=='' ? (parseInt(r.owed_qty)||0) : null,
           prev_unfinished: r.pending_qty!=='' ? (parseInt(r.pending_qty)||0) : null,
@@ -6332,6 +6362,51 @@ function parseRingSize(name) {
 }
 
 // 從商品缺貨需求自動產生鑄件補貨明細
+// ── 模具涵蓋戒圍 helper ──
+// mold_sizes 格式:'9' / '9,10' / '9-18' / '9,11,13-15'
+// 回傳:某戒圍是否在模具範圍內
+window._moldCoversSize = function(moldSizes, targetSize) {
+  if (!moldSizes || targetSize == null) return null;  // 沒填模具範圍 → 未知
+  const target = parseInt(targetSize);
+  if (isNaN(target)) return null;
+  const parts = String(moldSizes).split(/[,、]/).map(s => s.trim()).filter(Boolean);
+  for (const p of parts) {
+    if (p.includes('-')) {
+      const [a, b] = p.split('-').map(x => parseInt(x.trim()));
+      if (!isNaN(a) && !isNaN(b) && target >= Math.min(a,b) && target <= Math.max(a,b)) return true;
+    } else {
+      const n = parseInt(p);
+      if (!isNaN(n) && n === target) return true;
+    }
+  }
+  return false;
+};
+
+// 計算某戒圍與模具範圍的距離(用於挑最接近的模具做改蠟)
+window._distToMoldRange = function(moldSizes, targetSize) {
+  if (!moldSizes || targetSize == null) return Infinity;
+  const target = parseInt(targetSize);
+  if (isNaN(target)) return Infinity;
+  let minDist = Infinity;
+  String(moldSizes).split(/[,、]/).map(s => s.trim()).filter(Boolean).forEach(p => {
+    if (p.includes('-')) {
+      const [a, b] = p.split('-').map(x => parseInt(x.trim()));
+      if (!isNaN(a) && !isNaN(b)) {
+        const lo = Math.min(a,b), hi = Math.max(a,b);
+        const d = target < lo ? (lo - target) : (target > hi ? (target - hi) : 0);
+        if (d < minDist) minDist = d;
+      }
+    } else {
+      const n = parseInt(p);
+      if (!isNaN(n)) {
+        const d = Math.abs(n - target);
+        if (d < minDist) minDist = d;
+      }
+    }
+  });
+  return minDist;
+};
+
 function autoGenerateCastingRestockItems() {
   const castings = state.data.castings || [];
   const products = state.data.products || [];
@@ -6345,28 +6420,82 @@ function autoGenerateCastingRestockItems() {
   });
 
   // ── 來源二：抓料清單（待抓料/缺鑄件/缺零件）中欠的鑄件需求 ──
-  // casting_id → { need: 總欠數, orderDetails: [{ order_no, lack }] }
+  // casting_id → { need, orderDetails, forceRemelt?, forceTargetSize? }
   const pickupNeedMap = {};
   const restockOrders = (state.data.restock || []).filter(r => ['待抓料','缺鑄件','缺零件'].includes(r.status));
+
+  // 加需求 helper
+  const addPickupNeed = (cid, lack, r, need, forceRemelt = false, forceTargetSize = null) => {
+    if (!pickupNeedMap[cid]) pickupNeedMap[cid] = { need: 0, orderDetails: [], forceRemelt: false, forceTargetSize: null };
+    pickupNeedMap[cid].need += lack;
+    if (forceRemelt) {
+      pickupNeedMap[cid].forceRemelt = true;
+      pickupNeedMap[cid].forceTargetSize = forceTargetSize;
+    }
+    const existing = pickupNeedMap[cid].orderDetails.find(d => d.order_no === r.order_no);
+    if (existing) existing.qty += need;
+    else if (r.order_no) pickupNeedMap[cid].orderDetails.push({ order_no: r.order_no, qty: need });
+  };
+
   restockOrders.forEach(r => {
     (r.restock_order_items || []).forEach(it => {
       const qty = it.confirmed_qty ?? it.qty ?? 1;
+      const targetRingSize = it.ring_size;  // 補貨單指定的戒圍
       const product = products.find(p => p.id === it.product_id);
       const castingList = it.products?.product_castings || product?.product_castings || [];
-      castingList.forEach(c => {
-        const cid = c.casting_id || c.castings?.id;
+
+      // 分兩組:戒指模具(有 mold_sizes)、其他配件(無 mold_sizes、每個都要)
+      const ringMolds = [];
+      const alwaysComponents = [];
+      castingList.forEach(pc => {
+        const cid = pc.casting_id || pc.castings?.id;
         if (!cid) return;
-        const need = (c.qty||1) * qty;   // 這張補貨單需要的鑄件數量
-        const stock = c.castings?.stock ?? castings.find(cs=>cs.id===cid)?.stock ?? 0;
-        const lack = Math.max(0, need - stock);  // 實際欠料（用來判斷要不要納入）
-        if (lack > 0) {
-          if (!pickupNeedMap[cid]) pickupNeedMap[cid] = { need: 0, orderDetails: [] };
-          pickupNeedMap[cid].need += lack;
-          const existing = pickupNeedMap[cid].orderDetails.find(d => d.order_no === r.order_no);
-          if (existing) existing.qty += need;  // 同一張單累加補貨需求量
-          else if (r.order_no) pickupNeedMap[cid].orderDetails.push({ order_no: r.order_no, qty: need });
-        }
+        const casting = castings.find(cs => cs.id === cid);
+        if (!casting) return;
+        if (casting.mold_sizes) ringMolds.push({ pc, casting, cid });
+        else alwaysComponents.push({ pc, casting, cid });
       });
+
+      // ── 其他配件:每個都要 ──
+      alwaysComponents.forEach(({ pc, casting, cid }) => {
+        const need = (pc.qty||1) * qty;
+        const stock = casting.stock || 0;
+        const lack = Math.max(0, need - stock);
+        if (lack > 0) addPickupNeed(cid, lack, r, need);
+      });
+
+      // ── 戒指模具:依戒圍擇一 ──
+      if (ringMolds.length > 0) {
+        if (targetRingSize == null) {
+          // 沒指定戒圍 → 全部加入(向下相容,以前的資料)
+          ringMolds.forEach(({ pc, casting, cid }) => {
+            const need = (pc.qty||1) * qty;
+            const stock = casting.stock || 0;
+            const lack = Math.max(0, need - stock);
+            if (lack > 0) addPickupNeed(cid, lack, r, need);
+          });
+        } else {
+          // 找涵蓋此戒圍的模具
+          let picked = ringMolds.find(({casting}) => window._moldCoversSize(casting.mold_sizes, targetRingSize) === true);
+          let needRemelt = false;
+          if (!picked) {
+            // 沒有直接涵蓋 → 找最接近的做改蠟
+            let bestDist = Infinity;
+            ringMolds.forEach(rm => {
+              const d = window._distToMoldRange(rm.casting.mold_sizes, targetRingSize);
+              if (d < bestDist) { bestDist = d; picked = rm; }
+            });
+            needRemelt = true;
+          }
+          if (picked) {
+            const { pc, casting, cid } = picked;
+            const need = (pc.qty||1) * qty;
+            const stock = casting.stock || 0;
+            const lack = Math.max(0, need - stock);
+            if (lack > 0) addPickupNeed(cid, lack, r, need, needRemelt, needRemelt ? targetRingSize : null);
+          }
+        }
+      }
     });
   });
 
@@ -6391,6 +6520,26 @@ function autoGenerateCastingRestockItems() {
 
     // 備註不再自動填（由 renderDraftRow 動態顯示）
 
+    // 依「模具涵蓋戒圍」自動判斷是否需要改蠟
+    let autoType = 'wax';
+    let autoRemeltSize = null;
+    let autoNote = '';
+    // 優先用補貨單指定的戒圍(forceRemelt)
+    const forceRemelt = pickupNeedMap[cid]?.forceRemelt;
+    const forceTargetSize = pickupNeedMap[cid]?.forceTargetSize;
+    if (forceRemelt && forceTargetSize != null) {
+      autoType = 'remelt';
+      autoRemeltSize = forceTargetSize;
+      autoNote = `⚠️ 目標戒圍 ${forceTargetSize} 不在模具範圍(${c.mold_sizes||'未設'}),自動改蠟`;
+    } else if (ringSize != null && c.mold_sizes) {
+      const covered = window._moldCoversSize(c.mold_sizes, ringSize);
+      if (covered === false) {
+        autoType = 'remelt';
+        autoRemeltSize = ringSize;
+        autoNote = `⚠️ 戒圍 ${ringSize} 不在模具範圍(${c.mold_sizes})`;
+      }
+    }
+
     items.push({
       casting_id: c.id,
       casting_name: c.name,
@@ -6402,14 +6551,15 @@ function autoGenerateCastingRestockItems() {
       short_qty,
       safety_short:   safetyShort,
       pickup_need:    pickupNeed,
-      order_details:  orderDetails,  // [{ order_no, lack }]
+      order_details:  orderDetails,
       mold_yield: yield_,
       wax_qty: waxNeeded,
       mold_fee: c.mold_fee || 0,
       ring_size: ringSize,
-      item_type: 'wax',
-      remelt_size: null,
-      note: '',
+      mold_sizes: c.mold_sizes || null,
+      item_type: autoType,
+      remelt_size: autoRemeltSize,
+      note: autoNote,
       included: true,
     });
   });
