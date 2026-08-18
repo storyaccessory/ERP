@@ -5998,14 +5998,17 @@ async function modalNewProductRestock() {
                   style="font-size:12px">
                 <input type="hidden" id="pr-id-${i}" value="${r.product_id||''}">
                 <div id="pr-drop-${i}" style="display:none;position:absolute;z-index:200;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:6px;max-height:180px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.12)"></div>
-                ${hasRingSizes ? `<div style="margin-top:3px;display:flex;align-items:center;gap:4px">
+                ${pt ? (hasRingSizes ? `<div style="margin-top:3px;display:flex;align-items:center;gap:4px">
                   <span style="font-size:11px;color:#00695c">💍 戒圍:</span>
                   <input type="number" class="form-control" id="pr-size-${i}" value="${r.ring_size||''}" min="6" max="24" placeholder="號"
                     title="可下戒圍:${pt.available_ring_sizes}"
                     style="width:65px;font-size:11px;padding:2px 6px;text-align:center;background:#e8f5f4"
                     oninput="prRowRingSize(${i},this.value)">
                   <span style="font-size:10px;color:var(--muted)">(${pt.available_ring_sizes})</span>
-                </div>` : ''}
+                </div>` : ((pt.name||'').includes('戒指') ? `<div style="margin-top:3px;padding:3px 6px;background:#fff8e1;border:1px dashed #ffc107;border-radius:4px;font-size:10px;color:#e65100">
+                  ⚠️ 此戒指尚未設定「可下戒圍」,無法選尺寸<br>
+                  <span style="text-decoration:underline;cursor:pointer" onclick="prOpenProductEdit('${pt.id}')">→ 點此去商品編輯設定</span>
+                </div>` : '')) : ''}
               </div>
             </td>
             <td style="padding:4px">
@@ -6156,6 +6159,10 @@ async function modalNewProductRestock() {
   };
   window.prRowQty = (i,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i].qty = parseInt(v)||1; };
   window.prRowRingSize = (i,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i].ring_size = v ? parseInt(v) : ''; };
+  window.prOpenProductEdit = (pid) => {
+    closeModal();
+    setTimeout(() => { if (typeof modalProduct === 'function') modalProduct(pid); }, 100);
+  };
   window.prRowField = (i,key,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i][key] = parseFloat(v)||0; };
   window.prRowNote = (i,v) => { if(state.data._productRestockRows[i]) state.data._productRestockRows[i].note = v; };
   window.prRowRemove = (i) => {
