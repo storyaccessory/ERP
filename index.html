@@ -22545,7 +22545,25 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
         window._peCvsFile = null; window._peCvsType = null;
       }
 
-      const payload = {
+      // 若不是編輯模式,或日期被 AI 改了,先查 DB 該日是否已有紀錄
+      let targetExisting = existing;
+      if (!targetExisting || targetExisting.date !== date) {
+        const { data: byDate } = await db.from('postage_expenses').select('*').eq('date', date).maybeSingle();
+        if (byDate) targetExisting = byDate;
+      }
+
+      // 合併邏輯:如果該日已有紀錄,只覆蓋有值的欄位(避免清空原本資料)
+      const payload = targetExisting ? {
+        date,
+        cash_received: cash || targetExisting.cash_received || 0,
+        postal_amount: postal || targetExisting.postal_amount || 0,
+        familymart_invoice: fmInv || targetExisting.familymart_invoice || null,
+        familymart_amount: fmAmt || targetExisting.familymart_amount || 0,
+        familymart_image_url: fmUrl || targetExisting.familymart_image_url || null,
+        seveneleven_invoice: s11Inv || targetExisting.seveneleven_invoice || null,
+        seveneleven_amount: s11Amt || targetExisting.seveneleven_amount || 0,
+        seveneleven_image_url: s11Url || targetExisting.seveneleven_image_url || null,
+      } : {
         date, cash_received: cash, postal_amount: postal,
         familymart_invoice: fmInv||null, familymart_amount: fmAmt,
         familymart_image_url: fmUrl,
@@ -22553,15 +22571,15 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
         seveneleven_image_url: s11Url,
       };
       let dbErr;
-      if (existing) {
-        const { error } = await db.from('postage_expenses').update(payload).eq('id', existing.id);
+      if (targetExisting) {
+        const { error } = await db.from('postage_expenses').update(payload).eq('id', targetExisting.id);
         dbErr = error;
       } else {
         const { error } = await db.from('postage_expenses').insert(payload);
         dbErr = error;
       }
       if (dbErr) { showToast('儲存失敗：'+dbErr.message, 'error'); return; }
-      showToast(existing?'已更新':'已新增'); closeModal(); await loadPostage(); renderApp();
+      showToast(targetExisting?'已合併更新':'已新增'); closeModal(); await loadPostage(); renderApp();
     }},
     { label:'取消', onclick: closeModal },
   ]);
