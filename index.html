@@ -22378,6 +22378,7 @@ function renderPostage() {
       records.forEach(r => { recMap[r.date] = r; });
 
       const DAY_ZH = ['日','一','二','三','四','五','六'];
+      let runningBalance = 0;
       const rows = Array.from({length: daysInMonth}, (_, i) => {
         const day = i + 1;
         const dateStr = `${ym}-${String(day).padStart(2,'0')}`;
@@ -22387,11 +22388,18 @@ function renderPostage() {
         const r = recMap[dateStr];
         const isPast = dateStr < today || (dateStr === today);
         const isFuture = dateStr > today;
+        const cashIn = r?.cash_received || 0;
         const expense = r ? ((r.postal_amount||0)+(r.familymart_amount||0)+(r.seveneleven_amount||0)) : 0;
+        // 累計餘額(當日結束後剩多少零用金)
+        runningBalance += cashIn - expense;
+        const balColor = runningBalance < 0 ? '#c62828' : (runningBalance < 200 ? '#f57c00' : '#2e7d32');
+        const balBg = runningBalance < 0 ? '#ffebee' : (runningBalance < 200 ? '#fff8e1' : '#e8f5e9');
         // 未填提示(當月已過的天且無記錄)
         const isMissing = !r && isPast && !isFuture && !isWeekend;
         const rowBg = isFuture ? '#fafafa' : (isMissing ? '#fff3e0' : (isWeekend ? '#f9f9f9' : '#fff'));
         const dateColor = isWeekend ? '#e57373' : 'var(--text)';
+        // 未來的天不顯示餘額
+        const showBal = !isFuture && (r || runningBalance !== 0);
 
         return `<tr style="background:${rowBg}">
           <td style="padding:5px 8px;border:1px solid var(--border);white-space:nowrap;font-weight:600;color:${dateColor}">
@@ -22404,7 +22412,7 @@ function renderPostage() {
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#388e3c;font-weight:${r?.familymart_amount?'700':'400'}">${r?.familymart_amount ? r.familymart_amount.toLocaleString() : '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:center;font-family:monospace;font-size:11px;color:#f57c00">${r?.seveneleven_invoice || '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#f57c00;font-weight:${r?.seveneleven_amount?'700':'400'}">${r?.seveneleven_amount ? r.seveneleven_amount.toLocaleString() : '—'}</td>
-          <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#6a1b9a;font-weight:${expense?'700':'400'};background:${expense?'#f3e5f5':''}">${expense ? expense.toLocaleString() : '—'}</td>
+          <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:${balColor};font-weight:700;background:${showBal?balBg:''}" title="累計取現 − 累計支出">${showBal ? runningBalance.toLocaleString() : '—'}</td>
           <td style="padding:3px 4px;border:1px solid var(--border);text-align:center;white-space:nowrap">
             ${r ? `<button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#e3f2fd;color:#1565c0;border:none;border-radius:4px;cursor:pointer" onclick="window.modalAddPostage('${r.id}')">編輯</button>
                   <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#ffebee;color:#c62828;border:none;border-radius:4px;cursor:pointer;margin-left:2px" onclick="window.deletePostage('${r.id}')">🗑</button>
@@ -22426,7 +22434,7 @@ function renderPostage() {
                 <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#388e3c;min-width:80px">全家 $</th>
                 <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#f57c00;min-width:110px">🟠 7-11 發票</th>
                 <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#f57c00;min-width:80px">7-11 $</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#6a1b9a;background:#f3e5f5;min-width:90px">當日合計</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#2e7d32;background:#e8f5e9;min-width:90px" title="累計取現 − 累計支出 = 當日結束時零用金剩餘">💰 剩餘餘額</th>
                 <th style="padding:6px;border:1px solid var(--border);text-align:center;min-width:120px">操作</th>
               </tr>
             </thead>
@@ -22440,8 +22448,8 @@ function renderPostage() {
                 <td style="padding:6px;border:1px solid var(--border);text-align:right;color:#388e3c">${totalFM.toLocaleString()}</td>
                 <td style="padding:6px;border:1px solid var(--border)"></td>
                 <td style="padding:6px;border:1px solid var(--border);text-align:right;color:#f57c00">${total711.toLocaleString()}</td>
-                <td style="padding:6px;border:1px solid var(--border);text-align:right;color:#6a1b9a;background:#f3e5f5">${totalExpense.toLocaleString()}</td>
-                <td style="padding:6px;border:1px solid var(--border)"></td>
+                <td style="padding:6px;border:1px solid var(--border);text-align:right;color:${balance<0?'#c62828':'#2e7d32'};background:${balance<0?'#ffebee':'#e8f5e9'};font-size:14px" title="月底剩餘 = 總取現 ${totalCash.toLocaleString()} − 總支出 ${totalExpense.toLocaleString()}">${balance.toLocaleString()}</td>
+                <td style="padding:6px;border:1px solid var(--border);font-size:11px;color:var(--muted)">總支出 ${totalExpense.toLocaleString()}</td>
               </tr>
             </tfoot>
           </table>
