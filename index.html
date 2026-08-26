@@ -22349,8 +22349,13 @@ function renderPostage() {
       <span style="font-weight:700;font-size:15px">${year} 年 ${mon} 月</span>
       <button class="btn btn-outline btn-sm" onclick="window.postageNavTo('${nextYm}')">下月 ›</button>
       <button class="btn btn-outline btn-sm" onclick="window.postageNavTo('${_localToday().slice(0,7)}')">本月</button>
-      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.modalAddPostage()">+ 新增支出</button>
+      <label class="btn btn-sm" style="margin-left:auto;background:linear-gradient(135deg,#4CAF50,#FF9800);color:#fff;border:none;cursor:pointer;font-weight:700;padding:6px 14px">
+        📷 快速拍發票 (自動判斷日期+店家)
+        <input type="file" accept="image/*" capture="environment" style="display:none" onchange="window._peQuickCapture(this)">
+      </label>
+      <button class="btn btn-primary btn-sm" onclick="window.modalAddPostage()">+ 手動新增</button>
     </div>
+    <div id="pe-quick-status" style="display:none;padding:8px 12px;border-radius:6px;font-size:13px;margin-bottom:12px"></div>
 
     <!-- 月統計 -->
     <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:10px;margin-bottom:16px">
@@ -22563,6 +22568,112 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
 // ── 舊 _peOCR 保留(相容),新增 _peSmartOCR:AI 自動判斷店家 ──
 window._peOCR = async function(input, type) {
   // (舊功能保留 for backward compat,實務用 _peSmartOCR)
+};
+
+// ── 快速拍照(頁面級):AI 判斷日期+店家+金額 → 自動塞到對應天 ──
+window._peQuickCapture = async function(input) {
+  const file = input.files[0];
+  if (!file) return;
+  input.value = ''; // 讓下次選同一個檔也能觸發
+  const statusEl = document.getElementById('pe-quick-status');
+  const setStatus = (bg, color, txt) => {
+    if (!statusEl) return;
+    statusEl.style.display = 'block';
+    statusEl.style.background = bg; statusEl.style.color = color; statusEl.innerHTML = txt;
+  };
+  setStatus('#e3f2fd', '#1565c0', '⏳ 壓縮中…');
+  const compressed = await window._compressImage(file, 50);
+
+  if (typeof getClaudeApiKey !== 'function' || !getClaudeApiKey()) {
+    setStatus('#fff8e1', '#e65100', '⚠️ 未設定 Claude API Key,請至系統設定 → AI 設定');
+    return;
+  }
+  setStatus('#e3f2fd', '#1565c0', '🤖 AI 辨識中…');
+
+  const prompt = `這是一張台灣超商發票照片。請抽取:
+1. 日期(YYYY-MM-DD)
+2. 店家:「全家」或「7-11」
+3. 發票號碼(含 - 例:CK-33441725)
+4. 金額(數字)
+
+判斷技巧:
+- 全家發票號前綴常見:AG/CK/CJ/AA
+- 7-11發票號前綴常見:AT/CW/AB/BA
+- 日期通常在收據上方,格式可能為 2026/08/15 或 115/08/15(民國)或 2026-08-15
+
+回傳 JSON(僅 JSON,無其他文字):
+{"date":"YYYY-MM-DD","store":"全家" 或 "7-11","invoice_no":"...","amount":數字}
+無法辨識的欄位回 null`;
+
+  try {
+    const resp = await callClaudeVision(compressed, prompt);
+    const jsonMatch = (resp || '').match(/\{[\s\S]*?\}/);
+    if (!jsonMatch) throw new Error('AI 回傳非 JSON');
+    let parsed = JSON.parse(jsonMatch[0]);
+    console.log('[快速拍照辨識]', parsed);
+
+    // 民國轉西元
+    if (parsed.date && parsed.date.length === 8 && parsed.date[0] === '1') {
+      const y = parseInt(parsed.date.slice(0,3)) + 1911;
+      parsed.date = `${y}-${parsed.date.slice(3,5)}-${parsed.date.slice(5,7)}`;
+    }
+    if (parsed.date && parsed.date.includes('/')) parsed.date = parsed.date.replace(/\//g,'-');
+    if (parsed.date && !/^\d{4}-\d{2}-\d{2}$/.test(parsed.date)) parsed.date = null;
+
+    if (!parsed.store || !parsed.date) {
+      setStatus('#ffebee', '#c62828',
+        `❌ 辨識失敗(店家:${parsed.store||'?'},日期:${parsed.date||'?'})— 請手動輸入`);
+      return;
+    }
+
+    const isFM = parsed.store.includes('全家') || parsed.store.toLowerCase().includes('family');
+    const side = isFM ? 'fm' : '711';
+
+    // 上傳圖片
+    const filename = `${parsed.date}_${side}_${Date.now()}.jpg`;
+    const { error: upErr } = await db.storage.from('postage-invoices').upload(filename, compressed, { contentType:'image/jpeg', upsert:true });
+    let imgUrl = null;
+    if (!upErr) {
+      const { data: urlData } = db.storage.from('postage-invoices').getPublicUrl(filename);
+      imgUrl = urlData?.publicUrl || null;
+    }
+
+    // 查詢當日 record
+    const { data: existing } = await db.from('postage_expenses').select('*').eq('date', parsed.date).maybeSingle();
+
+    const upd = {};
+    if (isFM) {
+      upd.familymart_invoice = parsed.invoice_no || null;
+      upd.familymart_amount = (existing?.familymart_amount || 0) + (parsed.amount || 0);
+      if (imgUrl) upd.familymart_image_url = imgUrl;
+    } else {
+      upd.seveneleven_invoice = parsed.invoice_no || null;
+      upd.seveneleven_amount = (existing?.seveneleven_amount || 0) + (parsed.amount || 0);
+      if (imgUrl) upd.seveneleven_image_url = imgUrl;
+    }
+
+    if (existing) {
+      await db.from('postage_expenses').update(upd).eq('id', existing.id);
+    } else {
+      await db.from('postage_expenses').insert({ date: parsed.date, ...upd });
+    }
+
+    setStatus('#e8f5e9', '#2e7d32',
+      `✅ 已寫入 <b>${parsed.date}</b> · ${isFM?'🟢 全家':'🟠 7-11'} · ${parsed.invoice_no||'—'} · $${(parsed.amount||0).toLocaleString()}`);
+
+    // 若不在當月,提示可跳過去
+    const ym = parsed.date.slice(0,7);
+    const curYm = (state.data.postage?.ym) || _localToday().slice(0,7);
+    if (ym !== curYm) {
+      const s2 = statusEl.innerHTML;
+      statusEl.innerHTML = s2 + ` <a href="#" style="color:#1565c0;text-decoration:underline;margin-left:8px" onclick="event.preventDefault();window.postageNavTo('${ym}')">→ 跳到 ${ym.replace('-','年')}月</a>`;
+    } else {
+      await loadPostage(); renderApp();
+    }
+  } catch (err) {
+    console.error(err);
+    setStatus('#ffebee', '#c62828', `❌ 辨識失敗:${err.message}`);
+  }
 };
 
 window._peSmartOCR = async function(input) {
