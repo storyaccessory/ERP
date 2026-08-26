@@ -1465,8 +1465,8 @@ function renderSidebar() {
 
   const secColors = { '業務追蹤':'#42a5f5','商品管理':'#ab47bc','製作部':'#ffa726','物料管理':'#26a69a','行銷':'#f472b6','財務':'#66bb6a','系統':'#90a4ae' };
   const secOrder = getNavOrder();
-  // 確保有新的 section 也能顯示（包含行銷）
-  ['業務追蹤','商品管理','製作部','物料管理','財務','系統'].forEach(s => {
+  // 確保所有 section 都被列入(避免舊 localStorage 順序漏掉新加的 section)
+  ['業務追蹤','行政客服','商品管理','製作部','物料管理','行銷','財務','系統'].forEach(s => {
     if (!secOrder.includes(s)) secOrder.push(s);
   });
 
