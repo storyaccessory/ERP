@@ -22019,8 +22019,8 @@ function renderShipments() {
   rows.forEach(r => { rowMap[r.date] = r; });
 
   // 月導航
-  const prevYm = (() => { const d = new Date(ym+'-01T00:00:00'); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
-  const nextYm = (() => { const d = new Date(ym+'-01T00:00:00'); d.setMonth(d.getMonth()+1); return d.toISOString().slice(0,7); })();
+  const prevYm = (() => { const d = new Date(ym+'-01T00:00:00'); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
+  const nextYm = (() => { const d = new Date(ym+'-01T00:00:00'); d.setMonth(d.getMonth()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
 
   // 月合計
   const colTotals = {};
@@ -22375,8 +22375,8 @@ function renderPostage() {
   const ym = pd.ym || _localToday().slice(0,7);
   const records = pd.records || [];
   const [year, mon] = ym.split('-').map(Number);
-  const prevYm = (() => { const d = new Date(ym+'-01T00:00:00'); d.setMonth(d.getMonth()-1); return d.toISOString().slice(0,7); })();
-  const nextYm = (() => { const d = new Date(ym+'-01T00:00:00'); d.setMonth(d.getMonth()+1); return d.toISOString().slice(0,7); })();
+  const prevYm = (() => { const d = new Date(ym+'-01T00:00:00'); d.setMonth(d.getMonth()-1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
+  const nextYm = (() => { const d = new Date(ym+'-01T00:00:00'); d.setMonth(d.getMonth()+1); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`; })();
 
   // 月統計
   const totalCash = records.reduce((s,r)=>s+(r.cash_received||0),0);
