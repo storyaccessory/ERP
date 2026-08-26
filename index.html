@@ -22418,43 +22418,42 @@ window.modalAddPostage = async function(editId = null) {
       <label>郵局支出</label>
       <input class="form-control" type="number" min="0" id="pe-postal" placeholder="0" value="${existing?.postal_amount||''}">
     </div>
+    <!-- 🤖 AI 自動判斷 全家/7-11 -->
+    <div style="background:linear-gradient(135deg,#e8f5e9,#fff3e0);border:1px dashed #4CAF50;border-radius:10px;padding:14px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;margin-bottom:8px;color:#2e7d32">📷 超商發票 AI 拍照(自動判斷全家/7-11)</div>
+      <input type="file" id="pe-cvs-img" accept="image/*" capture="environment" onchange="window._peSmartOCR(this)" class="form-control" style="padding:6px">
+      <div id="pe-ocr-status" style="font-size:12px;margin-top:6px;padding:6px 8px;border-radius:4px;display:none"></div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">✨ 拍完照後,系統會自動判斷店家、抓發票號碼+金額,填入下方對應欄位</div>
+    </div>
+
     <div style="background:var(--surface);border-radius:8px;padding:12px;margin-bottom:12px">
-      <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#388e3c">全家便利商店</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#388e3c">🟢 全家便利商店</div>
       <div class="form-row form-row-2">
         <div class="form-group">
           <label>發票號碼</label>
-          <input class="form-control" id="pe-fm-inv" placeholder="AB12345678" value="${existing?.familymart_invoice||''}">
+          <input class="form-control" id="pe-fm-inv" placeholder="CK-33441725" value="${existing?.familymart_invoice||''}">
         </div>
         <div class="form-group">
           <label>金額</label>
           <input class="form-control" type="number" min="0" id="pe-fm-amt" placeholder="0" value="${existing?.familymart_amount||''}">
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label>發票照片 <span style="font-size:11px;color:var(--muted)">（自動壓縮至 50KB 以下，支援自動辨識）</span></label>
-        <input type="file" id="pe-fm-img" accept="image/*" capture="environment" onchange="window._peOCR(this,'fm')">
-        ${existing?.familymart_image_url ? `<img id="pe-fm-preview" src="${existing.familymart_image_url}" style="height:60px;margin-top:6px;border-radius:6px;display:block">` : `<img id="pe-fm-preview" style="height:60px;margin-top:6px;border-radius:6px;display:none">`}
-      </div>
+      ${existing?.familymart_image_url ? `<img id="pe-fm-preview" src="${existing.familymart_image_url}" style="height:80px;margin-top:6px;border-radius:6px;display:block;cursor:pointer" onclick="window.open('${existing.familymart_image_url}','_blank')">` : `<img id="pe-fm-preview" style="height:80px;margin-top:6px;border-radius:6px;display:none;cursor:pointer">`}
     </div>
     <div style="background:var(--surface);border-radius:8px;padding:12px;margin-bottom:12px">
-      <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#f57c00">7-11 超商</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#f57c00">🟠 7-11 超商</div>
       <div class="form-row form-row-2">
         <div class="form-group">
           <label>發票號碼</label>
-          <input class="form-control" id="pe-711-inv" placeholder="AB12345678" value="${existing?.seveneleven_invoice||''}">
+          <input class="form-control" id="pe-711-inv" placeholder="CW-69765565" value="${existing?.seveneleven_invoice||''}">
         </div>
         <div class="form-group">
           <label>金額</label>
           <input class="form-control" type="number" min="0" id="pe-711-amt" placeholder="0" value="${existing?.seveneleven_amount||''}">
         </div>
       </div>
-      <div class="form-group" style="margin-bottom:0">
-        <label>發票照片 <span style="font-size:11px;color:var(--muted)">（自動壓縮至 50KB 以下，支援自動辨識）</span></label>
-        <input type="file" id="pe-711-img" accept="image/*" capture="environment" onchange="window._peOCR(this,'711')">
-        ${existing?.seveneleven_image_url ? `<img id="pe-711-preview" src="${existing.seveneleven_image_url}" style="height:60px;margin-top:6px;border-radius:6px;display:block">` : `<img id="pe-711-preview" style="height:60px;margin-top:6px;border-radius:6px;display:none">`}
-      </div>
+      ${existing?.seveneleven_image_url ? `<img id="pe-711-preview" src="${existing.seveneleven_image_url}" style="height:80px;margin-top:6px;border-radius:6px;display:block;cursor:pointer" onclick="window.open('${existing.seveneleven_image_url}','_blank')">` : `<img id="pe-711-preview" style="height:80px;margin-top:6px;border-radius:6px;display:none;cursor:pointer">`}
     </div>
-    <div id="pe-ocr-status" style="font-size:12px;color:var(--accent);margin-top:4px"></div>
   `, [
     { label: existing ? '儲存' : '新增', primary: true, onclick: async () => {
       const date    = document.getElementById('pe-date').value;
@@ -22465,9 +22464,20 @@ window.modalAddPostage = async function(editId = null) {
       const s11Inv  = document.getElementById('pe-711-inv').value.trim().toUpperCase();
       const s11Amt  = parseInt(document.getElementById('pe-711-amt').value)||0;
 
-      // 上傳圖片
-      const fmUrl  = await window._peUploadImg('pe-fm-img',  date, 'fm',  existing?.familymart_image_url);
-      const s11Url = await window._peUploadImg('pe-711-img', date, '711', existing?.seveneleven_image_url);
+      // 上傳智慧拍照的圖片(依 AI 判斷的 side 決定要塞到 fm 或 711)
+      let fmUrl = existing?.familymart_image_url || null;
+      let s11Url = existing?.seveneleven_image_url || null;
+      if (window._peCvsFile && window._peCvsType) {
+        const filename = `${date}_${window._peCvsType}_${Date.now()}.jpg`;
+        const { error: upErr } = await db.storage.from('postage-invoices').upload(filename, window._peCvsFile, { contentType:'image/jpeg', upsert:true });
+        if (!upErr) {
+          const { data: urlData } = db.storage.from('postage-invoices').getPublicUrl(filename);
+          if (window._peCvsType === 'fm') fmUrl = urlData?.publicUrl || fmUrl;
+          else s11Url = urlData?.publicUrl || s11Url;
+        }
+        // 清掉暫存
+        window._peCvsFile = null; window._peCvsType = null;
+      }
 
       const payload = {
         date, cash_received: cash, postal_amount: postal,
@@ -22492,37 +22502,80 @@ window.modalAddPostage = async function(editId = null) {
 };
 
 // ── 圖片壓縮 + OCR ──
+// ── 舊 _peOCR 保留(相容),新增 _peSmartOCR:AI 自動判斷店家 ──
 window._peOCR = async function(input, type) {
+  // (舊功能保留 for backward compat,實務用 _peSmartOCR)
+};
+
+window._peSmartOCR = async function(input) {
   const file = input.files[0];
   if (!file) return;
   const statusEl = document.getElementById('pe-ocr-status');
-  if (statusEl) statusEl.textContent = '⏳ 辨識中…';
-
-  // 壓縮
-  const compressed = await window._compressImage(file, 50);
-  const previewId = type === 'fm' ? 'pe-fm-preview' : 'pe-711-preview';
-  const preview = document.getElementById(previewId);
-  if (preview) { preview.src = URL.createObjectURL(compressed); preview.style.display = 'block'; }
-
-  // OCR：讀 dataURL，用 pattern 辨識台灣發票號碼（2英文+8數字）和金額
-  const reader = new FileReader();
-  reader.onload = (e) => {
-    const img = new Image();
-    img.onload = () => {
-      // 轉成 canvas 讀取像素（簡單字元辨識需外部函式庫）
-      // 這裡直接提示使用者確認，自動辨識需 OCR 函式庫
-      if (statusEl) statusEl.textContent = '📷 圖片已載入，請確認發票號碼和金額是否正確';
-    };
-    img.src = e.target.result;
+  const setStatus = (bg, color, txt) => {
+    if (!statusEl) return;
+    statusEl.style.display = 'block';
+    statusEl.style.background = bg; statusEl.style.color = color; statusEl.textContent = txt;
   };
-  reader.readAsDataURL(compressed);
+  setStatus('#e3f2fd', '#1565c0', '⏳ 壓縮中…');
+  const compressed = await window._compressImage(file, 50);
 
-  // 嘗試從檔名萃取發票號碼
-  const nameMatch = file.name.toUpperCase().match(/[A-Z]{2}\d{8}/);
-  if (nameMatch) {
-    const invField = type === 'fm' ? 'pe-fm-inv' : 'pe-711-inv';
-    const el = document.getElementById(invField);
-    if (el && !el.value) { el.value = nameMatch[0]; if (statusEl) statusEl.textContent = `✅ 已從檔名辨識發票號碼：${nameMatch[0]}`; }
+  if (typeof getClaudeApiKey !== 'function' || !getClaudeApiKey()) {
+    setStatus('#fff8e1', '#e65100', '⚠️ 未設定 Claude API Key,請手動填入');
+    input.value = '';
+    return;
+  }
+  setStatus('#e3f2fd', '#1565c0', '🤖 AI 辨識中…');
+
+  try {
+    const prompt = `這是一張台灣超商發票照片。請判斷是「全家 FamilyMart」還是「7-11 統一超商」,並抽取「發票號碼」和「金額」。
+
+判斷技巧:
+- 全家常見發票號前綴:AG/CK/CJ/AA/BB(可能不同期別)+ "-" + 8位數
+- 7-11常見發票號前綴:AT/CW/AB/BA(可能不同期別)+ "-" + 8位數
+- 若店名清晰可辨,以店名為準
+
+回傳 JSON(僅回 JSON,無其他文字):
+{
+  "store": "全家" 或 "7-11",
+  "invoice_no": "發票號碼(含 - )",
+  "amount": 數字(不含 NT$)
+}
+如果無法辨識,回 {"store": null, "invoice_no": null, "amount": null}`;
+
+    const resp = await callClaudeVision(compressed, prompt);
+    const jsonMatch = (resp || '').match(/\{[\s\S]*?\}/);
+    if (!jsonMatch) throw new Error('AI 回傳非 JSON');
+    const parsed = JSON.parse(jsonMatch[0]);
+    console.log('[超商發票辨識]', parsed);
+
+    if (!parsed.store) {
+      setStatus('#ffebee', '#c62828', '❌ 無法辨識店家,請手動填入');
+      return;
+    }
+
+    // 決定要填哪一側
+    const isFM = parsed.store.includes('全家') || parsed.store.toLowerCase().includes('family');
+    const side = isFM ? 'fm' : '711';
+    const prefix = isFM ? 'pe-fm' : 'pe-711';
+
+    // 填欄位
+    const invEl = document.getElementById(`${prefix}-inv`);
+    const amtEl = document.getElementById(`${prefix}-amt`);
+    if (parsed.invoice_no && invEl) invEl.value = parsed.invoice_no;
+    if (parsed.amount && amtEl) amtEl.value = parsed.amount;
+
+    // 顯示預覽
+    const previewEl = document.getElementById(`${prefix}-preview`);
+    if (previewEl) { previewEl.src = URL.createObjectURL(compressed); previewEl.style.display = 'block'; }
+
+    // 存起來,save 時上傳
+    window._peCvsFile = compressed;
+    window._peCvsType = side;
+
+    setStatus('#e8f5e9', '#2e7d32', `✅ ${isFM?'🟢 全家':'🟠 7-11'} · ${parsed.invoice_no||'—'} · $${(parsed.amount||0).toLocaleString()}`);
+  } catch (err) {
+    console.error(err);
+    setStatus('#ffebee', '#c62828', `❌ 辨識失敗:${err.message}`);
   }
 };
 
