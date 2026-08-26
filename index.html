@@ -22032,12 +22032,8 @@ function renderShipments() {
     grandTotal += columns.reduce((s,c) => s + (data[c.id]||0), 0);
   });
 
-  // 當月 → 顯示全部欄位；過去月份 → 只顯示有資料的欄位
-  const currentYm = _localToday().slice(0,7);
-  const isPastMonth = ym < currentYm;
-  const visibleColumns = isPastMonth
-    ? columns.filter(c => (colTotals[c.id] || 0) > 0)
-    : columns;
+  // 一律顯示全部欄位(不管當月或過去月),格式保持一致
+  const visibleColumns = columns;
 
   // 按 group_name 分組 header
   const GROUP_COLORS = {
