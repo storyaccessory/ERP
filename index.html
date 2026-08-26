@@ -21988,7 +21988,10 @@ window.modalEditJournal = async function(existingId = null) {
 // ══════════════════════════════════════════════
 window.loadShipments = async function() {
   const ym = state.data.shipmentsYm || _localToday().slice(0,7);
-  const [start, end] = [`${ym}-01`, `${ym}-31`];
+  const [yr, mn] = ym.split('-').map(Number);
+  const lastDay = new Date(yr, mn, 0).getDate();  // 月底最後一天(避免 6/31、2/30 這種無效日期)
+  const start = `${ym}-01`;
+  const end = `${ym}-${String(lastDay).padStart(2,'0')}`;
   const [colsRes, rowsRes] = await Promise.all([
     db.from('shipment_columns').select('*').eq('is_active', true).order('display_order'),
     db.from('daily_shipments').select('*').gte('date', start).lte('date', end).order('date'),
