@@ -132,6 +132,10 @@ a { text-decoration: none; color: inherit; }
   border-radius: 10px; padding: 1px 6px; font-size: 11px; font-weight: 600;
 }
 .nav-item .badge.warn { background: var(--warning); }
+@keyframes pulseBadge {
+  0%,100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(229,57,53,.6); }
+  50% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(229,57,53,0); }
+}
 .sidebar-user {
   padding: 12px 14px; border-top: 1px solid rgba(255,255,255,.08);
   display: flex; align-items: center; gap: 9px; font-size: 12px;
@@ -742,7 +746,7 @@ async function loadDashboard() {
   const _mealYmStr = _mealYmDate.getFullYear().toString() + String(_mealYmDate.getMonth()+1).padStart(2,'0');
   const _mealYmLabel = `${_mealYmDate.getFullYear()}年 ${_mealYmDate.getMonth()+1} 月`;
   const _thisYmStr = _mealYmStr; // 保留變數名供其他地方參考
-  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors, myApprovals] = await Promise.all([
+  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors, myApprovals, pendingApprovalsCount] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     _addCalPrivacyFilter(db.from('calendar_events')
@@ -775,6 +779,10 @@ async function loadDashboard() {
     myId
       ? db.from('approval_requests').select('id,request_type,item_type,item_name,status,created_at,review_note,reviewed_at').eq('requested_by', myId).order('created_at',{ascending:false}).limit(20)
       : Promise.resolve({data:[]}),
+    // 側欄「審核管理」badge:老闆看全部待審,員工看自己送的待審
+    (state.profile?.role === 'admin' || state.profile?.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com')
+      ? db.from('approval_requests').select('id',{count:'exact',head:true}).eq('status','pending')
+      : (myId ? db.from('approval_requests').select('id',{count:'exact',head:true}).eq('status','pending').eq('requested_by', myId) : Promise.resolve({count:0})),
   ]);
   // 把最新的 sales_daily 寫進 salesCache,確保首頁業績圖表的數字跟業績儀表板一致
   if (!state.data.salesCache) state.data.salesCache = {};
@@ -808,6 +816,7 @@ async function loadDashboard() {
     overdue: overdueAll.data || [],
     mealThis: mealThis.data || [],
     myApprovals: myApprovals?.data || [],
+    pendingApprovalsCount: pendingApprovalsCount?.count || 0,
     ym: _thisYmStr,
     mealYmLabel: _mealYmLabel,
     today,
@@ -1452,7 +1461,8 @@ function renderSidebar() {
   });
 
   const d = state.data.dashboard || {};
-  const pendingApprovals = (state.data.approvalRequests||[]).filter(r=>r.status==='pending').length;
+  // 待審核數量:優先用 dashboard 的即時 count,fallback 用 approvalRequests
+  const pendingApprovals = d.pendingApprovalsCount ?? (state.data.approvalRequests||[]).filter(r=>r.status==='pending').length;
   const badges = {
     orders: d.orders?.filter(o => o.status === '待排圖').length || 0,
     restock: d.restock?.length || 0,
@@ -1509,7 +1519,7 @@ function renderSidebar() {
       html += `<div class="nav-item ${state.page===p.key?'active':''}" data-page="${p.key}" data-sec="${sec}" draggable="true">
         <span class="drag-handle" title="拖曳排序">⠿</span>
         <span>${p.icon}</span><span>${p.label}</span>
-        ${b ? `<span class="badge${p.key==='restock'?' warn':''}">${b}</span>` : ''}
+        ${b ? `<span class="badge${p.key==='restock' || p.key==='approvals'?' warn':''}" ${p.key==='approvals'?'style="background:#e53935;color:#fff;animation:pulseBadge 1.5s ease-in-out infinite"':''}>${b}</span>` : ''}
       </div>`;
     });
 
