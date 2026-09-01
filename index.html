@@ -142,29 +142,34 @@ a { text-decoration: none; color: inherit; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { background:#fff !important; }
   .sidebar, .sidebar-overlay, #main-header, .search-bar, .btn, .form-control, .modal-overlay { display:none !important; }
-  .main-content, .content, main { margin-left:0 !important; padding:0 !important; max-width:100% !important; }
-  .print-only-header { display:block !important; }
-  .print-only-header h1 { font-size:16px !important; margin:0 0 2px !important; }
-  .print-only-header div { font-size:10px !important; }
-  .card { box-shadow:none !important; padding:4px !important; border:none !important; margin:0 !important; }
-  /* 月統計卡片縮小 */
-  .cards, [style*="grid-template-columns:repeat(auto-fill"] {
+  .main-content, .content, main { margin-left:0 !important; padding:0 !important; max-width:100% !important; width:100% !important; }
+  .print-only-header { display:block !important; text-align:left !important; }
+  .print-only-header h1 { font-size:14px !important; margin:0 0 2px !important; text-align:left !important; }
+  .print-only-header div { font-size:9px !important; text-align:left !important; }
+  .card { box-shadow:none !important; padding:2px !important; border:none !important; margin:0 !important; }
+  /* 月統計卡片:6 個橫排,不擠 */
+  [style*="grid-template-columns:repeat(auto-fill"] {
     display:grid !important;
     grid-template-columns:repeat(6, 1fr) !important;
-    gap:4px !important;
-    margin-bottom:6px !important;
+    gap:3px !important;
+    margin-bottom:5px !important;
+    width:100% !important;
   }
-  .cards > div, [style*="grid-template-columns:repeat(auto-fill"] > div {
-    padding:4px !important;
-    font-size:9px !important;
+  [style*="grid-template-columns:repeat(auto-fill"] > div {
+    padding:3px !important;
+    text-align:left !important;
   }
-  .cards > div > div:first-child { font-size:9px !important; margin-bottom:0 !important; }
-  .cards > div > div:last-child { font-size:11px !important; }
-  /* 表格縮小 */
-  table { font-size:9px !important; border-collapse:collapse !important; width:100% !important; }
+  [style*="grid-template-columns:repeat(auto-fill"] > div > div:first-child { font-size:8px !important; margin-bottom:0 !important; text-align:left !important; }
+  [style*="grid-template-columns:repeat(auto-fill"] > div > div:last-child { font-size:10px !important; text-align:left !important; }
+  /* 表格 */
+  table { font-size:9px !important; border-collapse:collapse !important; width:100% !important; table-layout:auto !important; min-width:0 !important; }
   th, td { border:1px solid #666 !important; padding:1px 3px !important; line-height:1.2 !important; }
-  thead th { background:#f0f0f0 !important; font-size:9px !important; }
-  tfoot { background:#e8f5e9 !important; }
+  thead th { background:#f0f0f0 !important; font-size:9px !important; text-align:left !important; }
+  tfoot td { background:#e8f5e9 !important; }
+  /* 表格內容統一靠左 */
+  tbody td { text-align:left !important; }
+  /* 隱藏 overflow-x 讓所有欄位都能顯示 */
+  .table-wrap, [style*="overflow-x"] { overflow:visible !important; }
 }
 .sidebar-user {
   padding: 12px 14px; border-top: 1px solid rgba(255,255,255,.08);
