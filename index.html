@@ -139,15 +139,16 @@ a { text-decoration: none; color: inherit; }
 /* 列印模式:隱藏 UI chrome,只留表格 + 表頭 */
 @media print {
   @page { size: A4 landscape; margin: 10mm; }
+  * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { background:#fff !important; }
   .sidebar, .sidebar-overlay, #main-header, .search-bar, .btn, .form-control, .modal-overlay { display:none !important; }
   .main-content, .content, main { margin-left:0 !important; padding:0 !important; max-width:100% !important; }
   .print-only-header { display:block !important; }
-  .card { box-shadow:none !important; border:none !important; padding:0 !important; }
+  .card { box-shadow:none !important; padding:8px !important; }
   table { font-size:11px !important; border-collapse:collapse !important; }
   th, td { border:1px solid #666 !important; padding:3px 5px !important; }
-  thead { background:#f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
-  tfoot { background:#e8f5e9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  thead { background:#f0f0f0 !important; }
+  tfoot { background:#e8f5e9 !important; }
 }
 .sidebar-user {
   padding: 12px 14px; border-top: 1px solid rgba(255,255,255,.08);
@@ -22348,6 +22349,81 @@ window.postageNavTo = async function(ym) {
   state.data.postageYm = ym;
   try { await window.loadPostage(); } catch(e) { console.error('loadPostage error', e); }
   renderApp();
+};
+
+// 🖨️ 列印
+window.postagePrint = function() {
+  window.print();
+};
+
+// 📥 匯出 Excel(xlsx)
+window.postageExportXlsx = function() {
+  if (typeof XLSX === 'undefined') { showToast('xlsx 尚未載入,請稍候再試','error'); return; }
+  const pd = state.data.postage || {};
+  const ym = pd.ym || _localToday().slice(0,7);
+  const records = pd.records || [];
+  const [year, mon] = ym.split('-').map(Number);
+  const daysInMonth = new Date(year, mon, 0).getDate();
+  const DAY_ZH = ['日','一','二','三','四','五','六'];
+  const recMap = {}; records.forEach(r => { recMap[r.date] = r; });
+
+  // 先算月合計
+  let totalCash = 0, totalPostal = 0, totalFM = 0, total711 = 0;
+  records.forEach(r => {
+    totalCash += r.cash_received || 0;
+    totalPostal += r.postal_amount || 0;
+    totalFM += r.familymart_amount || 0;
+    total711 += r.seveneleven_amount || 0;
+  });
+  const totalExpense = totalPostal + totalFM + total711;
+  const balance = totalCash - totalExpense;
+
+  // 建工作表(rows 為二維陣列)
+  const rows = [];
+  rows.push([`${year} 年 ${mon} 月 郵資支出`]);
+  rows.push([`列印日期:${_localToday()}`]);
+  rows.push([]);
+  // 月統計摘要
+  rows.push(['📊 月統計摘要']);
+  rows.push(['取現金合計', totalCash, '', '郵局支出', totalPostal, '', '全家支出', totalFM, '']);
+  rows.push(['7-11 支出', total711, '', '總支出', totalExpense, '', '餘額', balance, '']);
+  rows.push([]);
+  rows.push(['📅 每日明細']);
+  rows.push(['日期','星期','取現金','郵局','全家發票','全家金額','7-11發票','7-11金額','剩餘餘額']);
+
+  let bal = 0;
+  for (let i = 1; i <= daysInMonth; i++) {
+    const dateStr = `${ym}-${String(i).padStart(2,'0')}`;
+    const dt = new Date(dateStr + 'T00:00:00');
+    const dow = DAY_ZH[dt.getDay()];
+    const r = recMap[dateStr];
+    const cash = r?.cash_received || 0;
+    const postal = r?.postal_amount || 0;
+    const fmInv = r?.familymart_invoice || '';
+    const fmAmt = r?.familymart_amount || 0;
+    const s11Inv = r?.seveneleven_invoice || '';
+    const s11Amt = r?.seveneleven_amount || 0;
+    const expense = postal + fmAmt + s11Amt;
+    bal += cash - expense;
+    rows.push([i, dow, cash || '', postal || '', fmInv, fmAmt || '', s11Inv, s11Amt || '', bal]);
+  }
+  rows.push([]);
+  rows.push(['月合計','',totalCash, totalPostal, '', totalFM, '', total711, balance]);
+
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  // 欄寬
+  ws['!cols'] = [{wch:6},{wch:6},{wch:10},{wch:10},{wch:15},{wch:10},{wch:15},{wch:10},{wch:12}];
+  // 合併儲存格(標題橫跨所有欄)
+  ws['!merges'] = [
+    {s:{r:0,c:0},e:{r:0,c:8}},  // 大標題
+    {s:{r:1,c:0},e:{r:1,c:8}},  // 列印日期
+    {s:{r:3,c:0},e:{r:3,c:8}},  // 📊 月統計摘要
+    {s:{r:7,c:0},e:{r:7,c:8}},  // 📅 每日明細
+  ];
+
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `${year}年${mon}月`);
+  XLSX.writeFile(wb, `郵資支出_${year}年${mon}月.xlsx`);
 };
 
 function renderPostage() {
