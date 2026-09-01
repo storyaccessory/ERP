@@ -138,7 +138,7 @@ a { text-decoration: none; color: inherit; }
 }
 /* 列印模式:A4 直式一頁裝下 */
 @media print {
-  @page { size: A4 portrait; margin: 8mm; }
+  @page { size: A4 portrait; margin: 5mm; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { background:#fff !important; }
   .sidebar, .sidebar-overlay, #main-header, .search-bar, .btn, .form-control, .modal-overlay { display:none !important; }
@@ -165,8 +165,6 @@ a { text-decoration: none; color: inherit; }
   th, td { border:1px solid #666 !important; padding:1px 3px !important; line-height:1.2 !important; }
   thead th { background:#f0f0f0 !important; font-size:9px !important; }
   tfoot { background:#e8f5e9 !important; }
-  /* 隱藏操作欄(列印時不需要) */
-  table th:last-child, table td:last-child { display:none !important; }
 }
 .sidebar-user {
   padding: 12px 14px; border-top: 1px solid rgba(255,255,255,.08);
@@ -22557,7 +22555,6 @@ function renderPostage() {
                 <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#f57c00;min-width:110px">🟠 7-11 發票</th>
                 <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#f57c00;min-width:80px">7-11 $</th>
                 <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#2e7d32;background:#e8f5e9;min-width:90px" title="累計取現 − 累計支出 = 當日結束時零用金剩餘">💰 剩餘餘額</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:center;min-width:120px">操作</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -22571,7 +22568,6 @@ function renderPostage() {
                 <td style="padding:6px;border:1px solid var(--border)"></td>
                 <td style="padding:6px;border:1px solid var(--border);text-align:right;color:#f57c00">${total711.toLocaleString()}</td>
                 <td style="padding:6px;border:1px solid var(--border);text-align:right;color:${balance<0?'#c62828':'#2e7d32'};background:${balance<0?'#ffebee':'#e8f5e9'};font-size:14px" title="月底剩餘 = 總取現 ${totalCash.toLocaleString()} − 總支出 ${totalExpense.toLocaleString()}">${balance.toLocaleString()}</td>
-                <td style="padding:6px;border:1px solid var(--border);font-size:11px;color:var(--muted)">總支出 ${totalExpense.toLocaleString()}</td>
               </tr>
             </tfoot>
           </table>
