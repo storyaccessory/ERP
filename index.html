@@ -18067,7 +18067,6 @@ function renderSalesInput() {
       <span style="color:#ccc;">|</span>
       ${cnySection}
       <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="window.salesPrintExpStore(${salesInputYear},${month1})">🖨️ 體驗店列印</button>
-      <button class="btn btn-outline btn-sm" onclick="window.salesExportExpStore(${salesInputYear},${month1})">📥 體驗店 Excel</button>
     </div>
     <!-- 列印用表頭 -->
     <div class="print-only-header-sales" style="display:none;text-align:center;margin-bottom:10px;padding-bottom:8px;border-bottom:3px solid #a5d6a7">
@@ -29035,8 +29034,8 @@ window.salesPrintExpStore = function(year, month1) {
     const cash = parseFloat(e.cash)||0, card = parseFloat(e.card)||0, line = parseFloat(e.linepay)||0;
     const tot = cash + card + line;
     cashT+=cash; cardT+=card; lineT+=line; if(e.stall) stallC++;
-    rows.push(`<tr style="${isWk?'background:#fafafa':''}">
-      <td>${d} (${dow})</td>
+    rows.push(`<tr class="${isWk?'wk':''}">
+      <td style="${isWk?'color:#c62828;font-weight:600':''}">${d} (${dow})</td>
       <td style="text-align:right">${cash||'—'}</td>
       <td style="text-align:right">${card||'—'}</td>
       <td style="text-align:right">${line||'—'}</td>
@@ -29053,23 +29052,43 @@ window.salesPrintExpStore = function(year, month1) {
       h1{font-size:22px;text-align:center;margin:0 0 4px;font-weight:800}
       .sub{font-size:9px;text-align:center;color:#666;margin-bottom:8px;padding-bottom:8px;border-bottom:3px solid #a5d6a7}
       .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px}
-      .stats div{padding:6px;text-align:center;border-radius:6px;background:#e0f2f1}
-      .stats .lbl{font-size:10px;color:#00695c;font-weight:600}
-      .stats .val{font-size:14px;font-weight:800;color:#00897b;margin-top:2px}
-      table{width:100%;border-collapse:collapse;font-size:11px}
+      .stats .box{padding:8px 6px;text-align:center;border-radius:8px}
+      .stats .lbl{font-size:11px;font-weight:700;margin-bottom:2px}
+      .stats .val{font-size:15px;font-weight:800;margin-top:2px}
+      /* 4 種顏色 */
+      .stats .cash    {background:#e8f5e9}
+      .stats .cash .lbl,.stats .cash .val{color:#2e7d32}
+      .stats .card    {background:#e3f2fd}
+      .stats .card .lbl,.stats .card .val{color:#1565c0}
+      .stats .linepay {background:#fff3e0}
+      .stats .linepay .lbl,.stats .linepay .val{color:#e65100}
+      .stats .stall   {background:#f3e5f5}
+      .stats .stall .lbl,.stats .stall .val{color:#6a1b9a}
+      table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
       th,td{border:1px solid #666;padding:3px 6px}
-      th{background:#e0f2f1;color:#00695c;font-weight:700}
+      th{background:#e0f2f1;color:#00695c;font-weight:700;text-align:center}
       tfoot td{background:#c8e6c9;font-weight:800}
+      /* 日合計欄位淺綠色底 */
+      td:nth-child(6),th:nth-child(6){background:#f1f8e9}
+      tfoot td:nth-child(6){background:#a5d6a7}
     </style></head><body>
     <h1>${year} 年 ${month1} 月 體驗店業績</h1>
     <div class="sub">${state.profile?.name || state.user?.email || '—'} · 列印日期:${_localToday()}</div>
     <div class="stats">
-      <div><div class="lbl">💵 現金</div><div class="val">${cashT.toLocaleString()}</div></div>
-      <div><div class="lbl">💳 刷卡</div><div class="val">${cardT.toLocaleString()}</div></div>
-      <div><div class="lbl">📱 LinePay</div><div class="val">${lineT.toLocaleString()}</div></div>
-      <div><div class="lbl">📅 擺攤天數</div><div class="val">${stallC} 天</div></div>
+      <div class="box cash"><div class="lbl">💵 現金</div><div class="val">${cashT.toLocaleString()}</div></div>
+      <div class="box card"><div class="lbl">💳 刷卡</div><div class="val">${cardT.toLocaleString()}</div></div>
+      <div class="box linepay"><div class="lbl">📱 LinePay</div><div class="val">${lineT.toLocaleString()}</div></div>
+      <div class="box stall"><div class="lbl">📅 擺攤天數</div><div class="val">${stallC} 天</div></div>
     </div>
     <table>
+      <colgroup>
+        <col style="width:15%">
+        <col style="width:17%">
+        <col style="width:17%">
+        <col style="width:17%">
+        <col style="width:12%">
+        <col style="width:22%">
+      </colgroup>
       <thead><tr><th>日期</th><th>現金</th><th>刷卡</th><th>LinePay</th><th>擺攤</th><th>日合計</th></tr></thead>
       <tbody>${rows.join('')}</tbody>
       <tfoot><tr><td>月合計</td><td style="text-align:right">${cashT.toLocaleString()}</td><td style="text-align:right">${cardT.toLocaleString()}</td><td style="text-align:right">${lineT.toLocaleString()}</td><td style="text-align:center">${stallC}天</td><td style="text-align:right">${totalAll.toLocaleString()}</td></tr></tfoot>
