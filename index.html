@@ -143,7 +143,9 @@ a { text-decoration: none; color: inherit; }
   body { background:#fff !important; }
   .sidebar, .sidebar-overlay, #main-header, .topbar, .search-bar, .btn, .form-control, .modal-overlay, .postage-nav-bar { display:none !important; }
   html, body { margin:0 !important; padding:0 !important; }
-  .main, .main-content, .content, main, #app, .app, .container { margin:0 !important; padding:0 !important; max-width:100% !important; width:100% !important; }
+  .main, .main-content, main, #app, .app, .container { margin:0 !important; padding:0 !important; max-width:100% !important; width:100% !important; }
+  /* 內容區保留 1cm 內距,即使瀏覽器忽略 @page margin 也不會貼邊 */
+  .content { padding:10mm !important; margin:0 !important; max-width:100% !important; width:100% !important; box-sizing:border-box !important; }
   .print-only-header {
     display:block !important;
     text-align:center !important;
