@@ -136,19 +136,37 @@ a { text-decoration: none; color: inherit; }
   0%,100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(229,57,53,.6); }
   50% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(229,57,53,0); }
 }
-/* 列印模式:隱藏 UI chrome,只留表格 + 表頭 */
+/* 列印模式:A4 直式一頁裝下 */
 @media print {
-  @page { size: A4 landscape; margin: 10mm; }
+  @page { size: A4 portrait; margin: 8mm; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { background:#fff !important; }
   .sidebar, .sidebar-overlay, #main-header, .search-bar, .btn, .form-control, .modal-overlay { display:none !important; }
   .main-content, .content, main { margin-left:0 !important; padding:0 !important; max-width:100% !important; }
   .print-only-header { display:block !important; }
-  .card { box-shadow:none !important; padding:8px !important; }
-  table { font-size:11px !important; border-collapse:collapse !important; }
-  th, td { border:1px solid #666 !important; padding:3px 5px !important; }
-  thead { background:#f0f0f0 !important; }
+  .print-only-header h1 { font-size:16px !important; margin:0 0 2px !important; }
+  .print-only-header div { font-size:10px !important; }
+  .card { box-shadow:none !important; padding:4px !important; border:none !important; margin:0 !important; }
+  /* 月統計卡片縮小 */
+  .cards, [style*="grid-template-columns:repeat(auto-fill"] {
+    display:grid !important;
+    grid-template-columns:repeat(6, 1fr) !important;
+    gap:4px !important;
+    margin-bottom:6px !important;
+  }
+  .cards > div, [style*="grid-template-columns:repeat(auto-fill"] > div {
+    padding:4px !important;
+    font-size:9px !important;
+  }
+  .cards > div > div:first-child { font-size:9px !important; margin-bottom:0 !important; }
+  .cards > div > div:last-child { font-size:11px !important; }
+  /* 表格縮小 */
+  table { font-size:9px !important; border-collapse:collapse !important; width:100% !important; }
+  th, td { border:1px solid #666 !important; padding:1px 3px !important; line-height:1.2 !important; }
+  thead th { background:#f0f0f0 !important; font-size:9px !important; }
   tfoot { background:#e8f5e9 !important; }
+  /* 隱藏操作欄(列印時不需要) */
+  table th:last-child, table td:last-child { display:none !important; }
 }
 .sidebar-user {
   padding: 12px 14px; border-top: 1px solid rgba(255,255,255,.08);
@@ -22507,10 +22525,14 @@ function renderPostage() {
         // 未來的天不顯示餘額
         const showBal = !isFuture && (r || runningBalance !== 0);
 
-        return `<tr style="background:${rowBg}">
+        const clickHandler = r
+          ? `onclick="window.modalAddPostage('${r.id}')"`
+          : `onclick="window.modalAddPostage(null,'${dateStr}')"`;
+        return `<tr style="background:${rowBg};cursor:pointer" ${clickHandler} title="${r?'點擊編輯':'點擊新增'}">
           <td style="padding:5px 8px;border:1px solid var(--border);white-space:nowrap;font-weight:600;color:${dateColor}">
             ${day}<span style="font-size:10px;color:var(--muted);margin-left:3px">(${DAY_ZH[dow]})</span>
             ${isMissing ? '<span style="font-size:10px;background:#f57c00;color:#fff;padding:1px 5px;border-radius:8px;margin-left:4px">未填</span>' : ''}
+            ${r && (r.familymart_image_url || r.seveneleven_image_url) ? '<span style="font-size:10px;margin-left:3px" title="有發票照片">📎</span>' : ''}
           </td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#1565c0;font-weight:${r?.cash_received?'700':'400'}">${r?.cash_received ? r.cash_received.toLocaleString() : '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#c62828;font-weight:${r?.postal_amount?'700':'400'}">${r?.postal_amount ? r.postal_amount.toLocaleString() : '—'}</td>
@@ -22519,12 +22541,6 @@ function renderPostage() {
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:center;font-family:monospace;font-size:11px;color:#f57c00">${r?.seveneleven_invoice || '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#f57c00;font-weight:${r?.seveneleven_amount?'700':'400'}">${r?.seveneleven_amount ? r.seveneleven_amount.toLocaleString() : '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:${balColor};font-weight:700;background:${showBal?balBg:''}" title="累計取現 − 累計支出">${showBal ? runningBalance.toLocaleString() : '—'}</td>
-          <td style="padding:3px 4px;border:1px solid var(--border);text-align:center;white-space:nowrap">
-            ${r ? `<button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#e3f2fd;color:#1565c0;border:none;border-radius:4px;cursor:pointer" onclick="window.modalAddPostage('${r.id}')">編輯</button>
-                  <button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#ffebee;color:#c62828;border:none;border-radius:4px;cursor:pointer;margin-left:2px" onclick="window.deletePostage('${r.id}')">🗑</button>
-                  ${(r.familymart_image_url || r.seveneleven_image_url) ? `<span style="font-size:11px;margin-left:3px" title="有發票照片">📎</span>` : ''}`
-                : `<button class="btn btn-sm" style="padding:2px 8px;font-size:11px;background:#e8f5e9;color:#2e7d32;border:none;border-radius:4px;cursor:pointer" onclick="window.modalAddPostage(null,'${dateStr}')">+ 新增</button>`}
-          </td>
         </tr>`;
       }).join('');
 
