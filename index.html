@@ -141,12 +141,12 @@ a { text-decoration: none; color: inherit; }
   @page { size: A4 portrait; margin: 5mm; }
   * { -webkit-print-color-adjust: exact !important; print-color-adjust: exact !important; }
   body { background:#fff !important; }
-  .sidebar, .sidebar-overlay, #main-header, .search-bar, .btn, .form-control, .modal-overlay { display:none !important; }
+  .sidebar, .sidebar-overlay, #main-header, .topbar, .search-bar, .btn, .form-control, .modal-overlay { display:none !important; }
   html, body { margin:0 !important; padding:0 !important; }
   .main, .main-content, .content, main, #app, .app, .container { margin:0 !important; padding:0 !important; max-width:100% !important; width:100% !important; }
-  .print-only-header { display:block !important; text-align:left !important; }
-  .print-only-header h1 { font-size:14px !important; margin:0 0 2px !important; text-align:left !important; }
-  .print-only-header div { font-size:9px !important; text-align:left !important; }
+  .print-only-header { display:block !important; text-align:center !important; margin:0 0 6px !important; }
+  .print-only-header h1 { font-size:15px !important; margin:0 0 2px !important; text-align:center !important; font-weight:800 !important; }
+  .print-only-header div { font-size:9px !important; text-align:center !important; color:#666 !important; }
   .card { box-shadow:none !important; padding:2px !important; border:none !important; margin:0 !important; }
   /* 月統計卡片:6 個橫排,不擠 */
   [style*="grid-template-columns:repeat(auto-fill"] {
@@ -22477,7 +22477,7 @@ function renderPostage() {
     <!-- 列印用表頭(平時隱藏,列印時顯示) -->
     <div class="print-only-header" style="display:none;text-align:center;margin-bottom:12px">
       <h1 style="font-size:22px;font-weight:800;margin:0 0 4px">${year} 年 ${mon} 月 郵資支出</h1>
-      <div style="font-size:12px;color:#666">STORY 故事銀飾 · 列印日期:${_localToday()}</div>
+      <div style="font-size:12px;color:#666">${state.profile?.name || state.user?.email || '—'} · 列印日期:${_localToday()}</div>
     </div>
 
     <!-- 月統計 -->
