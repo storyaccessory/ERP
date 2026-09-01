@@ -18057,8 +18057,8 @@ function renderSalesInput() {
     <td style="padding:5px 6px;font-size:12px;font-weight:700;text-align:right;color:#00695c;border-right:1px solid #80cbc4;">${salesFmtFull(expLinePayTotal)}</td>
     <td style="padding:5px 6px;font-size:12px;font-weight:700;text-align:center;color:#00695c;">${expStallCount}天</td>`;
 
-  return `<div>
-    <div style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
+  return `<div class="sales-input-wrap">
+    <div class="sales-toolbar" style="display:flex;align-items:center;gap:6px;margin-bottom:10px;flex-wrap:wrap;">
       <span style="font-weight:700;font-size:14px;">自營平台業績</span>
       ${!salesEditable?'<span style="font-size:11px;color:#ef9a9a;background:#fff3f3;border:1px solid #ffcdd2;padding:2px 8px;border-radius:4px;">👁 僅供檢視，無編輯權限</span>':''}
       <div style="display:flex;gap:4px;">${yearBtns}</div>
@@ -18066,6 +18066,13 @@ function renderSalesInput() {
       <div style="display:flex;gap:3px;flex-wrap:wrap;">${monthBtns}</div>
       <span style="color:#ccc;">|</span>
       ${cnySection}
+      <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="window.salesPrintExpStore(${salesInputYear},${month1})">🖨️ 體驗店列印</button>
+      <button class="btn btn-outline btn-sm" onclick="window.salesExportExpStore(${salesInputYear},${month1})">📥 體驗店 Excel</button>
+    </div>
+    <!-- 列印用表頭 -->
+    <div class="print-only-header-sales" style="display:none;text-align:center;margin-bottom:10px;padding-bottom:8px;border-bottom:3px solid #a5d6a7">
+      <h1 style="font-size:22px;font-weight:800;margin:0 0 4px">${salesInputYear} 年 ${month1} 月 體驗店業績</h1>
+      <div style="font-size:9px;color:#666">${state.profile?.name || state.user?.email || '—'} · 列印日期:${_localToday()}</div>
     </div>
     <!-- 當月業績總覽卡 -->
     <div style="margin-bottom:10px;background:#e0f2f1;border:1px solid #b2dfdb;border-radius:10px;padding:10px 14px;">
@@ -29013,6 +29020,92 @@ window.salesDayInput = salesDayInput;
 window.salesExpInput = salesExpInput;
 window.salesSaveGoalNoRedraw = salesSaveGoalNoRedraw;
 window.salesSetRate = salesSetRate;
+
+// 🖨️ 體驗店月報列印
+window.salesPrintExpStore = function(year, month1) {
+  // 建暫時的可列印區塊
+  const daysInMonth = salesDaysInMonth(year, month1);
+  const DAY_ZH = ['日','一','二','三','四','五','六'];
+  let cashT=0, cardT=0, lineT=0, stallC=0;
+  const rows = [];
+  for (let d=1;d<=daysInMonth;d++){
+    const dow = DAY_ZH[new Date(year, month1-1, d).getDay()];
+    const isWk = [0,6].includes(new Date(year, month1-1, d).getDay());
+    const e = (state.data.expCache||{})[`${year}_${month1}_${d}`] || {cash:0,card:0,linepay:0,stall:false};
+    const cash = parseFloat(e.cash)||0, card = parseFloat(e.card)||0, line = parseFloat(e.linepay)||0;
+    const tot = cash + card + line;
+    cashT+=cash; cardT+=card; lineT+=line; if(e.stall) stallC++;
+    rows.push(`<tr style="${isWk?'background:#fafafa':''}">
+      <td>${d} (${dow})</td>
+      <td style="text-align:right">${cash||'—'}</td>
+      <td style="text-align:right">${card||'—'}</td>
+      <td style="text-align:right">${line||'—'}</td>
+      <td style="text-align:center">${e.stall?'✔':''}</td>
+      <td style="text-align:right;font-weight:600">${tot||'—'}</td>
+    </tr>`);
+  }
+  const totalAll = cashT+cardT+lineT;
+  const w = window.open('','_blank','width=800,height=1000');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${year}年${month1}月 體驗店</title>
+    <style>
+      @page{size:A4 portrait;margin:10mm}
+      body{font-family:Arial,sans-serif;margin:0;padding:0}
+      h1{font-size:22px;text-align:center;margin:0 0 4px;font-weight:800}
+      .sub{font-size:9px;text-align:center;color:#666;margin-bottom:8px;padding-bottom:8px;border-bottom:3px solid #a5d6a7}
+      .stats{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;margin-bottom:12px}
+      .stats div{padding:6px;text-align:center;border-radius:6px;background:#e0f2f1}
+      .stats .lbl{font-size:10px;color:#00695c;font-weight:600}
+      .stats .val{font-size:14px;font-weight:800;color:#00897b;margin-top:2px}
+      table{width:100%;border-collapse:collapse;font-size:11px}
+      th,td{border:1px solid #666;padding:3px 6px}
+      th{background:#e0f2f1;color:#00695c;font-weight:700}
+      tfoot td{background:#c8e6c9;font-weight:800}
+    </style></head><body>
+    <h1>${year} 年 ${month1} 月 體驗店業績</h1>
+    <div class="sub">${state.profile?.name || state.user?.email || '—'} · 列印日期:${_localToday()}</div>
+    <div class="stats">
+      <div><div class="lbl">💵 現金</div><div class="val">${cashT.toLocaleString()}</div></div>
+      <div><div class="lbl">💳 刷卡</div><div class="val">${cardT.toLocaleString()}</div></div>
+      <div><div class="lbl">📱 LinePay</div><div class="val">${lineT.toLocaleString()}</div></div>
+      <div><div class="lbl">📅 擺攤天數</div><div class="val">${stallC} 天</div></div>
+    </div>
+    <table>
+      <thead><tr><th>日期</th><th>現金</th><th>刷卡</th><th>LinePay</th><th>擺攤</th><th>日合計</th></tr></thead>
+      <tbody>${rows.join('')}</tbody>
+      <tfoot><tr><td>月合計</td><td style="text-align:right">${cashT.toLocaleString()}</td><td style="text-align:right">${cardT.toLocaleString()}</td><td style="text-align:right">${lineT.toLocaleString()}</td><td style="text-align:center">${stallC}天</td><td style="text-align:right">${totalAll.toLocaleString()}</td></tr></tfoot>
+    </table>
+    <script>window.onload=()=>{setTimeout(()=>window.print(),300)}<\/script>
+    </body></html>`);
+  w.document.close();
+};
+
+// 📥 體驗店月報 Excel 匯出
+window.salesExportExpStore = function(year, month1) {
+  if (typeof XLSX === 'undefined') { showToast('xlsx 尚未載入','error'); return; }
+  const daysInMonth = salesDaysInMonth(year, month1);
+  const DAY_ZH = ['日','一','二','三','四','五','六'];
+  let cashT=0, cardT=0, lineT=0, stallC=0;
+  const rows = [];
+  rows.push([`${year} 年 ${month1} 月 體驗店業績`]);
+  rows.push([`${state.profile?.name || state.user?.email || '—'} · 列印日期:${_localToday()}`]);
+  rows.push([]);
+  rows.push(['日期','星期','現金','刷卡','LinePay','擺攤','日合計']);
+  for (let d=1;d<=daysInMonth;d++){
+    const dow = DAY_ZH[new Date(year, month1-1, d).getDay()];
+    const e = (state.data.expCache||{})[`${year}_${month1}_${d}`] || {cash:0,card:0,linepay:0,stall:false};
+    const cash = parseFloat(e.cash)||0, card = parseFloat(e.card)||0, line = parseFloat(e.linepay)||0;
+    cashT+=cash; cardT+=card; lineT+=line; if(e.stall) stallC++;
+    rows.push([d, dow, cash||'', card||'', line||'', e.stall?'✔':'', (cash+card+line)||'']);
+  }
+  rows.push([]);
+  rows.push(['月合計','', cashT, cardT, lineT, `${stallC}天`, cashT+cardT+lineT]);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
+  ws['!cols'] = [{wch:6},{wch:6},{wch:12},{wch:12},{wch:12},{wch:8},{wch:12}];
+  ws['!merges'] = [{s:{r:0,c:0},e:{r:0,c:6}},{s:{r:1,c:0},e:{r:1,c:6}}];
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, `${year}年${month1}月`);
+  XLSX.writeFile(wb, `體驗店業績_${year}年${month1}月.xlsx`);
+};
 </script>
 </body>
 </html>
