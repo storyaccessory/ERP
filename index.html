@@ -136,6 +136,19 @@ a { text-decoration: none; color: inherit; }
   0%,100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(229,57,53,.6); }
   50% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(229,57,53,0); }
 }
+/* 列印模式:隱藏 UI chrome,只留表格 + 表頭 */
+@media print {
+  @page { size: A4 landscape; margin: 10mm; }
+  body { background:#fff !important; }
+  .sidebar, .sidebar-overlay, #main-header, .search-bar, .btn, .form-control, .modal-overlay { display:none !important; }
+  .main-content, .content, main { margin-left:0 !important; padding:0 !important; max-width:100% !important; }
+  .print-only-header { display:block !important; }
+  .card { box-shadow:none !important; border:none !important; padding:0 !important; }
+  table { font-size:11px !important; border-collapse:collapse !important; }
+  th, td { border:1px solid #666 !important; padding:3px 5px !important; }
+  thead { background:#f0f0f0 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  tfoot { background:#e8f5e9 !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+}
 .sidebar-user {
   padding: 12px 14px; border-top: 1px solid rgba(255,255,255,.08);
   display: flex; align-items: center; gap: 9px; font-size: 12px;
@@ -22359,7 +22372,14 @@ function renderPostage() {
       <span style="font-weight:700;font-size:15px">${year} 年 ${mon} 月</span>
       <button class="btn btn-outline btn-sm" onclick="window.postageNavTo('${nextYm}')">下月 ›</button>
       <button class="btn btn-outline btn-sm" onclick="window.postageNavTo('${_localToday().slice(0,7)}')">本月</button>
-      <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="window.modalAddPostage()">+ 新增支出</button>
+      <button class="btn btn-outline btn-sm" style="margin-left:auto" onclick="window.postagePrint()">🖨️ 列印</button>
+      <button class="btn btn-outline btn-sm" onclick="window.postageExportXlsx()">📥 匯出 Excel</button>
+      <button class="btn btn-primary btn-sm" onclick="window.modalAddPostage()">+ 新增支出</button>
+    </div>
+    <!-- 列印用表頭(平時隱藏,列印時顯示) -->
+    <div class="print-only-header" style="display:none;text-align:center;margin-bottom:12px">
+      <h1 style="font-size:22px;font-weight:800;margin:0 0 4px">${year} 年 ${mon} 月 郵資支出</h1>
+      <div style="font-size:12px;color:#666">STORY 故事銀飾 · 列印日期:${_localToday()}</div>
     </div>
 
     <!-- 月統計 -->
