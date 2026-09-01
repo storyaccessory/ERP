@@ -29068,8 +29068,11 @@ window.salesPrintExpStore = function(year, month1) {
       th,td{border:1px solid #666;padding:3px 6px}
       th{background:#e0f2f1;color:#00695c;font-weight:700;text-align:center}
       tfoot td{background:#c8e6c9;font-weight:800}
-      /* 日合計欄位淺綠色底 */
+      /* 假日整列淺紅底 */
+      tbody tr.wk td{background:#ffebee}
+      /* 日合計欄位淺綠色底(比假日紅優先) */
       td:nth-child(6),th:nth-child(6){background:#f1f8e9}
+      tbody tr.wk td:nth-child(6){background:#ffe0e0}
       tfoot td:nth-child(6){background:#a5d6a7}
     </style></head><body>
     <h1>${year} 年 ${month1} 月 體驗店業績</h1>
