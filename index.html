@@ -11649,6 +11649,11 @@ function renderAccounting() {
   }
   const activeTab = state.data.acctTab || (canSeeAP ? '應付帳款' : '餐費發票');
 
+  // 非老闆的餐費發票只能看當月 or 前月:若跑到「全部」或「選月份」,強制拉回當月
+  if (!isAdmin && activeTab === '餐費發票' && (state.data._acctYmMode === 'all' || state.data._acctYmMode === 'pick')) {
+    state.data._acctYmMode = 'this';
+  }
+
 
   return `
     ${canSeeDashboard ? `
@@ -11671,8 +11676,10 @@ function renderAccounting() {
       <div style="display:flex;gap:2px;background:var(--bg-alt,#f5f5f5);border-radius:8px;padding:3px;flex-shrink:0">
         <button class="btn-ym-quick ${ymMode==='this'?'active':''}" data-ym-mode="this">本月</button>
         <button class="btn-ym-quick ${ymMode==='prev'?'active':''}" data-ym-mode="prev">前月</button>
-        <button class="btn-ym-quick ${ymMode==='all'?'active':''}" data-ym-mode="all">全部</button>
-        <button class="btn-ym-quick ${ymMode==='pick'?'active':''}" data-ym-mode="pick">選月份</button>
+        ${(isAdmin || activeTab !== '餐費發票') ? `
+          <button class="btn-ym-quick ${ymMode==='all'?'active':''}" data-ym-mode="all">全部</button>
+          <button class="btn-ym-quick ${ymMode==='pick'?'active':''}" data-ym-mode="pick">選月份</button>
+        ` : ''}
       </div>
       ${ymMode==='pick' ? `<select class="form-control" id="ym-select" style="width:100px;font-size:12px">
         ${ymOptions.map(m=>`<option ${m===(ym||thisYm)?'selected':''}>${m}</option>`).join('')}
