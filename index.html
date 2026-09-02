@@ -21476,14 +21476,8 @@ function renderJournal() {
     const tpl = _getTemplateForLog(log, jd);
     const fields = log.fields || {};
     const logProfile = profiles.find(p => p.id === log.user_id);
-    const isBackfill = log.date && log.created_at && log.created_at.slice(0,10) > log.date;
-    const backfillTag = isBackfill
-      ? `<span style="background:#fff8e1;color:#e65100;border:1px solid #ffe082;border-radius:4px;padding:1px 6px;font-size:10px;font-weight:700;margin-right:6px;white-space:nowrap">⚠ 補填於 ${log.created_at.slice(5,10).replace('-','/')}</span>`
-      : '';
-    const mbCount = _monthlyBackfill[log.user_id] || 0;
-    const monthlyTag = mbCount > 0
-      ? `<span style="margin-left:8px;font-size:11px;color:#e65100;font-weight:700">本月補填 ${mbCount} 次</span>`
-      : '';
+    const backfillTag = '';
+    const monthlyTag = '';
     return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
         <div>
