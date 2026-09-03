@@ -29099,6 +29099,7 @@ function renderPurchases() {
     <div class="search-bar">
       <input class="search-input" id="_purchase-search" placeholder="搜尋 品項 / 申請人 / 負責人 / 類別…" value="${searchQ}">
       <button class="btn btn-primary" data-action="add-purchase">+ 新增採購申請</button>
+      ${isBoss ? `<button class="btn btn-outline" onclick="window.openPurchaseItemsAdmin()">⚙️ 品項庫管理</button>` : ''}
     </div>
     <div class="card">
       <div class="table-wrap">
@@ -29370,8 +29371,19 @@ window._puSubmitNew = async function(existing) {
   fields.purchaser_name = null;
   const { data, error } = await db.from('purchase_requests').insert(fields).select().single();
   if (error) { showToast('送出失敗:'+error.message,'error'); return; }
-  // 更新 purchase_items usage_count
-  await db.from('purchase_items').update({ usage_count: 1 }).eq('name', fields.item_name).select();
+  // 品項庫自動維護:沒有的話新增,有的話 usage_count +1
+  const existingItem = (state.data.purchaseItems||[]).find(it => it.name === fields.item_name);
+  if (existingItem) {
+    await db.from('purchase_items').update({ usage_count: (existingItem.usage_count||0) + 1 }).eq('id', existingItem.id);
+  } else {
+    await db.from('purchase_items').insert({
+      name: fields.item_name,
+      category: fields.category || '其他',
+      reference_link: fields.reference_link || null,
+      usage_count: 1,
+      is_active: true,
+    });
+  }
   showToast('✅ 已送出申請,等待老闆指派負責人'); closeModal(); await loadPurchases(); renderApp();
 };
 
@@ -29449,6 +29461,127 @@ window._puMoveStatus = async function(id, existing, newStatus) {
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
   showToast(`已標記為 ${newStatus} ✅`);
   closeModal(); await loadPurchases(); renderApp();
+};
+
+// ⚙️ 品項庫管理(老闆可編輯/停用/刪除)
+window.openPurchaseItemsAdmin = async function() {
+  const { data } = await db.from('purchase_items').select('*').order('category').order('usage_count',{ascending:false});
+  state.data.purchaseItems = data || [];
+  window._puItemsFilter = '';
+  window._renderPuItemsBody = function() {
+    const items = state.data.purchaseItems || [];
+    const q = (window._puItemsFilter||'').toLowerCase().trim();
+    const filtered = q
+      ? items.filter(it => (it.name||'').toLowerCase().includes(q) || (it.category||'').toLowerCase().includes(q))
+      : items;
+    return `
+      <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
+        <input class="form-control" id="pi-search" value="${q}" placeholder="搜尋名稱 / 類別…" oninput="window._puItemsFilter=this.value;document.getElementById('pi-body').innerHTML=window._renderPuItemsBody()">
+        <button class="btn btn-primary btn-sm" onclick="window._puItemNew()">+ 新增品項</button>
+        <span style="font-size:12px;color:var(--muted);white-space:nowrap">共 ${filtered.length} 項</span>
+      </div>
+      <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="position:sticky;top:0;background:#f5f5f5"><tr>
+            <th style="padding:6px;text-align:left">分類</th>
+            <th style="padding:6px;text-align:left">品項名稱</th>
+            <th style="padding:6px;text-align:center;width:60px">次數</th>
+            <th style="padding:6px;text-align:left">連結</th>
+            <th style="padding:6px;text-align:center;width:60px">狀態</th>
+            <th style="padding:6px;text-align:center;width:120px">操作</th>
+          </tr></thead>
+          <tbody>
+            ${filtered.length===0 ? `<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--muted)">沒有符合的品項</td></tr>` :
+              filtered.map(it => `<tr style="border-top:1px solid #eee;${!it.is_active?'opacity:.5':''}">
+                <td style="padding:5px 6px">${it.category||'—'}</td>
+                <td style="padding:5px 6px;font-weight:600">${it.name}${it.note?`<div style="font-size:10px;color:var(--muted)">${it.note}</div>`:''}</td>
+                <td style="padding:5px 6px;text-align:center;color:var(--muted)">${it.usage_count||0}</td>
+                <td style="padding:5px 6px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.reference_link||''}</td>
+                <td style="padding:5px 6px;text-align:center">
+                  <span class="tag ${it.is_active?'tag-green':'tag-grey'}" style="font-size:10px">${it.is_active?'啟用':'停用'}</span>
+                </td>
+                <td style="padding:5px 6px;text-align:center;white-space:nowrap">
+                  <button class="btn-table" style="padding:2px 6px;font-size:11px" onclick="window._puItemEdit('${it.id}')">編輯</button>
+                  <button class="btn-table" style="padding:2px 6px;font-size:11px" onclick="window._puItemToggle('${it.id}',${!it.is_active})">${it.is_active?'停用':'啟用'}</button>
+                  <button class="btn-table danger" style="padding:2px 6px;font-size:11px" onclick="window._puItemDelete('${it.id}','${(it.name||'').replace(/'/g,'\\\\\\'')}',${it.usage_count||0})">刪</button>
+                </td>
+              </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    `;
+  };
+  showModal('⚙️ 採購品項庫管理', `<div id="pi-body">${window._renderPuItemsBody()}</div>`, [
+    { label:'關閉', onclick: closeModal },
+  ], { wide: true });
+};
+
+// 新增品項
+window._puItemNew = function() {
+  window._puItemEditRaw({ id:null, name:'', category:'其他', reference_link:'', note:'', is_active:true });
+};
+// 編輯品項
+window._puItemEdit = function(id) {
+  const it = (state.data.purchaseItems||[]).find(x=>x.id===id);
+  if (it) window._puItemEditRaw(it);
+};
+window._puItemEditRaw = function(it) {
+  showModal(it.id ? '編輯品項' : '新增品項', `
+    <div class="form-group"><label>類別</label>
+      <select class="form-control" id="pie-cat">
+        ${PURCHASE_CATEGORIES.map(c=>`<option ${it.category===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+    </div>
+    <div class="form-group"><label>品項名稱 *</label>
+      <input class="form-control" id="pie-name" value="${(it.name||'').replace(/"/g,'&quot;')}">
+    </div>
+    <div class="form-group"><label>參考連結(選填)</label>
+      <input class="form-control" id="pie-link" value="${it.reference_link||''}">
+    </div>
+    <div class="form-group"><label>備註(選填)</label>
+      <input class="form-control" id="pie-note" value="${(it.note||'').replace(/"/g,'&quot;')}">
+    </div>
+  `, [
+    { label:'儲存', primary:true, onclick: async () => {
+      const payload = {
+        name: document.getElementById('pie-name').value.trim(),
+        category: document.getElementById('pie-cat').value,
+        reference_link: document.getElementById('pie-link').value.trim() || null,
+        note: document.getElementById('pie-note').value.trim() || null,
+      };
+      if (!payload.name) { showToast('請填品項名稱','error'); return; }
+      if (it.id) {
+        const { error } = await db.from('purchase_items').update(payload).eq('id', it.id);
+        if (error) { showToast('儲存失敗:'+error.message,'error'); return; }
+        showToast('已更新');
+      } else {
+        payload.is_active = true;
+        payload.usage_count = 0;
+        const { error } = await db.from('purchase_items').insert(payload);
+        if (error) { showToast('新增失敗:'+error.message,'error'); return; }
+        showToast('已新增');
+      }
+      closeModal();
+      setTimeout(() => window.openPurchaseItemsAdmin(), 100);
+    }},
+    { label:'取消', onclick: () => { closeModal(); setTimeout(()=>window.openPurchaseItemsAdmin(),80); } },
+  ]);
+};
+window._puItemToggle = async function(id, active) {
+  await db.from('purchase_items').update({ is_active: active }).eq('id', id);
+  const { data } = await db.from('purchase_items').select('*').order('category').order('usage_count',{ascending:false});
+  state.data.purchaseItems = data || [];
+  document.getElementById('pi-body').innerHTML = window._renderPuItemsBody();
+};
+window._puItemDelete = async function(id, name, usageCount) {
+  let msg = `確定刪除品項「${name}」?`;
+  if (usageCount > 0) msg += `\n⚠️ 此品項已被申請過 ${usageCount} 次(申請紀錄不受影響,只是下拉選單不再出現)`;
+  if (!confirm(msg)) return;
+  await db.from('purchase_items').delete().eq('id', id);
+  const { data } = await db.from('purchase_items').select('*').order('category').order('usage_count',{ascending:false});
+  state.data.purchaseItems = data || [];
+  document.getElementById('pi-body').innerHTML = window._renderPuItemsBody();
+  showToast('已刪除');
 };
 
 window.deletePurchase = async function(id) {
