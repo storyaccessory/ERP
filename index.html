@@ -29199,8 +29199,11 @@ window.openPurchaseModal = async function(id) {
       </div>
     </div>
 
-    <div class="form-group"><label>品項名稱 * <span style="font-size:11px;color:var(--muted);font-weight:400">(輸入時會自動提示已建檔品項)</span></label>
-      <input class="form-control" id="pu-item" list="pu-item-list" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱-12號、K金擦拭布" oninput="window._puAutoFillFromItem(this.value)">
+    <div class="form-group"><label>品項名稱 * <span style="font-size:11px;color:var(--muted);font-weight:400">(可打字自動提示、或點右邊按鈕從庫選)</span></label>
+      <div style="display:flex;gap:6px">
+        <input class="form-control" id="pu-item" list="pu-item-list" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱-12號、K金擦拭布" oninput="window._puAutoFillFromItem(this.value)" style="flex:1">
+        <button type="button" class="btn btn-outline btn-sm" onclick="window._puPickFromLibrary()" style="white-space:nowrap;padding:6px 12px">📋 從庫選</button>
+      </div>
       <datalist id="pu-item-list">
         ${purchaseItems.map(it => `<option value="${(it.name||'').replace(/"/g,'&quot;')}" data-cat="${it.category||''}" data-link="${it.reference_link||''}">${it.category ? `[${it.category}]` : ''}</option>`).join('')}
       </datalist>
