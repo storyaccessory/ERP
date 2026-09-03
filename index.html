@@ -29199,14 +29199,9 @@ window.openPurchaseModal = async function(id) {
       </div>
     </div>
 
-    <div class="form-group"><label>品項名稱 * <span style="font-size:11px;color:var(--muted);font-weight:400">(可打字自動提示、或點右邊按鈕從庫選)</span></label>
-      <div style="display:flex;gap:6px">
-        <input class="form-control" id="pu-item" list="pu-item-list" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱-12號、K金擦拭布" oninput="window._puAutoFillFromItem(this.value)" style="flex:1">
-        <button type="button" class="btn btn-outline btn-sm" onclick="window._puPickFromLibrary()" style="white-space:nowrap;padding:6px 12px">📋 從庫選</button>
-      </div>
-      <datalist id="pu-item-list">
-        ${purchaseItems.map(it => `<option value="${(it.name||'').replace(/"/g,'&quot;')}" data-cat="${it.category||''}" data-link="${it.reference_link||''}">${it.category ? `[${it.category}]` : ''}</option>`).join('')}
-      </datalist>
+    <div class="form-group" style="position:relative"><label>品項名稱 * <span style="font-size:11px;color:var(--muted);font-weight:400">(輸入關鍵字即時搜尋品項庫)</span></label>
+      <input class="form-control" id="pu-item" autocomplete="off" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱 / 絨布 / K金" oninput="window._puSearchItems(this.value)" onfocus="window._puSearchItems(this.value)" onblur="setTimeout(()=>{const d=document.getElementById('pu-item-drop');if(d) d.style.display='none';},200)">
+      <div id="pu-item-drop" style="display:none;position:absolute;z-index:200;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:6px;max-height:280px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15);margin-top:2px"></div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group"><label>預計採購數量</label>
@@ -29353,6 +29348,93 @@ async function _puCompleteCalendar(eventId) {
   if (!eventId) return;
   await db.from('calendar_events').update({ completed_at: new Date().toISOString() }).eq('id', eventId);
 }
+
+// 品項即時搜尋(輸入框下方顯示下拉)
+window._puSearchItems = function(q) {
+  const drop = document.getElementById('pu-item-drop');
+  if (!drop) return;
+  const items = state.data.purchaseItems || [];
+  const qs = (q||'').toLowerCase().trim();
+  // 沒輸入 → 顯示前 20 個最常用的;有輸入 → 過濾包含關鍵字
+  const filtered = qs
+    ? items.filter(it => (it.name||'').toLowerCase().includes(qs) || (it.category||'').toLowerCase().includes(qs)).slice(0, 30)
+    : items.slice(0, 20);
+  if (!filtered.length) { drop.style.display = 'none'; return; }
+  drop.innerHTML = filtered.map(it => `<div style="padding:7px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center"
+    onmouseover="this.style.background='#e0f2f1'" onmouseout="this.style.background=''"
+    onmousedown="window._puPickItem('${it.id}')">
+    <div style="flex:1">
+      <div style="font-size:13px;font-weight:600">${it.name}</div>
+      ${it.note?`<div style="font-size:11px;color:var(--muted);margin-top:1px">${it.note}</div>`:''}
+    </div>
+    <div style="display:flex;align-items:center;gap:6px">
+      <span class="tag tag-blue" style="font-size:10px">${it.category||'—'}</span>
+      ${it.usage_count>0?`<span style="font-size:10px;color:var(--muted)">${it.usage_count}x</span>`:''}
+    </div>
+  </div>`).join('');
+  drop.style.display = 'block';
+};
+
+// (舊按鈕保留兼容,實際不再使用)
+window._puPickFromLibrary = function() {
+  const items = state.data.purchaseItems || [];
+  if (!items.length) { showToast('品項庫是空的,請直接輸入','info'); return; }
+  window._puLibFilter = { q:'', cat:'' };
+  const cats = [...new Set(items.map(i=>i.category).filter(Boolean))];
+  const _render = () => {
+    const q = (window._puLibFilter.q||'').toLowerCase();
+    const cat = window._puLibFilter.cat;
+    const filtered = items.filter(it =>
+      (!cat || it.category === cat) &&
+      (!q || (it.name||'').toLowerCase().includes(q))
+    );
+    return `
+      <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+        <input class="form-control" id="pu-lib-q" placeholder="🔍 搜尋品項…" style="flex:1;min-width:150px"
+          oninput="window._puLibFilter.q=this.value;document.getElementById('pu-lib-body').innerHTML=window._puLibRender()">
+      </div>
+      <div style="display:flex;gap:4px;margin-bottom:8px;flex-wrap:wrap">
+        <button class="btn btn-sm" style="padding:4px 10px;font-size:12px;background:${!cat?'#00897b':'#f5f5f5'};color:${!cat?'#fff':'#333'};border:none;border-radius:6px;cursor:pointer"
+          onclick="window._puLibFilter.cat='';document.getElementById('pu-lib-body').innerHTML=window._puLibRender()">全部</button>
+        ${cats.map(c=>`<button class="btn btn-sm" style="padding:4px 10px;font-size:12px;background:${cat===c?'#00897b':'#f5f5f5'};color:${cat===c?'#fff':'#333'};border:none;border-radius:6px;cursor:pointer"
+          onclick="window._puLibFilter.cat='${c}';document.getElementById('pu-lib-body').innerHTML=window._puLibRender()">${c}</button>`).join('')}
+      </div>
+      <div style="max-height:400px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+        ${filtered.length === 0 ? '<div style="padding:20px;text-align:center;color:var(--muted)">沒有符合的品項</div>' :
+          filtered.map(it => `<div style="padding:8px 12px;border-bottom:1px solid #f0f0f0;cursor:pointer;display:flex;justify-content:space-between;align-items:center"
+            onmouseover="this.style.background='#e0f2f1'" onmouseout="this.style.background=''"
+            onclick="window._puPickItem('${it.id}')">
+            <div>
+              <div style="font-weight:600">${it.name}</div>
+              ${it.note?`<div style="font-size:11px;color:var(--muted)">${it.note}</div>`:''}
+            </div>
+            <div style="display:flex;align-items:center;gap:8px">
+              <span class="tag tag-blue" style="font-size:10px">${it.category||'—'}</span>
+              ${it.usage_count>0?`<span style="font-size:10px;color:var(--muted)">用 ${it.usage_count}x</span>`:''}
+            </div>
+          </div>`).join('')}
+      </div>
+    `;
+  };
+  window._puLibRender = _render;
+  showModal('📋 選擇品項', `<div id="pu-lib-body">${_render()}</div>`, [
+    { label:'取消', onclick: closeModal },
+  ], { wide: true });
+};
+
+window._puPickItem = function(id) {
+  const it = (state.data.purchaseItems||[]).find(x=>x.id===id);
+  if (!it) return;
+  closeModal();
+  setTimeout(() => {
+    const itemEl = document.getElementById('pu-item');
+    const catEl = document.getElementById('pu-category');
+    const linkEl = document.getElementById('pu-link');
+    if (itemEl) itemEl.value = it.name;
+    if (catEl && it.category) catEl.value = it.category;
+    if (linkEl && it.reference_link) linkEl.value = it.reference_link;
+  }, 100);
+};
 
 // 選品項自動帶入類別/連結
 window._puAutoFillFromItem = function(name) {
