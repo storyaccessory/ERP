@@ -636,6 +636,7 @@ const PAGES = {
   restock:    { label: '補貨管理',     icon: '🔄', section: '製作部' },
   repair:     { label: '維修管理',     icon: '🔧', section: '製作部' },
   // 物料管理
+  purchases:  { label: '採購申請',     icon: '🛒', section: '物料管理' },
   pickup:     { label: '抓料清單',     icon: '📋', section: '物料管理' },
   castings:   { label: '鑄件管理',     icon: '⚙️', section: '物料管理' },
   parts:      { label: '零件管理',     icon: '🔩', section: '物料管理' },
@@ -763,6 +764,7 @@ async function loadPageData(page) {
     peripheral: loadPeripheral,
     shipments:  loadShipments,
     postage:    loadPostage,
+    purchases:  loadPurchases,
   };
   if (loaders[page]) {
     try { await loaders[page](); } catch(e) { console.error(e); }
@@ -26670,6 +26672,7 @@ const pageRenderers = {
   peripheral: renderPeripheral,
   shipments:  renderShipments,
   postage:    renderPostage,
+  purchases:  renderPurchases,
 };
 
 const pageTitle = Object.fromEntries(Object.entries(PAGES).map(([k,v])=>[k,v.label]));
@@ -26813,6 +26816,15 @@ function bindEvents() {
   // 維修狀態 tab
   document.querySelectorAll('[data-repair-status]').forEach(el => {
     el.onclick = () => { state.data._repairStatusFilter = el.dataset.repairStatus; renderApp(); };
+  });
+  // 採購狀態 tab
+  document.querySelectorAll('[data-purchase-status]').forEach(el => {
+    el.onclick = () => { state.data._purchaseStatus = el.dataset.purchaseStatus; renderApp(); };
+  });
+  document.getElementById('_purchase-search')?.addEventListener('input', (e) => {
+    state.data._purchaseSearch = e.target.value;
+    clearTimeout(window.__puSearchT);
+    window.__puSearchT = setTimeout(() => renderApp(), 200);
   });
   // 維修搜尋
   document.getElementById('_repair-search')?.addEventListener('input', (e) => {
@@ -27767,6 +27779,10 @@ async function handleAction(action, id, dataset) {
 
     case 'add-repair':
       window._openRepairModal(null);
+      break;
+
+    case 'add-purchase':
+      window.openPurchaseModal(null);
       break;
 
     case 'edit-repair':
@@ -29020,6 +29036,371 @@ window.salesDayInput = salesDayInput;
 window.salesExpInput = salesExpInput;
 window.salesSaveGoalNoRedraw = salesSaveGoalNoRedraw;
 window.salesSetRate = salesSetRate;
+
+// ══════════════════════════════════════════════
+// 🛒 採購申請
+// ══════════════════════════════════════════════
+const PURCHASE_CATEGORIES = ['包材','耗材','零件','辦公用品','其他'];
+const PURCHASE_STATUSES = ['待採購','已採購','已到貨','結案','暫不採購'];
+// 採購負責人白名單(可視需要調整)
+const PURCHASER_NAMES = ['蔡采玲','劉怡汝'];
+
+async function loadPurchases() {
+  const [{ data }, { data: users }] = await Promise.all([
+    db.from('purchase_requests').select('*').order('request_date', { ascending: false }).order('created_at', { ascending: false }),
+    (state.data.users?.length ? Promise.resolve({data: state.data.users}) : db.from('profiles').select('id,name,email,role,is_active').order('name')),
+  ]);
+  state.data.purchases = data || [];
+  if (users) state.data.users = users;
+}
+
+function renderPurchases() {
+  const list = state.data.purchases || [];
+  const users = state.data.users || [];
+  const _ep = effectiveProfile() || {};
+  const isBoss = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
+
+  const activeStatus = state.data._purchaseStatus || '全部';
+  const searchQ = (state.data._purchaseSearch || '').toLowerCase().trim();
+
+  let filtered = list;
+  if (activeStatus !== '全部') filtered = filtered.filter(r => r.status === activeStatus);
+  if (searchQ) filtered = filtered.filter(r =>
+    (r.item_name||'').toLowerCase().includes(searchQ) ||
+    (r.requester_name||'').toLowerCase().includes(searchQ) ||
+    (r.purchaser_name||'').toLowerCase().includes(searchQ) ||
+    (r.category||'').toLowerCase().includes(searchQ)
+  );
+
+  const cnt = s => list.filter(r => r.status === s).length;
+  const stats = { 待採購: cnt('待採購'), 已採購: cnt('已採購'), 已到貨: cnt('已到貨'), 結案: cnt('結案'), 暫不採購: cnt('暫不採購') };
+
+  const statusColor = { '待採購':'tag-orange','已採購':'tag-blue','已到貨':'tag-teal','結案':'tag-green','暫不採購':'tag-grey' };
+  const catColor = { '包材':'#e1f5fe','耗材':'#fff3e0','零件':'#e8f5e9','辦公用品':'#f3e5f5','其他':'#f5f5f5' };
+  const catText  = { '包材':'#0277bd','耗材':'#e65100','零件':'#2e7d32','辦公用品':'#6a1b9a','其他':'#616161' };
+
+  return `
+    <div class="cards cards-4" style="margin-bottom:16px">
+      <div class="card"><div class="card-title">⏳ 待採購</div><div class="card-value warning">${stats.待採購}</div></div>
+      <div class="card"><div class="card-title">📮 已採購</div><div class="card-value accent">${stats.已採購}</div></div>
+      <div class="card"><div class="card-title">📦 已到貨</div><div class="card-value">${stats.已到貨}</div></div>
+      <div class="card"><div class="card-title">✅ 結案</div><div class="card-value success">${stats.結案}</div></div>
+    </div>
+    <div class="tabs">
+      ${['全部','待採購','已採購','已到貨','結案','暫不採購'].map(s =>
+        `<div class="tab ${activeStatus===s?'active':''}" data-purchase-status="${s}">${s}${s!=='全部' && stats[s]?` <span style="opacity:.6">(${stats[s]})</span>`:''}</div>`
+      ).join('')}
+    </div>
+    <div class="search-bar">
+      <input class="search-input" id="_purchase-search" placeholder="搜尋 品項 / 申請人 / 負責人 / 類別…" value="${searchQ}">
+      <button class="btn btn-primary" data-action="add-purchase">+ 新增採購申請</button>
+    </div>
+    <div class="card">
+      <div class="table-wrap">
+        <table>
+          <thead><tr>
+            <th style="width:110px">申請日</th>
+            <th style="width:70px">類別</th>
+            <th>品項</th>
+            <th style="width:120px">預計數 / 庫存</th>
+            <th style="width:80px">申請人</th>
+            <th style="width:80px">負責人</th>
+            <th style="width:80px">狀態</th>
+            <th style="width:100px">實際採購</th>
+            <th style="width:110px">操作</th>
+          </tr></thead>
+          <tbody>
+          ${filtered.length===0 ? `<tr><td colspan="9"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
+            filtered.map(r => `<tr style="cursor:pointer" onclick="window.openPurchaseModal('${r.id}')">
+              <td style="font-size:11px;color:var(--muted)">${r.request_date||''}${r.request_no?`<div style="font-size:10px">${r.request_no}</div>`:''}</td>
+              <td><span style="background:${catColor[r.category]||'#f5f5f5'};color:${catText[r.category]||'#666'};padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600">${r.category||'—'}</span></td>
+              <td>
+                <div style="font-size:13px;font-weight:600">${r.item_name}</div>
+                ${r.notes?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${r.notes}</div>`:''}
+                ${r.reference_link?`<a href="${r.reference_link}" target="_blank" onclick="event.stopPropagation()" style="font-size:11px;color:var(--accent)">🔗 連結</a>`:''}
+              </td>
+              <td style="font-size:12px">
+                ${r.expected_qty?`<div>需 ${r.expected_qty}</div>`:''}
+                ${r.current_stock?`<div style="color:var(--muted)">現 ${r.current_stock}</div>`:''}
+              </td>
+              <td style="font-size:12px">${r.requester_name||'—'}</td>
+              <td style="font-size:12px;font-weight:600">${r.purchaser_name||'—'}</td>
+              <td><span class="tag ${statusColor[r.status]||'tag-grey'}">${r.status}</span></td>
+              <td style="font-size:12px">
+                ${r.actual_qty?`<div>${r.actual_qty}</div>`:'—'}
+                ${r.actual_amount?`<div style="color:var(--muted)">$${Number(r.actual_amount).toLocaleString()}</div>`:''}
+                ${r.arrived_date?`<div style="color:#2e7d32;font-size:10px">📦 ${r.arrived_date.slice(5)}</div>`:''}
+              </td>
+              <td onclick="event.stopPropagation()">
+                <button class="btn-table" onclick="window.openPurchaseModal('${r.id}')">開啟</button>
+                ${isBoss ? `<button class="btn-table danger" style="margin-left:2px" onclick="window.deletePurchase('${r.id}')">刪</button>` : ''}
+              </td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+  `;
+}
+
+// 開啟採購申請 modal(新增/編輯)
+window.openPurchaseModal = async function(id) {
+  const users = state.data.users || [];
+  let r;
+  if (id) {
+    r = (state.data.purchases||[]).find(x=>x.id===id);
+    if (!r) { const {data} = await db.from('purchase_requests').select('*').eq('id',id).single(); r = data; }
+    if (!r) { showToast('找不到申請','error'); return; }
+  } else {
+    r = {
+      id: null,
+      request_no: `PR-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${String(Math.floor(Math.random()*900)+100)}`,
+      requester_id: state.user?.id,
+      requester_name: state.profile?.name || state.user?.email || '',
+      request_date: _localToday(),
+      status: '待採購',
+    };
+  }
+  const _ep = effectiveProfile() || {};
+  const isBoss = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com';
+  const canEdit = !r.id || isBoss || r.requester_id === state.user?.id || r.purchaser_id === state.user?.id;
+  // 負責人選單:白名單優先,再列出所有 users
+  const purchaserOpts = users.filter(u => u.is_active !== false).map(u => {
+    const isRec = PURCHASER_NAMES.includes(u.name);
+    return `<option value="${u.id}" data-name="${u.name}" ${r.purchaser_id===u.id?'selected':''}>${isRec?'⭐ ':''}${u.name}</option>`;
+  }).join('');
+
+  const html = `
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:12px">
+      <div><strong>${r.request_no}</strong></div>
+      <span class="tag ${{ '待採購':'tag-orange','已採購':'tag-blue','已到貨':'tag-teal','結案':'tag-green','暫不採購':'tag-grey' }[r.status]||'tag-grey'}">${r.status}</span>
+    </div>
+
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin-bottom:6px">📝 申請資訊</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="form-group"><label>申請人</label>
+        <input class="form-control" id="pu-requester" value="${r.requester_name||''}" ${r.id?'disabled':''}>
+      </div>
+      <div class="form-group"><label>申請日期</label>
+        <input type="date" class="form-control" id="pu-date" value="${r.request_date||_localToday()}">
+      </div>
+      <div class="form-group"><label>類別</label>
+        <select class="form-control" id="pu-category">
+          <option value="">— 選擇 —</option>
+          ${PURCHASE_CATEGORIES.map(c=>`<option ${r.category===c?'selected':''}>${c}</option>`).join('')}
+        </select>
+      </div>
+    </div>
+
+    <div class="form-group"><label>品項名稱 *</label>
+      <input class="form-control" id="pu-item" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱-12號、K金擦拭布">
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group"><label>預計採購數量</label>
+        <input class="form-control" id="pu-expected" value="${(r.expected_qty||'').replace(/"/g,'&quot;')}" placeholder="支援文字,如 100 或 藍*5 粉*3">
+      </div>
+      <div class="form-group"><label>目前庫存</label>
+        <input class="form-control" id="pu-stock" value="${(r.current_stock||'').replace(/"/g,'&quot;')}" placeholder="支援文字">
+      </div>
+    </div>
+    <div class="form-group"><label>參考連結(選填)</label>
+      <input class="form-control" id="pu-link" value="${r.reference_link||''}" placeholder="https://...">
+    </div>
+    <div class="form-group"><label>備註(選填)</label>
+      <textarea class="form-control" id="pu-notes" rows="2">${r.notes||''}</textarea>
+    </div>
+
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:14px 0 6px">🎯 指派採購負責人</div>
+    <div class="form-group">
+      <select class="form-control" id="pu-purchaser">
+        <option value="">— 選擇負責人 —</option>
+        ${purchaserOpts}
+      </select>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">⭐ = 建議採購人;指派後會自動加入該負責人的行事曆提醒</div>
+    </div>
+
+    ${['已採購','已到貨','結案'].includes(r.status) || r.actual_qty || r.actual_amount ? `
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:14px 0 6px">💰 採購執行</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="form-group"><label>實際採購數量</label>
+        <input class="form-control" id="pu-actual-qty" value="${(r.actual_qty||'').replace(/"/g,'&quot;')}">
+      </div>
+      <div class="form-group"><label>採購金額</label>
+        <input type="number" class="form-control" id="pu-actual-amt" value="${r.actual_amount||''}">
+      </div>
+      <div class="form-group"><label>採購日期</label>
+        <input type="date" class="form-control" id="pu-purchase-date" value="${r.purchase_date||''}">
+      </div>
+    </div>
+    <div class="form-group"><label>廠商(選填)</label>
+      <input class="form-control" id="pu-vendor" value="${(r.vendor||'').replace(/"/g,'&quot;')}">
+    </div>` : ''}
+
+    ${['已到貨','結案'].includes(r.status) || r.arrived_date ? `
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:14px 0 6px">📦 到貨資訊</div>
+    <div class="form-group"><label>到貨日期</label>
+      <input type="date" class="form-control" id="pu-arrived-date" value="${r.arrived_date||''}">
+    </div>
+    <div class="form-group"><label>到貨備註</label>
+      <input class="form-control" id="pu-arrived-note" value="${(r.arrived_note||'').replace(/"/g,'&quot;')}">
+    </div>` : ''}
+  `;
+
+  const btns = [];
+  if (r.status === '待採購') {
+    btns.push({ label:'💾 儲存', primary:true, onclick: async () => await window._puSave(r.id, r) });
+    btns.push({ label:'✅ 標記已採購', onclick: async () => await window._puMoveStatus(r.id, r, '已採購') });
+    btns.push({ label:'🚫 暫不採購', onclick: async () => await window._puMoveStatus(r.id, r, '暫不採購') });
+  } else if (r.status === '已採購') {
+    btns.push({ label:'💾 儲存', primary:true, onclick: async () => await window._puSave(r.id, r) });
+    btns.push({ label:'📦 標記已到貨', onclick: async () => await window._puMoveStatus(r.id, r, '已到貨') });
+  } else if (r.status === '已到貨') {
+    btns.push({ label:'💾 儲存', primary:true, onclick: async () => await window._puSave(r.id, r) });
+    btns.push({ label:'✅ 結案', onclick: async () => await window._puMoveStatus(r.id, r, '結案') });
+  } else {
+    btns.push({ label:'💾 儲存', primary:true, onclick: async () => await window._puSave(r.id, r) });
+    btns.push({ label:'↩ 重新開啟', onclick: async () => await window._puMoveStatus(r.id, r, '待採購') });
+  }
+  btns.push({ label:'關閉', onclick: closeModal });
+
+  showModal(id ? `🛒 採購申請 ${r.request_no}` : '🛒 新增採購申請', html, btns, { wide: true });
+};
+
+// 收集表單欄位
+window._puCollect = function(existing) {
+  const purSel = document.getElementById('pu-purchaser');
+  const purOpt = purSel?.selectedOptions[0];
+  return {
+    request_no: existing?.request_no || `PR-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${String(Math.floor(Math.random()*900)+100)}`,
+    requester_id: existing?.requester_id || state.user?.id || null,
+    requester_name: existing?.requester_name || state.profile?.name || state.user?.email || '',
+    request_date: document.getElementById('pu-date')?.value || _localToday(),
+    category: document.getElementById('pu-category')?.value || null,
+    item_name: document.getElementById('pu-item')?.value.trim() || null,
+    expected_qty: document.getElementById('pu-expected')?.value.trim() || null,
+    current_stock: document.getElementById('pu-stock')?.value.trim() || null,
+    reference_link: document.getElementById('pu-link')?.value.trim() || null,
+    notes: document.getElementById('pu-notes')?.value.trim() || null,
+    purchaser_id: purSel?.value || null,
+    purchaser_name: purOpt?.dataset?.name || null,
+    actual_qty: document.getElementById('pu-actual-qty')?.value.trim() || null,
+    actual_amount: parseFloat(document.getElementById('pu-actual-amt')?.value) || null,
+    vendor: document.getElementById('pu-vendor')?.value.trim() || null,
+    purchase_date: document.getElementById('pu-purchase-date')?.value || null,
+    arrived_date: document.getElementById('pu-arrived-date')?.value || null,
+    arrived_note: document.getElementById('pu-arrived-note')?.value.trim() || null,
+    updated_at: new Date().toISOString(),
+  };
+};
+
+// 建立/更新行事曆事件(採購提醒)
+async function _puSyncCalendar(purchaseRow) {
+  if (!purchaseRow.purchaser_id) return null;
+  const title = `🛒 採購:${purchaseRow.item_name}${purchaseRow.expected_qty?` × ${purchaseRow.expected_qty}`:''}`;
+  const desc = [
+    purchaseRow.category ? `類別:${purchaseRow.category}` : '',
+    purchaseRow.current_stock ? `目前庫存:${purchaseRow.current_stock}` : '',
+    purchaseRow.reference_link ? `連結:${purchaseRow.reference_link}` : '',
+    purchaseRow.notes ? `備註:${purchaseRow.notes}` : '',
+    `申請人:${purchaseRow.requester_name||''}`,
+  ].filter(Boolean).join('\n');
+  const payload = {
+    title,
+    event_type: 'purchase',
+    start_date: purchaseRow.request_date,
+    end_date: purchaseRow.request_date,
+    priority: '中',
+    description: desc,
+    assigned_to: purchaseRow.purchaser_id,
+    assignee_ids: [purchaseRow.purchaser_id],
+  };
+  if (purchaseRow.calendar_event_id) {
+    // 更新既有事件
+    await db.from('calendar_events').update(payload).eq('id', purchaseRow.calendar_event_id);
+    return purchaseRow.calendar_event_id;
+  } else {
+    payload.created_by = state.user?.id || null;
+    const { data } = await db.from('calendar_events').insert(payload).select().single();
+    return data?.id || null;
+  }
+}
+
+// 完成行事曆事件(採購結案)
+async function _puCompleteCalendar(eventId) {
+  if (!eventId) return;
+  await db.from('calendar_events').update({ completed_at: new Date().toISOString() }).eq('id', eventId);
+}
+
+window._puSave = async function(id, existing) {
+  const fields = window._puCollect(existing);
+  if (!fields.item_name) { showToast('請填品項名稱','error'); return; }
+  if (id) {
+    // 同步行事曆
+    let calId = existing.calendar_event_id;
+    if (fields.purchaser_id) {
+      calId = await _puSyncCalendar({ ...existing, ...fields, calendar_event_id: existing.calendar_event_id });
+    }
+    fields.calendar_event_id = calId;
+    const { error } = await db.from('purchase_requests').update(fields).eq('id', id);
+    if (error) { showToast('儲存失敗:'+error.message,'error'); return; }
+    showToast('已儲存 ✅');
+  } else {
+    fields.status = '待採購';
+    const { data, error } = await db.from('purchase_requests').insert(fields).select().single();
+    if (error) { showToast('建立失敗:'+error.message,'error'); return; }
+    if (data && fields.purchaser_id) {
+      const calId = await _puSyncCalendar(data);
+      if (calId) await db.from('purchase_requests').update({ calendar_event_id: calId }).eq('id', data.id);
+    }
+    showToast('已建立採購申請 ✅');
+  }
+  closeModal(); await loadPurchases(); renderApp();
+};
+
+window._puMoveStatus = async function(id, existing, newStatus) {
+  if (!id) {
+    // 若尚未存過,先存
+    const savedId = await (async () => {
+      const fields = window._puCollect(existing);
+      if (!fields.item_name) { showToast('請填品項名稱','error'); return null; }
+      fields.status = newStatus;
+      const { data, error } = await db.from('purchase_requests').insert(fields).select().single();
+      if (error) { showToast('建立失敗:'+error.message,'error'); return null; }
+      if (data && fields.purchaser_id) {
+        const calId = await _puSyncCalendar(data);
+        if (calId) await db.from('purchase_requests').update({ calendar_event_id: calId }).eq('id', data.id);
+      }
+      return data?.id || null;
+    })();
+    if (!savedId) return;
+    showToast(`已建立並標記為 ${newStatus}`);
+    closeModal(); await loadPurchases(); renderApp();
+    return;
+  }
+  const fields = window._puCollect(existing);
+  fields.status = newStatus;
+  // 到貨自動填今天
+  if (newStatus === '已到貨' && !fields.arrived_date) fields.arrived_date = _localToday();
+  // 已採購自動填今天
+  if (newStatus === '已採購' && !fields.purchase_date) fields.purchase_date = _localToday();
+  // 結案 or 到貨 → 標記行事曆完成
+  if (['已到貨','結案'].includes(newStatus) && existing.calendar_event_id) {
+    await _puCompleteCalendar(existing.calendar_event_id);
+  }
+  const { error } = await db.from('purchase_requests').update(fields).eq('id', id);
+  if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  showToast(`已標記為 ${newStatus} ✅`);
+  closeModal(); await loadPurchases(); renderApp();
+};
+
+window.deletePurchase = async function(id) {
+  const r = (state.data.purchases||[]).find(x=>x.id===id);
+  if (!r) return;
+  if (!confirm(`確定刪除「${r.item_name}」?`)) return;
+  if (r.calendar_event_id) await db.from('calendar_events').delete().eq('id', r.calendar_event_id);
+  await db.from('purchase_requests').delete().eq('id', id);
+  showToast('已刪除'); await loadPurchases(); renderApp();
+};
 
 // 🖨️ 體驗店月報列印
 window.salesPrintExpStore = function(year, month1) {
