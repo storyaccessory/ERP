@@ -29503,7 +29503,7 @@ window.openPurchaseItemsAdmin = async function() {
                 <td style="padding:5px 6px;text-align:center;white-space:nowrap">
                   <button class="btn-table" style="padding:2px 6px;font-size:11px" onclick="window._puItemEdit('${it.id}')">編輯</button>
                   <button class="btn-table" style="padding:2px 6px;font-size:11px" onclick="window._puItemToggle('${it.id}',${!it.is_active})">${it.is_active?'停用':'啟用'}</button>
-                  <button class="btn-table danger" style="padding:2px 6px;font-size:11px" onclick="window._puItemDelete('${it.id}','${(it.name||'').replace(/'/g,'\\\\\\'')}',${it.usage_count||0})">刪</button>
+                  <button class="btn-table danger" style="padding:2px 6px;font-size:11px" onclick="window._puItemDelete('${it.id}',${it.usage_count||0})">刪</button>
                 </td>
               </tr>`).join('')}
           </tbody>
@@ -29573,7 +29573,9 @@ window._puItemToggle = async function(id, active) {
   state.data.purchaseItems = data || [];
   document.getElementById('pi-body').innerHTML = window._renderPuItemsBody();
 };
-window._puItemDelete = async function(id, name, usageCount) {
+window._puItemDelete = async function(id, usageCount) {
+  const it = (state.data.purchaseItems||[]).find(x=>x.id===id);
+  const name = it?.name || '此品項';
   let msg = `確定刪除品項「${name}」?`;
   if (usageCount > 0) msg += `\n⚠️ 此品項已被申請過 ${usageCount} 次(申請紀錄不受影響,只是下拉選單不再出現)`;
   if (!confirm(msg)) return;
