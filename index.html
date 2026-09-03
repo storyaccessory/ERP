@@ -790,7 +790,7 @@ async function loadDashboard() {
   const _mealYmStr = _mealYmDate.getFullYear().toString() + String(_mealYmDate.getMonth()+1).padStart(2,'0');
   const _mealYmLabel = `${_mealYmDate.getFullYear()}年 ${_mealYmDate.getMonth()+1} 月`;
   const _thisYmStr = _mealYmStr; // 保留變數名供其他地方參考
-  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors, myApprovals, pendingApprovalsCount] = await Promise.all([
+  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors, myApprovals, pendingApprovalsCount, purchasesPending] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     _addCalPrivacyFilter(db.from('calendar_events')
@@ -827,6 +827,8 @@ async function loadDashboard() {
     (state.profile?.role === 'admin' || state.profile?.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com')
       ? db.from('approval_requests').select('id',{count:'exact',head:true}).eq('status','pending')
       : (myId ? db.from('approval_requests').select('id',{count:'exact',head:true}).eq('status','pending').eq('requested_by', myId) : Promise.resolve({count:0})),
+    // 採購申請待指派(給老闆看紅點)
+    db.from('purchase_requests').select('id,status').eq('status','待指派'),
   ]);
   // 把最新的 sales_daily 寫進 salesCache,確保首頁業績圖表的數字跟業績儀表板一致
   if (!state.data.salesCache) state.data.salesCache = {};
@@ -861,6 +863,7 @@ async function loadDashboard() {
     mealThis: mealThis.data || [],
     myApprovals: myApprovals?.data || [],
     pendingApprovalsCount: pendingApprovalsCount?.count || 0,
+    purchasesPendingCount: (purchasesPending?.data || []).length,
     ym: _thisYmStr,
     mealYmLabel: _mealYmLabel,
     today,
@@ -1515,6 +1518,7 @@ function renderSidebar() {
     repair: d.repair?.filter(r => !['已完成','已寄回','取消'].includes(r.status)).length || 0,
     approvals: pendingApprovals || 0,
     inquiries: (state.data.inquiries||[]).filter(i => i.status === '未處理').length || 0,
+    purchases: (state.data.purchases||[]).filter(p => p.status === '待指派').length || d.purchasesPendingCount || 0,
   };
 
   const secColors = { '業務追蹤':'#42a5f5','商品管理':'#ab47bc','製作部':'#ffa726','物料管理':'#26a69a','行銷':'#f472b6','財務':'#66bb6a','系統':'#90a4ae' };
@@ -1563,7 +1567,7 @@ function renderSidebar() {
       html += `<div class="nav-item ${state.page===p.key?'active':''}" data-page="${p.key}" data-sec="${sec}" draggable="true">
         <span class="drag-handle" title="拖曳排序">⠿</span>
         <span>${p.icon}</span><span>${p.label}</span>
-        ${b ? `<span class="badge${p.key==='restock' || p.key==='approvals'?' warn':''}" ${p.key==='approvals'?'style="background:#e53935;color:#fff;animation:pulseBadge 1.5s ease-in-out infinite"':''}>${b}</span>` : ''}
+        ${b ? `<span class="badge${p.key==='restock'?' warn':''}" ${(p.key==='approvals'||p.key==='purchases')?'style="background:#e53935;color:#fff;animation:pulseBadge 1.5s ease-in-out infinite"':''}>${b}</span>` : ''}
       </div>`;
     });
 
@@ -29041,16 +29045,17 @@ window.salesSetRate = salesSetRate;
 // 🛒 採購申請
 // ══════════════════════════════════════════════
 const PURCHASE_CATEGORIES = ['包材','耗材','零件','辦公用品','其他'];
-const PURCHASE_STATUSES = ['待採購','已採購','已到貨','結案','暫不採購'];
-// 採購負責人白名單(可視需要調整)
+const PURCHASE_STATUSES = ['待指派','待採購','已採購','已到貨','結案','暫不採購'];
 const PURCHASER_NAMES = ['蔡采玲','劉怡汝'];
 
 async function loadPurchases() {
-  const [{ data }, { data: users }] = await Promise.all([
+  const [{ data }, { data: users }, { data: items }] = await Promise.all([
     db.from('purchase_requests').select('*').order('request_date', { ascending: false }).order('created_at', { ascending: false }),
     (state.data.users?.length ? Promise.resolve({data: state.data.users}) : db.from('profiles').select('id,name,email,role,is_active').order('name')),
+    db.from('purchase_items').select('*').eq('is_active', true).order('usage_count', { ascending: false }),
   ]);
   state.data.purchases = data || [];
+  state.data.purchaseItems = items || [];
   if (users) state.data.users = users;
 }
 
@@ -29073,21 +29078,21 @@ function renderPurchases() {
   );
 
   const cnt = s => list.filter(r => r.status === s).length;
-  const stats = { 待採購: cnt('待採購'), 已採購: cnt('已採購'), 已到貨: cnt('已到貨'), 結案: cnt('結案'), 暫不採購: cnt('暫不採購') };
+  const stats = { 待指派: cnt('待指派'), 待採購: cnt('待採購'), 已採購: cnt('已採購'), 已到貨: cnt('已到貨'), 結案: cnt('結案'), 暫不採購: cnt('暫不採購') };
 
-  const statusColor = { '待採購':'tag-orange','已採購':'tag-blue','已到貨':'tag-teal','結案':'tag-green','暫不採購':'tag-grey' };
+  const statusColor = { '待指派':'tag-red','待採購':'tag-orange','已採購':'tag-blue','已到貨':'tag-teal','結案':'tag-green','暫不採購':'tag-grey' };
   const catColor = { '包材':'#e1f5fe','耗材':'#fff3e0','零件':'#e8f5e9','辦公用品':'#f3e5f5','其他':'#f5f5f5' };
   const catText  = { '包材':'#0277bd','耗材':'#e65100','零件':'#2e7d32','辦公用品':'#6a1b9a','其他':'#616161' };
 
   return `
     <div class="cards cards-4" style="margin-bottom:16px">
+      <div class="card" style="border-left:4px solid #e53935"><div class="card-title">🔔 待指派</div><div class="card-value" style="color:#c62828">${stats.待指派}</div></div>
       <div class="card"><div class="card-title">⏳ 待採購</div><div class="card-value warning">${stats.待採購}</div></div>
       <div class="card"><div class="card-title">📮 已採購</div><div class="card-value accent">${stats.已採購}</div></div>
-      <div class="card"><div class="card-title">📦 已到貨</div><div class="card-value">${stats.已到貨}</div></div>
       <div class="card"><div class="card-title">✅ 結案</div><div class="card-value success">${stats.結案}</div></div>
     </div>
     <div class="tabs">
-      ${['全部','待採購','已採購','已到貨','結案','暫不採購'].map(s =>
+      ${['全部','待指派','待採購','已採購','已到貨','結案','暫不採購'].map(s =>
         `<div class="tab ${activeStatus===s?'active':''}" data-purchase-status="${s}">${s}${s!=='全部' && stats[s]?` <span style="opacity:.6">(${stats[s]})</span>`:''}</div>`
       ).join('')}
     </div>
@@ -29158,9 +29163,10 @@ window.openPurchaseModal = async function(id) {
       requester_id: state.user?.id,
       requester_name: state.profile?.name || state.user?.email || '',
       request_date: _localToday(),
-      status: '待採購',
+      status: '待指派',
     };
   }
+  const purchaseItems = state.data.purchaseItems || [];
   const _ep = effectiveProfile() || {};
   const isBoss = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com';
   const canEdit = !r.id || isBoss || r.requester_id === state.user?.id || r.purchaser_id === state.user?.id;
@@ -29192,8 +29198,11 @@ window.openPurchaseModal = async function(id) {
       </div>
     </div>
 
-    <div class="form-group"><label>品項名稱 *</label>
-      <input class="form-control" id="pu-item" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱-12號、K金擦拭布">
+    <div class="form-group"><label>品項名稱 * <span style="font-size:11px;color:var(--muted);font-weight:400">(輸入時會自動提示已建檔品項)</span></label>
+      <input class="form-control" id="pu-item" list="pu-item-list" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱-12號、K金擦拭布" oninput="window._puAutoFillFromItem(this.value)">
+      <datalist id="pu-item-list">
+        ${purchaseItems.map(it => `<option value="${(it.name||'').replace(/"/g,'&quot;')}" data-cat="${it.category||''}" data-link="${it.reference_link||''}">${it.category ? `[${it.category}]` : ''}</option>`).join('')}
+      </datalist>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group"><label>預計採購數量</label>
@@ -29247,7 +29256,17 @@ window.openPurchaseModal = async function(id) {
   `;
 
   const btns = [];
-  if (r.status === '待採購') {
+  if (r.status === '待指派') {
+    if (!r.id) {
+      btns.push({ label:'📤 送出申請', primary:true, onclick: async () => await window._puSubmitNew(r) });
+    } else {
+      btns.push({ label:'💾 儲存', onclick: async () => await window._puSave(r.id, r) });
+      if (isBoss) {
+        btns.push({ label:'👉 指派並開始採購', primary:true, onclick: async () => await window._puAssign(r.id, r) });
+        btns.push({ label:'🚫 暫不採購', onclick: async () => await window._puMoveStatus(r.id, r, '暫不採購') });
+      }
+    }
+  } else if (r.status === '待採購') {
     btns.push({ label:'💾 儲存', primary:true, onclick: async () => await window._puSave(r.id, r) });
     btns.push({ label:'✅ 標記已採購', onclick: async () => await window._puMoveStatus(r.id, r, '已採購') });
     btns.push({ label:'🚫 暫不採購', onclick: async () => await window._puMoveStatus(r.id, r, '暫不採購') });
@@ -29330,6 +29349,45 @@ async function _puCompleteCalendar(eventId) {
   if (!eventId) return;
   await db.from('calendar_events').update({ completed_at: new Date().toISOString() }).eq('id', eventId);
 }
+
+// 選品項自動帶入類別/連結
+window._puAutoFillFromItem = function(name) {
+  const items = state.data.purchaseItems || [];
+  const found = items.find(it => it.name === name);
+  if (!found) return;
+  const cat = document.getElementById('pu-category');
+  const link = document.getElementById('pu-link');
+  if (cat && !cat.value && found.category) cat.value = found.category;
+  if (link && !link.value && found.reference_link) link.value = found.reference_link;
+};
+
+// 送出新申請(狀態 = 待指派)
+window._puSubmitNew = async function(existing) {
+  const fields = window._puCollect(existing);
+  if (!fields.item_name) { showToast('請填品項名稱','error'); return; }
+  fields.status = '待指派';
+  fields.purchaser_id = null;
+  fields.purchaser_name = null;
+  const { data, error } = await db.from('purchase_requests').insert(fields).select().single();
+  if (error) { showToast('送出失敗:'+error.message,'error'); return; }
+  // 更新 purchase_items usage_count
+  await db.from('purchase_items').update({ usage_count: 1 }).eq('name', fields.item_name).select();
+  showToast('✅ 已送出申請,等待老闆指派負責人'); closeModal(); await loadPurchases(); renderApp();
+};
+
+// 老闆指派負責人 → 狀態變 待採購 + 建行事曆
+window._puAssign = async function(id, existing) {
+  const fields = window._puCollect(existing);
+  if (!fields.purchaser_id) { showToast('請先選擇負責人','error'); return; }
+  fields.status = '待採購';
+  const merged = { ...existing, ...fields };
+  const calId = await _puSyncCalendar(merged);
+  fields.calendar_event_id = calId;
+  const { error } = await db.from('purchase_requests').update(fields).eq('id', id);
+  if (error) { showToast('指派失敗:'+error.message,'error'); return; }
+  showToast(`✅ 已指派給 ${fields.purchaser_name} · 已加入行事曆提醒`);
+  closeModal(); await loadPurchases(); renderApp();
+};
 
 window._puSave = async function(id, existing) {
   const fields = window._puCollect(existing);
