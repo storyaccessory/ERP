@@ -29083,6 +29083,8 @@ function renderPurchases() {
   const users = state.data.users || [];
   const _ep = effectiveProfile() || {};
   const isBoss = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
+  // 只有「老闆」(admin) 可以刪除採購申請,主管也不行
+  const isAdminOnly = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
 
   const activeStatus = state.data._purchaseStatus || '全部';
   const searchQ = (state.data._purchaseSearch || '').toLowerCase().trim();
@@ -29134,10 +29136,10 @@ function renderPurchases() {
             <th style="width:110px">採購狀態</th>
             <th style="width:110px">實際採購數</th>
             <th style="width:250px">實際到貨 (QC)</th>
-            ${isBoss?'<th style="width:40px"></th>':''}
+            <th style="width:40px"></th>
           </tr></thead>
           <tbody>
-          ${filtered.length===0 ? `<tr><td colspan="${isBoss?11:10}"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
+          ${filtered.length===0 ? `<tr><td colspan="11"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
             filtered.map(r => `<tr>
               <td style="font-size:12px">${r.request_date||''}</td>
               <td style="font-size:12px">${r.requester_name||'—'}</td>
@@ -29179,7 +29181,11 @@ function renderPurchases() {
                   onchange="window._puInlineArrived('${r.id}',this.value)">
                 ${r.arrived_date?`<div style="font-size:10px;color:#2e7d32;text-align:center;margin-top:2px">📦 ${r.arrived_date.slice(5)}</div>`:''}
               </td>
-              ${isBoss?`<td style="text-align:center"><button class="btn-table danger" style="padding:3px 6px;font-size:11px" onclick="window.deletePurchase('${r.id}')">🗑</button></td>`:''}
+              <td style="text-align:center">
+                ${(isAdminOnly || (r.status === '待指派' && r.requester_id === state.user?.id))
+                  ? `<button class="btn-table danger" style="padding:3px 6px;font-size:11px" onclick="window.deletePurchase('${r.id}')" title="${isAdminOnly?'老闆可刪除':'待指派 · 申請人可刪除'}">🗑</button>`
+                  : ''}
+              </td>
             </tr>`).join('')}
           </tbody>
         </table>
@@ -29539,12 +29545,12 @@ async function _puSyncCalendar(purchaseRow) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
     const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
     if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
-    const title = `外購品採購需求 (${subs.length} 項)`;
+    const title = `外購品採購需求`;
     await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
     return existing.id;
   } else {
     const payload = {
-      title: `外購品採購需求 (1 項)`,
+      title: `外購品採購需求`,
       event_type: 'purchase',
       event_date: dueDate,
       start_date: dueDate,
@@ -29628,12 +29634,12 @@ async function _puCreateQcReminder(purchaseRow) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
     const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
     if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
-    const title = `外購品點數量入庫 (${subs.length} 項)`;
+    const title = `外購品點數量入庫`;
     await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
     return existing.id;
   } else {
     const payload = {
-      title: `外購品點數量入庫 (1 項)`,
+      title: `外購品點數量入庫`,
       event_type: 'qc',
       event_date: dueDate,
       start_date: dueDate,
@@ -30077,6 +30083,14 @@ window._puInlineArrived = async function(id, note) {
 window.deletePurchase = async function(id) {
   const r = (state.data.purchases||[]).find(x=>x.id===id);
   if (!r) return;
+  // 權限檢查:老闆隨時可刪;待指派狀態下,申請人本人也可刪
+  const _ep = effectiveProfile() || {};
+  const isAdminOnly = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
+  const isRequesterAndPending = r.status === '待指派' && r.requester_id === state.user?.id;
+  if (!isAdminOnly && !isRequesterAndPending) {
+    showToast('只有老闆能刪除已指派的申請;待指派可由申請人本人刪除', 'error', 4000);
+    return;
+  }
   if (!confirm(`確定刪除「${r.item_name}」?`)) return;
   // 從行事曆事件移除對應子任務(而非整個事件)
   if (r.calendar_event_id) await _puRemoveSubtaskFromEvent(r.calendar_event_id, r.id);
