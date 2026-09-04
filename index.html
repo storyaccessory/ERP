@@ -30046,13 +30046,15 @@ window._puInlineStatus = async function(id, newStatus) {
 // 清單內直接編輯欄位(actual_qty 等)
 window._puInlineField = async function(id, field, value) {
   const upd = { [field]: value || null };
-  // 填了 actual_qty 而且狀態還是待採購 → 自動改為已採購
-  if (field === 'actual_qty' && value) {
-    const r = (state.data.purchases||[]).find(x=>x.id===id);
-    if (r && r.status === '待採購') {
+  const r = (state.data.purchases||[]).find(x=>x.id===id);
+  // 填了 actual_qty → 狀態改已採購 + 採購子任務自動打勾
+  if (field === 'actual_qty' && value && r) {
+    if (r.status === '待採購') {
       upd.status = '已採購';
-      upd.purchase_date = _localToday();
+      upd.purchase_date = upd.purchase_date || _localToday();
     }
+    // 採購子任務自動勾選完成
+    if (r.calendar_event_id) await _puMarkSubtaskDone(r.calendar_event_id, r.id);
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
