@@ -29122,7 +29122,7 @@ function renderPurchases() {
             <th style="width:90px">負責人</th>
             <th style="width:110px">採購狀態</th>
             <th style="width:110px">實際採購數</th>
-            <th style="width:130px">實際到貨 (QC)</th>
+            <th style="width:200px">實際到貨 (QC)</th>
             ${isBoss?'<th style="width:40px"></th>':''}
           </tr></thead>
           <tbody>
@@ -29136,12 +29136,12 @@ function renderPurchases() {
                 ${r.notes?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${r.notes}</div>`:''}
                 ${r.reference_link?`<a href="${r.reference_link}" target="_blank" onclick="event.stopPropagation()" style="font-size:11px;color:var(--accent)">🔗 連結</a>`:''}
               </td>
-              <td style="font-size:12px;text-align:center">${r.expected_qty||'—'}</td>
+              <td style="font-size:13px;text-align:center;color:#c62828;font-weight:700">${r.expected_qty||'—'}</td>
               <td style="font-size:12px;text-align:center;color:var(--muted)">${r.current_stock||'—'}</td>
               <td>
                 <select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${!r.purchaser_id?'#fff3e0':'#e0f2f1'};color:${!r.purchaser_id?'#e65100':'#00695c'};width:100%"
                   onchange="window._puInlinePurchaser('${r.id}',this)">
-                  <option value="">— 未指派 —</option>
+                  <option value="">未指派</option>
                   ${(() => {
                     const active = (users||[]).filter(u=>u.is_active!==false);
                     const top = PURCHASER_NAMES.map(n => active.find(u=>u.name===n)).filter(Boolean);
