@@ -136,6 +136,17 @@ a { text-decoration: none; color: inherit; }
   0%,100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(229,57,53,.6); }
   50% { transform: scale(1.15); box-shadow: 0 0 0 6px rgba(229,57,53,0); }
 }
+/* 拿掉 date input 右邊的日曆圖示,點欄位就會彈出日曆 */
+input[type="date"]::-webkit-calendar-picker-indicator {
+  opacity: 0;
+  position: absolute;
+  right: 0;
+  width: 100%;
+  height: 100%;
+  cursor: pointer;
+}
+input[type="date"] { position: relative; cursor: pointer; }
+
 /* 列印模式:A4 直式一頁裝下 */
 @media print {
   @page { size: A4 portrait; margin: 10mm; }
@@ -29137,12 +29148,13 @@ function renderPurchases() {
             <th style="width:90px">採購日期</th>
             <th style="width:110px">實際採購數</th>
             <th style="width:100px">到貨日期</th>
-            <th style="width:250px">實際到貨 (QC)</th>
+            <th style="width:110px">實際入庫數</th>
+            <th style="width:200px">QC 備註</th>
             <th style="width:110px">QC 入庫日期</th>
             <th style="width:40px"></th>
           </tr></thead>
           <tbody>
-          ${filtered.length===0 ? `<tr><td colspan="14"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
+          ${filtered.length===0 ? `<tr><td colspan="15"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
             filtered.map(r => `<tr>
               <td style="font-size:12px">${r.request_date||''}</td>
               <td style="font-size:12px">${r.requester_name||'—'}</td>
@@ -29179,7 +29191,7 @@ function renderPurchases() {
                   onchange="window._puInlineField('${r.id}','purchase_date',this.value)">
               </td>
               <td>
-                <input type="text" value="${(r.actual_qty||'').toString().replace(/"/g,'&quot;')}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px"
+                <input type="number" min="0" step="1" value="${r.actual_qty||''}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px"
                   onchange="window._puInlineField('${r.id}','actual_qty',this.value)">
               </td>
               <td>
@@ -29188,8 +29200,13 @@ function renderPurchases() {
                   title="物品實際到達日期(集運/自取);填了自動變已到貨並提醒申請人 QC">
               </td>
               <td>
-                <input type="text" value="${(r.arrived_note||'').toString().replace(/"/g,'&quot;')}" placeholder="QC 備註/實收" style="width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:${r.arrived_date?'#e8f5e9':''}"
-                  onchange="window._puInlineArrived('${r.id}',this.value)">
+                <input type="number" min="0" step="1" value="${r.qc_qty||''}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px;background:${r.qc_qty?'#e8f5e9':''}"
+                  onchange="window._puInlineQcQty('${r.id}',this.value)"
+                  title="QC 點過的實收數量,填了自動結案">
+              </td>
+              <td>
+                <input type="text" value="${(r.arrived_note||'').toString().replace(/"/g,'&quot;')}" placeholder="備註(選填)" style="width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px"
+                  onchange="window._puInlineField('${r.id}','arrived_note',this.value)">
               </td>
               <td>
                 <input type="date" value="${r.arrived_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:${r.arrived_date?'#e8f5e9':''}"
@@ -29299,8 +29316,8 @@ window.openPurchaseBatchModal = function() {
           <tr>
             <th style="padding:6px;width:100px">類別</th>
             <th style="padding:6px">品項名稱 *</th>
-            <th style="padding:6px;width:120px">預計數量</th>
-            <th style="padding:6px;width:120px">目前庫存</th>
+            <th style="padding:6px;width:120px">預計數量 <span style="color:var(--danger)">*</span></th>
+            <th style="padding:6px;width:120px">目前庫存 <span style="color:var(--danger)">*</span></th>
             <th style="padding:6px">備註</th>
             <th style="padding:6px;width:40px"></th>
           </tr>
@@ -29317,6 +29334,12 @@ window.openPurchaseBatchModal = function() {
     { label:'📤 送出全部', primary:true, onclick: async () => {
       const rows = (state.data._puBatchRows||[]).filter(r => r.item_name && r.item_name.trim());
       if (!rows.length) { showToast('至少要填一項','error'); return; }
+      // 必填驗證:每筆都要有預計採購數量 + 目前庫存
+      const missing = rows.filter(r => !r.expected_qty || !r.expected_qty.toString().trim() || !r.current_stock || !r.current_stock.toString().trim());
+      if (missing.length) {
+        showToast(`請填寫「預計採購數量」和「目前庫存」:${missing.map(r=>r.item_name).join('、')}`, 'error', 5000);
+        return;
+      }
       const today = _localToday();
       const chosenDate = document.getElementById('pub-date')?.value || today;
       const reqSel = document.getElementById('pub-requester');
@@ -30109,6 +30132,34 @@ window._puInlineField = async function(id, field, value) {
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  await loadPurchases(); renderApp();
+};
+
+// 填實際入庫數(qc_qty)→ 結案 + 兩個子任務都打勾 + 自動填 QC 入庫日期
+window._puInlineQcQty = async function(id, value) {
+  const r = (state.data.purchases||[]).find(x=>x.id===id);
+  if (!r) return;
+  const val = value === '' ? null : parseFloat(value);
+  const upd = { qc_qty: val };
+  if (val != null && !isNaN(val)) {
+    upd.status = '結案';
+    if (!r.arrived_date) upd.arrived_date = _localToday();
+    if (!r.arrival_date) upd.arrival_date = r.arrival_date || _localToday();
+    if (r.calendar_event_id) await _puMarkSubtaskDone(r.calendar_event_id, r.id);
+    let qcId = r.qc_event_id;
+    if (!qcId) {
+      qcId = await _puCreateQcReminder({ ...r, ...upd });
+      if (qcId) upd.qc_event_id = qcId;
+    }
+    if (qcId) await _puMarkSubtaskDone(qcId, r.id);
+  } else {
+    // 清空 → 退回已到貨
+    if (r.status === '結案') upd.status = '已到貨';
+    if (r.qc_event_id) await _puUncheckSubtask(r.qc_event_id, r.id);
+  }
+  const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
+  if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  if (val != null) showToast(`已入庫 ${val} · 結案 ✅`);
   await loadPurchases(); renderApp();
 };
 
