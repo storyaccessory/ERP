@@ -25632,8 +25632,19 @@ window._calToggleSubtask = async function(evId, subIdx, checked) {
   const doneCount = ev.subtasks.filter(s=>s.done).length;
   const bar = document.querySelector('#cal-view-sub-0')?.closest('[style*="margin-bottom:12px"]')?.querySelector('[style*="background:var(--accent)"]');
   if (bar) bar.style.width = Math.round(doneCount/ev.subtasks.length*100)+'%';
+  // 若全部子任務都完成 → 母任務也自動 completed
+  const allDone = ev.subtasks.length > 0 && ev.subtasks.every(s => s.done);
+  const upd = { subtasks: ev.subtasks };
+  if (allDone && !ev.completed_at) upd.completed_at = new Date().toISOString();
+  else if (!allDone && ev.completed_at) upd.completed_at = null;  // 取消勾選 → 母任務也復原
   // 寫回 DB,真的失敗就回滾 UI 並提示
-  const { error } = await db.from('calendar_events').update({ subtasks: ev.subtasks }).eq('id', evId);
+  const { error } = await db.from('calendar_events').update(upd).eq('id', evId);
+  if (!error && upd.completed_at && allDone) {
+    ev.completed_at = upd.completed_at;
+    showToast('所有子任務完成 → 母任務自動結案 ✅');
+  } else if (!error && !allDone && ev.completed_at === null && upd.completed_at === null) {
+    ev.completed_at = null;
+  }
   if (error) {
     // 回滾本地狀態與畫面
     ev.subtasks[subIdx].done = prevDone;
