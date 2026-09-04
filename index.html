@@ -29137,10 +29137,11 @@ function renderPurchases() {
             <th style="width:90px">採購日期</th>
             <th style="width:110px">實際採購數</th>
             <th style="width:250px">實際到貨 (QC)</th>
+            <th style="width:110px">QC 入庫日期</th>
             <th style="width:40px"></th>
           </tr></thead>
           <tbody>
-          ${filtered.length===0 ? `<tr><td colspan="12"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
+          ${filtered.length===0 ? `<tr><td colspan="13"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
             filtered.map(r => `<tr>
               <td style="font-size:12px">${r.request_date||''}</td>
               <td style="font-size:12px">${r.requester_name||'—'}</td>
@@ -29183,7 +29184,10 @@ function renderPurchases() {
               <td>
                 <input type="text" value="${(r.arrived_note||'').toString().replace(/"/g,'&quot;')}" placeholder="QC 備註/實收" style="width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:${r.arrived_date?'#e8f5e9':''}"
                   onchange="window._puInlineArrived('${r.id}',this.value)">
-                ${r.arrived_date?`<div style="font-size:10px;color:#2e7d32;text-align:center;margin-top:2px">📦 ${r.arrived_date.slice(5)}</div>`:''}
+              </td>
+              <td>
+                <input type="date" value="${r.arrived_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:${r.arrived_date?'#e8f5e9':''}"
+                  onchange="window._puInlineField('${r.id}','arrived_date',this.value)">
               </td>
               <td style="text-align:center">
                 ${(isAdminOnly || (r.status === '待指派' && r.requester_id === state.user?.id))
@@ -29580,7 +29584,8 @@ async function _puRemoveSubtaskFromEvent(eventId, purchaseId) {
   if (subs.length === 0) {
     await db.from('calendar_events').delete().eq('id', eventId);
   } else {
-    const title = `🛒 今日採購 (${subs.length} 項)`;
+    // 依 event_type 決定標題(不寫死)
+    const title = ev.event_type === 'qc' ? '外購品點數量入庫' : '外購品採購需求';
     await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', eventId);
   }
 }
@@ -30043,23 +30048,56 @@ window._puInlineStatus = async function(id, newStatus) {
   await loadPurchases(); renderApp();
 };
 
-// 清單內直接編輯欄位(actual_qty 等)
+// 清單內直接編輯欄位(actual_qty、purchase_date、arrived_date 等)
 window._puInlineField = async function(id, field, value) {
   const upd = { [field]: value || null };
   const r = (state.data.purchases||[]).find(x=>x.id===id);
-  // 填了 actual_qty → 狀態改已採購 + 採購子任務自動打勾
-  if (field === 'actual_qty' && value && r) {
+  if (!r) return;
+
+  // ── 填 actual_qty:狀態→已採購 + 採購子任務打勾 ──
+  if (field === 'actual_qty' && value) {
     if (r.status === '待採購') {
       upd.status = '已採購';
       upd.purchase_date = upd.purchase_date || _localToday();
     }
-    // 採購子任務自動勾選完成
     if (r.calendar_event_id) await _puMarkSubtaskDone(r.calendar_event_id, r.id);
+  }
+  // ── 清空 actual_qty / purchase_date:採購子任務退回未完成 + 狀態退回待採購 ──
+  if ((field === 'actual_qty' || field === 'purchase_date') && !value) {
+    // 若清空 actual_qty 或 purchase_date,且尚未到貨 → 退回待採購
+    if (r.status === '已採購' && (
+      (field === 'actual_qty' && !r.purchase_date) ||
+      (field === 'purchase_date' && !r.actual_qty) ||
+      (field === 'actual_qty' && r.actual_qty) ||   // 剛清空
+      (field === 'purchase_date' && r.purchase_date)
+    )) {
+      upd.status = '待採購';
+    }
+    if (r.calendar_event_id) await _puUncheckSubtask(r.calendar_event_id, r.id);
+  }
+  // ── 清空 arrived_date:QC 退回未完成 ──
+  if (field === 'arrived_date' && !value) {
+    if (r.qc_event_id) await _puUncheckSubtask(r.qc_event_id, r.id);
+    if (r.status === '結案') upd.status = '已到貨';
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
   await loadPurchases(); renderApp();
 };
+
+// 取消勾選事件中某採購的子任務,母任務也退回未完成
+async function _puUncheckSubtask(eventId, purchaseId) {
+  if (!eventId) return;
+  const { data: ev } = await db.from('calendar_events').select('*').eq('id', eventId).maybeSingle();
+  if (!ev) return;
+  const subs = (ev.subtasks || []).map(s =>
+    s.purchase_id === purchaseId ? { ...s, done: false } : s
+  );
+  // 有未完成的子任務 → 母任務也退回
+  const upd = { subtasks: subs };
+  if (ev.completed_at) upd.completed_at = null;
+  await db.from('calendar_events').update(upd).eq('id', eventId);
+}
 
 // 填 QC 實收 → 直接視為 QC 完成 → 狀態結案 + 相關子任務全打勾
 window._puInlineArrived = async function(id, note) {
