@@ -29516,31 +29516,30 @@ async function _puSyncCalendar(purchaseRow) {
     await _puRemoveSubtaskFromEvent(purchaseRow.calendar_event_id, purchaseRow.id);
   }
 
-  // 找今天既有的採購事件(同負責人)
+  // 找同截止日既有的採購事件(同負責人)
   const { data: existing } = await db.from('calendar_events').select('*')
     .eq('event_type', 'purchase')
     .eq('assigned_to', purchaseRow.purchaser_id)
-    .eq('event_date', today)
+    .eq('event_date', dueDate)
     .is('completed_at', null)
     .maybeSingle();
 
   if (existing) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
-    // 避免重複
     const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
     if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
-    const title = `🛒 今日採購 (${subs.length} 項)`;
+    const title = `外購品採購需求 (${subs.length} 項)`;
     await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
     return existing.id;
   } else {
     const payload = {
-      title: `🛒 今日採購 (1 項)`,
+      title: `🛒 採購到期 (1 項)`,
       event_type: 'purchase',
-      event_date: today,
-      start_date: today,
+      event_date: dueDate,
+      start_date: dueDate,
       end_date: dueDate,
       priority: '中',
-      description: `⏰ 請於 3 個工作天內完成採購,每項打勾表示完成`,
+      description: `⏰ 採購截止日 ${dueDate},每項打勾表示完成`,
       assigned_to: purchaseRow.purchaser_id,
       assignee_ids: [purchaseRow.purchaser_id],
       subtasks: [newSub],
@@ -29606,11 +29605,11 @@ async function _puCreateQcReminder(purchaseRow) {
     await _puRemoveSubtaskFromEvent(purchaseRow.qc_event_id, purchaseRow.id);
   }
 
-  // 找當日既有 QC 事件(同申請人)
+  // 找同截止日既有 QC 事件(同申請人)
   const { data: existing } = await db.from('calendar_events').select('*')
     .eq('event_type', 'qc')
     .eq('assigned_to', purchaseRow.requester_id)
-    .eq('event_date', startDate)
+    .eq('event_date', dueDate)
     .is('completed_at', null)
     .maybeSingle();
 
@@ -29618,18 +29617,18 @@ async function _puCreateQcReminder(purchaseRow) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
     const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
     if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
-    const title = `📦 QC 點收 (${subs.length} 項)`;
+    const title = `📦 QC 到期 (${subs.length} 項)`;
     await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
     return existing.id;
   } else {
     const payload = {
-      title: `📦 QC 點收 (1 項)`,
+      title: `📦 QC 到期 (1 項)`,
       event_type: 'qc',
-      event_date: startDate,
-      start_date: startDate,
+      event_date: dueDate,
+      start_date: dueDate,
       end_date: dueDate,
       priority: '高',
-      description: `⏰ 請於 2 個工作天內完成 QC 點收,每項打勾表示完成`,
+      description: `⏰ QC 截止日 ${dueDate},每項打勾表示完成`,
       assigned_to: purchaseRow.requester_id,
       assignee_ids: [purchaseRow.requester_id],
       subtasks: [newSub],
