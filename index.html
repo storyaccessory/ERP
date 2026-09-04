@@ -29220,8 +29220,14 @@ window.openPurchaseBatchModal = function() {
 
   const html = `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:12px;gap:12px;flex-wrap:wrap">
-      <div style="display:flex;align-items:center;gap:8px">
-        <strong>申請人</strong>:${state.profile?.name||state.user?.email||''}
+      <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <strong>申請人</strong>:
+        <select id="pub-requester" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" title="臨時可修改,匯入舊資料用">
+          ${(state.data.users||[]).filter(u=>u.is_active!==false).map(u=>{
+            const cur = u.id === state.user?.id || u.name === (state.profile?.name||'');
+            return `<option value="${u.id}" data-name="${u.name}" ${cur?'selected':''}>${u.name}</option>`;
+          }).join('')}
+        </select>
         <span style="color:#ccc">·</span>
         <strong>申請日期</strong>:
         <input type="date" id="pub-date" value="${_localToday()}" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" title="臨時可修改,匯入舊資料用">
@@ -29254,10 +29260,13 @@ window.openPurchaseBatchModal = function() {
       if (!rows.length) { showToast('至少要填一項','error'); return; }
       const today = _localToday();
       const chosenDate = document.getElementById('pub-date')?.value || today;
-      const reqName = state.profile?.name || state.user?.email || '';
+      const reqSel = document.getElementById('pub-requester');
+      const reqOpt = reqSel?.selectedOptions[0];
+      const reqId = reqSel?.value || state.user?.id || null;
+      const reqName = reqOpt?.dataset?.name || state.profile?.name || state.user?.email || '';
       const inserts = rows.map(r => ({
         request_no: `PR-${chosenDate.replace(/-/g,'')}-${String(Math.floor(Math.random()*900)+100)}`,
-        requester_id: state.user?.id || null,
+        requester_id: reqId,
         requester_name: reqName,
         request_date: chosenDate,
         category: r.category || '其他',
