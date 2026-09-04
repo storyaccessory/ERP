@@ -29105,42 +29105,49 @@ function renderPurchases() {
       <div class="table-wrap">
         <table>
           <thead><tr>
-            <th style="width:110px">申請日</th>
-            <th style="width:70px">類別</th>
+            <th style="width:90px">申請日</th>
+            <th style="width:60px">類別</th>
             <th>品項</th>
-            <th style="width:120px">預計數 / 庫存</th>
+            <th style="width:70px">預計數</th>
+            <th style="width:70px">目前庫存</th>
             <th style="width:80px">申請人</th>
-            <th style="width:80px">負責人</th>
-            <th style="width:80px">狀態</th>
-            <th style="width:100px">實際採購</th>
-            <th style="width:110px">操作</th>
+            <th style="width:90px">負責人</th>
+            <th style="width:110px">採購狀態</th>
+            <th style="width:110px">實際採購數</th>
+            <th style="width:130px">實際到貨 (QC)</th>
+            ${isBoss?'<th style="width:40px"></th>':''}
           </tr></thead>
           <tbody>
-          ${filtered.length===0 ? `<tr><td colspan="9"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
-            filtered.map(r => `<tr style="cursor:pointer" onclick="window.openPurchaseModal('${r.id}')">
-              <td style="font-size:11px;color:var(--muted)">${r.request_date||''}${r.request_no?`<div style="font-size:10px">${r.request_no}</div>`:''}</td>
+          ${filtered.length===0 ? `<tr><td colspan="${isBoss?11:10}"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
+            filtered.map(r => `<tr>
+              <td style="font-size:12px">${r.request_date||''}</td>
               <td><span style="background:${catColor[r.category]||'#f5f5f5'};color:${catText[r.category]||'#666'};padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600">${r.category||'—'}</span></td>
-              <td>
+              <td style="cursor:pointer" onclick="window.openPurchaseModal('${r.id}')">
                 <div style="font-size:13px;font-weight:600">${r.item_name}</div>
                 ${r.notes?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${r.notes}</div>`:''}
                 ${r.reference_link?`<a href="${r.reference_link}" target="_blank" onclick="event.stopPropagation()" style="font-size:11px;color:var(--accent)">🔗 連結</a>`:''}
               </td>
-              <td style="font-size:12px">
-                ${r.expected_qty?`<div>需 ${r.expected_qty}</div>`:''}
-                ${r.current_stock?`<div style="color:var(--muted)">現 ${r.current_stock}</div>`:''}
-              </td>
+              <td style="font-size:12px;text-align:center">${r.expected_qty||'—'}</td>
+              <td style="font-size:12px;text-align:center;color:var(--muted)">${r.current_stock||'—'}</td>
               <td style="font-size:12px">${r.requester_name||'—'}</td>
-              <td style="font-size:12px;font-weight:600">${r.purchaser_name||'—'}</td>
-              <td><span class="tag ${statusColor[r.status]||'tag-grey'}">${r.status}</span></td>
-              <td style="font-size:12px">
-                ${r.actual_qty?`<div>${r.actual_qty}</div>`:'—'}
-                ${r.actual_amount?`<div style="color:var(--muted)">$${Number(r.actual_amount).toLocaleString()}</div>`:''}
-                ${r.arrived_date?`<div style="color:#2e7d32;font-size:10px">📦 ${r.arrived_date.slice(5)}</div>`:''}
+              <td style="font-size:12px;font-weight:600">${r.purchaser_name||'<span style="color:var(--warning);font-size:11px">未指派</span>'}</td>
+              <td>
+                <select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${r.status==='待指派'?'#ffebee':r.status==='待採購'?'#fff8e1':r.status==='已採購'?'#e3f2fd':r.status==='已到貨'?'#e0f2f1':r.status==='結案'?'#e8f5e9':'#f5f5f5'};color:${r.status==='待指派'?'#c62828':r.status==='待採購'?'#e65100':r.status==='已採購'?'#1565c0':r.status==='已到貨'?'#00695c':r.status==='結案'?'#2e7d32':'#616161'}"
+                  onchange="window._puInlineStatus('${r.id}',this.value)">
+                  ${PURCHASE_STATUSES.map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}
+                </select>
               </td>
-              <td onclick="event.stopPropagation()">
-                <button class="btn-table" onclick="window.openPurchaseModal('${r.id}')">開啟</button>
-                ${isBoss ? `<button class="btn-table danger" style="margin-left:2px" onclick="window.deletePurchase('${r.id}')">刪</button>` : ''}
+              <td>
+                <input type="text" value="${(r.actual_qty||'').toString().replace(/"/g,'&quot;')}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px"
+                  onchange="window._puInlineField('${r.id}','actual_qty',this.value)">
+                ${r.purchase_date?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px">${r.purchase_date.slice(5)}</div>`:''}
               </td>
+              <td>
+                <input type="text" value="${(r.arrived_note||'').toString().replace(/"/g,'&quot;')}" placeholder="QC 備註/實收" style="width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:${r.arrived_date?'#e8f5e9':''}"
+                  onchange="window._puInlineArrived('${r.id}',this.value)">
+                ${r.arrived_date?`<div style="font-size:10px;color:#2e7d32;text-align:center;margin-top:2px">📦 ${r.arrived_date.slice(5)}</div>`:''}
+              </td>
+              ${isBoss?`<td style="text-align:center"><button class="btn-table danger" style="padding:3px 6px;font-size:11px" onclick="window.deletePurchase('${r.id}')">🗑</button></td>`:''}
             </tr>`).join('')}
           </tbody>
         </table>
@@ -29296,7 +29303,12 @@ window.openPurchaseBatchModal = function() {
       closeModal(); await loadPurchases(); renderApp();
     }},
     { label:'取消', onclick: () => { state.data._puBatchRows = null; closeModal(); } },
-  ], { width: '1300px' });
+  ], { width: '1000px' });
+  // 開啟後,把 modal body 高度撐大,方便搜尋下拉有位置放
+  setTimeout(() => {
+    const body = document.getElementById('modal-body-slot');
+    if (body) { body.style.minHeight = '600px'; body.style.maxHeight = '80vh'; }
+  }, 30);
 };
 
 window.openPurchaseModal = async function(id) {
@@ -29819,6 +29831,59 @@ window._puItemDelete = async function(id, usageCount) {
   state.data.purchaseItems = data || [];
   document.getElementById('pi-body').innerHTML = window._renderPuItemsBody();
   showToast('已刪除');
+};
+
+// 清單內直接切換狀態
+window._puInlineStatus = async function(id, newStatus) {
+  const r = (state.data.purchases||[]).find(x=>x.id===id);
+  if (!r) return;
+  const upd = { status: newStatus };
+  // 到採購 → 沒 purchase_date 帶今天
+  if (newStatus === '已採購' && !r.purchase_date) upd.purchase_date = _localToday();
+  // 到貨 → 沒 arrived_date 帶今天
+  if (newStatus === '已到貨' && !r.arrived_date) upd.arrived_date = _localToday();
+  // 到貨/結案 → 標記行事曆完成
+  if (['已到貨','結案'].includes(newStatus) && r.calendar_event_id) {
+    await _puCompleteCalendar(r.calendar_event_id);
+  }
+  const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
+  if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  showToast(`已改為 ${newStatus}`);
+  await loadPurchases(); renderApp();
+};
+
+// 清單內直接編輯欄位(actual_qty 等)
+window._puInlineField = async function(id, field, value) {
+  const upd = { [field]: value || null };
+  // 填了 actual_qty 而且狀態還是待採購 → 自動改為已採購
+  if (field === 'actual_qty' && value) {
+    const r = (state.data.purchases||[]).find(x=>x.id===id);
+    if (r && r.status === '待採購') {
+      upd.status = '已採購';
+      upd.purchase_date = _localToday();
+    }
+  }
+  const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
+  if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  await loadPurchases(); renderApp();
+};
+
+// 到貨 QC 輸入 → 自動填 arrived_date + 改狀態
+window._puInlineArrived = async function(id, note) {
+  const upd = { arrived_note: note || null };
+  if (note) {
+    upd.arrived_date = _localToday();
+    const r = (state.data.purchases||[]).find(x=>x.id===id);
+    if (r && ['待採購','已採購'].includes(r.status)) {
+      upd.status = '已到貨';
+      if (r.calendar_event_id) await _puCompleteCalendar(r.calendar_event_id);
+    }
+  } else {
+    upd.arrived_date = null;
+  }
+  const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
+  if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  await loadPurchases(); renderApp();
 };
 
 window.deletePurchase = async function(id) {
