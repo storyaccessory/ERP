@@ -29617,12 +29617,12 @@ async function _puCreateQcReminder(purchaseRow) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
     const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
     if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
-    const title = `外購品到貨需QC點數量入庫 (${subs.length} 項)`;
+    const title = `外購品點數量入庫 (${subs.length} 項)`;
     await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
     return existing.id;
   } else {
     const payload = {
-      title: `外購品到貨需QC點數量入庫 (1 項)`,
+      title: `外購品點數量入庫 (1 項)`,
       event_type: 'qc',
       event_date: dueDate,
       start_date: dueDate,
@@ -30038,25 +30038,28 @@ window._puInlineField = async function(id, field, value) {
   await loadPurchases(); renderApp();
 };
 
-// 到貨 QC 輸入 → 自動填 arrived_date + 改狀態 + 建 QC 提醒
+// 填 QC 實收 → 直接視為 QC 完成 → 狀態結案 + 相關子任務全打勾
 window._puInlineArrived = async function(id, note) {
   const upd = { arrived_note: note || null };
   const r = (state.data.purchases||[]).find(x=>x.id===id);
   if (note && r) {
     upd.arrived_date = r.arrived_date || _localToday();
-    if (['待採購','已採購'].includes(r.status)) {
-      upd.status = '已到貨';
-      if (r.calendar_event_id) await _puMarkSubtaskDone(r.calendar_event_id, r.id);
+    upd.status = '結案';                     // 有填數量/內容 = QC 完成
+    // 採購子任務打勾
+    if (r.calendar_event_id) await _puMarkSubtaskDone(r.calendar_event_id, r.id);
+    // 若沒 QC 事件 → 先建再打勾;有的話直接打勾
+    let qcId = r.qc_event_id;
+    if (!qcId) {
+      qcId = await _puCreateQcReminder({ ...r, ...upd });
+      if (qcId) upd.qc_event_id = qcId;
     }
-    // 建 QC 提醒
-    const qcId = await _puCreateQcReminder({ ...r, ...upd });
-    if (qcId) upd.qc_event_id = qcId;
+    if (qcId) await _puMarkSubtaskDone(qcId, r.id);
   } else if (!note) {
     upd.arrived_date = null;
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
-  if (note && r && upd.qc_event_id) showToast(`已建 QC 提醒給 ${r.requester_name}(2 個工作天內)`);
+  if (note && r) showToast('已完成 QC + 結案 ✅');
   await loadPurchases(); renderApp();
 };
 
