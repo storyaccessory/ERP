@@ -29533,7 +29533,7 @@ async function _puSyncCalendar(purchaseRow) {
     return existing.id;
   } else {
     const payload = {
-      title: `🛒 採購到期 (1 項)`,
+      title: `外購品採購需求 (1 項)`,
       event_type: 'purchase',
       event_date: dueDate,
       start_date: dueDate,
@@ -29617,7 +29617,7 @@ async function _puCreateQcReminder(purchaseRow) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
     const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
     if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
-    const title = `📦 QC 到期 (${subs.length} 項)`;
+    const title = `外購品到貨需QC點數量入庫 (${subs.length} 項)`;
     await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
     return existing.id;
   } else {
