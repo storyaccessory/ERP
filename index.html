@@ -29514,6 +29514,7 @@ async function _puSyncCalendar(purchaseRow) {
   const payload = {
     title,
     event_type: 'purchase',
+    event_date: today,          // ← 必填欄位(舊 schema 保留)
     start_date: today,
     end_date: dueDate,
     priority: '中',
@@ -29546,6 +29547,7 @@ async function _puCreateQcReminder(purchaseRow) {
   const payload = {
     title: `📦 QC 點收:${purchaseRow.item_name}${purchaseRow.actual_qty?` × ${purchaseRow.actual_qty}`:''}`,
     event_type: 'qc',
+    event_date: startDate,      // ← 必填欄位
     start_date: startDate,
     end_date: dueDate,
     priority: '高',
