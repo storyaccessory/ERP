@@ -29136,12 +29136,13 @@ function renderPurchases() {
             <th style="width:110px">採購狀態</th>
             <th style="width:90px">採購日期</th>
             <th style="width:110px">實際採購數</th>
+            <th style="width:100px">到貨日期</th>
             <th style="width:250px">實際到貨 (QC)</th>
             <th style="width:110px">QC 入庫日期</th>
             <th style="width:40px"></th>
           </tr></thead>
           <tbody>
-          ${filtered.length===0 ? `<tr><td colspan="13"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
+          ${filtered.length===0 ? `<tr><td colspan="14"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
             filtered.map(r => `<tr>
               <td style="font-size:12px">${r.request_date||''}</td>
               <td style="font-size:12px">${r.requester_name||'—'}</td>
@@ -29180,6 +29181,11 @@ function renderPurchases() {
               <td>
                 <input type="text" value="${(r.actual_qty||'').toString().replace(/"/g,'&quot;')}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px"
                   onchange="window._puInlineField('${r.id}','actual_qty',this.value)">
+              </td>
+              <td>
+                <input type="date" value="${r.arrival_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:${r.arrival_date?'#e0f2f1':''}"
+                  onchange="window._puInlineField('${r.id}','arrival_date',this.value)"
+                  title="物品實際到達日期(集運/自取);填了自動變已到貨並提醒申請人 QC">
               </td>
               <td>
                 <input type="text" value="${(r.arrived_note||'').toString().replace(/"/g,'&quot;')}" placeholder="QC 備註/實收" style="width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:${r.arrived_date?'#e8f5e9':''}"
@@ -29611,11 +29617,11 @@ async function _puCompleteCalendar(eventId) {
   await db.from('calendar_events').update({ completed_at: new Date().toISOString() }).eq('id', eventId);
 }
 
-// 到貨 → 建 QC 提醒給原申請人(2 個工作天內完成)· 同一天同申請人合併為一個事件
+// 到貨 → 建 QC 提醒給原申請人(3 個工作天內完成)· 同一天同申請人合併為一個事件
 async function _puCreateQcReminder(purchaseRow) {
   if (!purchaseRow.requester_id) return null;
-  const startDate = purchaseRow.arrived_date || _localToday();
-  const dueDate = addWorkdays(new Date(startDate + 'T00:00:00'), 2).toISOString().slice(0,10);
+  const startDate = purchaseRow.arrival_date || purchaseRow.arrived_date || _localToday();
+  const dueDate = addWorkdays(new Date(startDate + 'T00:00:00'), 3).toISOString().slice(0,10);
   const subtaskText = `${purchaseRow.item_name}${purchaseRow.actual_qty?` × ${purchaseRow.actual_qty}`:''}${purchaseRow.arrived_note?` (${purchaseRow.arrived_note})`:''}`;
   const newSub = {
     id: `qc_${purchaseRow.id}`,
@@ -30079,6 +30085,27 @@ window._puInlineField = async function(id, field, value) {
   if (field === 'arrived_date' && !value) {
     if (r.qc_event_id) await _puUncheckSubtask(r.qc_event_id, r.id);
     if (r.status === '結案') upd.status = '已到貨';
+  }
+  // ── 填 arrival_date(到貨日期):狀態→已到貨 + 建 QC 提醒給申請人 ──
+  if (field === 'arrival_date' && value) {
+    if (['待採購','已採購'].includes(r.status)) {
+      upd.status = '已到貨';
+      // 採購子任務也自動打勾(採購已完成)
+      if (r.calendar_event_id) await _puMarkSubtaskDone(r.calendar_event_id, r.id);
+    }
+    // 建 QC 提醒(3 個工作天內)
+    if (!r.qc_event_id) {
+      const qcId = await _puCreateQcReminder({ ...r, ...upd });
+      if (qcId) upd.qc_event_id = qcId;
+    }
+  }
+  // ── 清空 arrival_date:退回已採購 + 移除 QC 提醒子任務 ──
+  if (field === 'arrival_date' && !value) {
+    if (r.status === '已到貨') upd.status = '已採購';
+    if (r.qc_event_id) {
+      await _puRemoveSubtaskFromEvent(r.qc_event_id, r.id);
+      upd.qc_event_id = null;
+    }
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
