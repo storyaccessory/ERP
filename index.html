@@ -29496,41 +29496,88 @@ window._puCollect = function(existing) {
 };
 
 // 建立/更新行事曆事件(採購提醒)
+// 同一天同負責人 → 合併為一個事件,多品項各為子任務
 async function _puSyncCalendar(purchaseRow) {
   if (!purchaseRow.purchaser_id) return null;
-  const title = `🛒 採購:${purchaseRow.item_name}${purchaseRow.expected_qty?` × ${purchaseRow.expected_qty}`:''}`;
   const today = _localToday();
   const dueDate = addWorkdays(new Date(today + 'T00:00:00'), 3).toISOString().slice(0,10);
-  const desc = [
-    `原申請日:${purchaseRow.request_date||'—'}`,
-    `申請人:${purchaseRow.requester_name||''}`,
-    purchaseRow.category ? `類別:${purchaseRow.category}` : '',
-    purchaseRow.expected_qty ? `預計數量:${purchaseRow.expected_qty}` : '',
-    purchaseRow.current_stock ? `目前庫存:${purchaseRow.current_stock}` : '',
-    purchaseRow.reference_link ? `連結:${purchaseRow.reference_link}` : '',
-    purchaseRow.notes ? `備註:${purchaseRow.notes}` : '',
-    `⏰ 請於 3 個工作天內(${dueDate.slice(5)} 前)完成採購`,
-  ].filter(Boolean).join('\n');
-  const payload = {
-    title,
-    event_type: 'purchase',
-    event_date: today,          // ← 必填欄位(舊 schema 保留)
-    start_date: today,
-    end_date: dueDate,
-    priority: '中',
-    description: desc,
-    assigned_to: purchaseRow.purchaser_id,
-    assignee_ids: [purchaseRow.purchaser_id],
+  const subtaskText = `${purchaseRow.item_name}${purchaseRow.expected_qty?` × ${purchaseRow.expected_qty}`:''}${purchaseRow.reference_link?` 🔗`:''}`;
+  const newSub = {
+    id: `pu_${purchaseRow.id}`,
+    text: subtaskText,
+    done: false,
+    due_date: dueDate,
+    purchase_id: purchaseRow.id,
+    assignee_id: purchaseRow.purchaser_id,
   };
+
+  // 若本筆已有連到事件,先把舊事件的子任務移除(可能換負責人)
   if (purchaseRow.calendar_event_id) {
-    // 更新既有事件
-    await db.from('calendar_events').update(payload).eq('id', purchaseRow.calendar_event_id);
-    return purchaseRow.calendar_event_id;
+    await _puRemoveSubtaskFromEvent(purchaseRow.calendar_event_id, purchaseRow.id);
+  }
+
+  // 找今天既有的採購事件(同負責人)
+  const { data: existing } = await db.from('calendar_events').select('*')
+    .eq('event_type', 'purchase')
+    .eq('assigned_to', purchaseRow.purchaser_id)
+    .eq('event_date', today)
+    .is('completed_at', null)
+    .maybeSingle();
+
+  if (existing) {
+    const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
+    // 避免重複
+    const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
+    if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
+    const title = `🛒 今日採購 (${subs.length} 項)`;
+    await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
+    return existing.id;
   } else {
-    payload.created_by = state.user?.id || null;
+    const payload = {
+      title: `🛒 今日採購 (1 項)`,
+      event_type: 'purchase',
+      event_date: today,
+      start_date: today,
+      end_date: dueDate,
+      priority: '中',
+      description: `⏰ 請於 3 個工作天內完成採購,每項打勾表示完成`,
+      assigned_to: purchaseRow.purchaser_id,
+      assignee_ids: [purchaseRow.purchaser_id],
+      subtasks: [newSub],
+      created_by: state.user?.id || null,
+    };
     const { data } = await db.from('calendar_events').insert(payload).select().single();
     return data?.id || null;
   }
+}
+
+// 從事件移除某採購的子任務;若全空就刪事件
+async function _puRemoveSubtaskFromEvent(eventId, purchaseId) {
+  if (!eventId) return;
+  const { data: ev } = await db.from('calendar_events').select('*').eq('id', eventId).maybeSingle();
+  if (!ev) return;
+  const subs = (ev.subtasks || []).filter(s => s.purchase_id !== purchaseId);
+  if (subs.length === 0) {
+    await db.from('calendar_events').delete().eq('id', eventId);
+  } else {
+    const title = `🛒 今日採購 (${subs.length} 項)`;
+    await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', eventId);
+  }
+}
+
+// 標記事件中某採購的子任務為完成;若全完成 → 事件標為完成
+async function _puMarkSubtaskDone(eventId, purchaseId) {
+  if (!eventId) return;
+  const { data: ev } = await db.from('calendar_events').select('*').eq('id', eventId).maybeSingle();
+  if (!ev) return;
+  const subs = (ev.subtasks || []).map(s =>
+    s.purchase_id === purchaseId ? { ...s, done: true } : s
+  );
+  const upd = { subtasks: subs };
+  if (subs.length > 0 && subs.every(s => s.done)) {
+    upd.completed_at = new Date().toISOString();
+  }
+  await db.from('calendar_events').update(upd).eq('id', eventId);
 }
 
 // 完成行事曆事件(採購結案)
@@ -29539,36 +29586,58 @@ async function _puCompleteCalendar(eventId) {
   await db.from('calendar_events').update({ completed_at: new Date().toISOString() }).eq('id', eventId);
 }
 
-// 到貨 → 建 QC 提醒給原申請人(2 個工作天內完成)
+// 到貨 → 建 QC 提醒給原申請人(2 個工作天內完成)· 同一天同申請人合併為一個事件
 async function _puCreateQcReminder(purchaseRow) {
   if (!purchaseRow.requester_id) return null;
   const startDate = purchaseRow.arrived_date || _localToday();
   const dueDate = addWorkdays(new Date(startDate + 'T00:00:00'), 2).toISOString().slice(0,10);
-  const payload = {
-    title: `📦 QC 點收:${purchaseRow.item_name}${purchaseRow.actual_qty?` × ${purchaseRow.actual_qty}`:''}`,
-    event_type: 'qc',
-    event_date: startDate,      // ← 必填欄位
-    start_date: startDate,
-    end_date: dueDate,
-    priority: '高',
-    description: [
-      `採購品項:${purchaseRow.item_name}`,
-      purchaseRow.actual_qty ? `實際採購:${purchaseRow.actual_qty}` : '',
-      `採購負責人:${purchaseRow.purchaser_name||'—'}`,
-      purchaseRow.arrived_note ? `到貨備註:${purchaseRow.arrived_note}` : '',
-      `⏰ 請於 2 個工作天內(${dueDate.slice(5)} 前)完成 QC 點收`,
-    ].filter(Boolean).join('\n'),
-    assigned_to: purchaseRow.requester_id,
-    assignee_ids: [purchaseRow.requester_id],
-    created_by: state.user?.id || null,
+  const subtaskText = `${purchaseRow.item_name}${purchaseRow.actual_qty?` × ${purchaseRow.actual_qty}`:''}${purchaseRow.arrived_note?` (${purchaseRow.arrived_note})`:''}`;
+  const newSub = {
+    id: `qc_${purchaseRow.id}`,
+    text: subtaskText,
+    done: false,
+    due_date: dueDate,
+    purchase_id: purchaseRow.id,
+    assignee_id: purchaseRow.requester_id,
   };
-  // 若已有 qc_event_id → 更新;否則新增
+
+  // 若本筆已連 QC 事件,先移舊子任務
   if (purchaseRow.qc_event_id) {
-    await db.from('calendar_events').update(payload).eq('id', purchaseRow.qc_event_id);
-    return purchaseRow.qc_event_id;
+    await _puRemoveSubtaskFromEvent(purchaseRow.qc_event_id, purchaseRow.id);
   }
-  const { data } = await db.from('calendar_events').insert(payload).select().single();
-  return data?.id || null;
+
+  // 找當日既有 QC 事件(同申請人)
+  const { data: existing } = await db.from('calendar_events').select('*')
+    .eq('event_type', 'qc')
+    .eq('assigned_to', purchaseRow.requester_id)
+    .eq('event_date', startDate)
+    .is('completed_at', null)
+    .maybeSingle();
+
+  if (existing) {
+    const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
+    const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
+    if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
+    const title = `📦 QC 點收 (${subs.length} 項)`;
+    await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
+    return existing.id;
+  } else {
+    const payload = {
+      title: `📦 QC 點收 (1 項)`,
+      event_type: 'qc',
+      event_date: startDate,
+      start_date: startDate,
+      end_date: dueDate,
+      priority: '高',
+      description: `⏰ 請於 2 個工作天內完成 QC 點收,每項打勾表示完成`,
+      assigned_to: purchaseRow.requester_id,
+      assignee_ids: [purchaseRow.requester_id],
+      subtasks: [newSub],
+      created_by: state.user?.id || null,
+    };
+    const { data } = await db.from('calendar_events').insert(payload).select().single();
+    return data?.id || null;
+  }
 }
 
 // 品項即時搜尋(輸入框下方顯示下拉)
@@ -29761,9 +29830,13 @@ window._puMoveStatus = async function(id, existing, newStatus) {
   if (newStatus === '已到貨' && !fields.arrived_date) fields.arrived_date = _localToday();
   // 已採購自動填今天
   if (newStatus === '已採購' && !fields.purchase_date) fields.purchase_date = _localToday();
-  // 結案 or 到貨 → 標記行事曆完成
+  // 結案 or 到貨 → 標記採購子任務完成
   if (['已到貨','結案'].includes(newStatus) && existing.calendar_event_id) {
-    await _puCompleteCalendar(existing.calendar_event_id);
+    await _puMarkSubtaskDone(existing.calendar_event_id, existing.id);
+  }
+  // 結案 → QC 子任務也完成
+  if (newStatus === '結案' && existing.qc_event_id) {
+    await _puMarkSubtaskDone(existing.qc_event_id, existing.id);
   }
   const { error } = await db.from('purchase_requests').update(fields).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
@@ -29936,13 +30009,13 @@ window._puInlineStatus = async function(id, newStatus) {
     const qcId = await _puCreateQcReminder({ ...r, ...upd });
     if (qcId) upd.qc_event_id = qcId;
   }
-  // 到貨/結案 → 標記採購行事曆完成
+  // 到貨/結案 → 標記採購子任務完成
   if (['已到貨','結案'].includes(newStatus) && r.calendar_event_id) {
-    await _puCompleteCalendar(r.calendar_event_id);
+    await _puMarkSubtaskDone(r.calendar_event_id, r.id);
   }
-  // 結案 → QC 事件也完成
+  // 結案 → QC 子任務完成
   if (newStatus === '結案' && r.qc_event_id) {
-    await _puCompleteCalendar(r.qc_event_id);
+    await _puMarkSubtaskDone(r.qc_event_id, r.id);
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
@@ -29974,7 +30047,7 @@ window._puInlineArrived = async function(id, note) {
     upd.arrived_date = r.arrived_date || _localToday();
     if (['待採購','已採購'].includes(r.status)) {
       upd.status = '已到貨';
-      if (r.calendar_event_id) await _puCompleteCalendar(r.calendar_event_id);
+      if (r.calendar_event_id) await _puMarkSubtaskDone(r.calendar_event_id, r.id);
     }
     // 建 QC 提醒
     const qcId = await _puCreateQcReminder({ ...r, ...upd });
@@ -29992,7 +30065,9 @@ window.deletePurchase = async function(id) {
   const r = (state.data.purchases||[]).find(x=>x.id===id);
   if (!r) return;
   if (!confirm(`確定刪除「${r.item_name}」?`)) return;
-  if (r.calendar_event_id) await db.from('calendar_events').delete().eq('id', r.calendar_event_id);
+  // 從行事曆事件移除對應子任務(而非整個事件)
+  if (r.calendar_event_id) await _puRemoveSubtaskFromEvent(r.calendar_event_id, r.id);
+  if (r.qc_event_id) await _puRemoveSubtaskFromEvent(r.qc_event_id, r.id);
   await db.from('purchase_requests').delete().eq('id', id);
   showToast('已刪除'); await loadPurchases(); renderApp();
 };
