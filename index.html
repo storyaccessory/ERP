@@ -29425,15 +29425,16 @@ window._puPickFromLibrary = function() {
 window._puPickItem = function(id) {
   const it = (state.data.purchaseItems||[]).find(x=>x.id===id);
   if (!it) return;
-  closeModal();
-  setTimeout(() => {
-    const itemEl = document.getElementById('pu-item');
-    const catEl = document.getElementById('pu-category');
-    const linkEl = document.getElementById('pu-link');
-    if (itemEl) itemEl.value = it.name;
-    if (catEl && it.category) catEl.value = it.category;
-    if (linkEl && it.reference_link) linkEl.value = it.reference_link;
-  }, 100);
+  // 直接填欄位,不關 modal
+  const itemEl = document.getElementById('pu-item');
+  const catEl = document.getElementById('pu-category');
+  const linkEl = document.getElementById('pu-link');
+  if (itemEl) itemEl.value = it.name;
+  if (catEl && it.category) catEl.value = it.category;
+  if (linkEl && it.reference_link && !linkEl.value) linkEl.value = it.reference_link;
+  // 隱藏下拉
+  const drop = document.getElementById('pu-item-drop');
+  if (drop) drop.style.display = 'none';
 };
 
 // 選品項自動帶入類別/連結
