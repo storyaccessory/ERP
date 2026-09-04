@@ -29082,7 +29082,7 @@ async function loadPurchases() {
   const [{ data }, { data: users }, { data: items }] = await Promise.all([
     db.from('purchase_requests').select('*').order('request_date', { ascending: false }).order('created_at', { ascending: false }),
     (state.data.users?.length ? Promise.resolve({data: state.data.users}) : db.from('profiles').select('id,name,email,role,is_active').order('name')),
-    db.from('purchase_items').select('*').eq('is_active', true).order('usage_count', { ascending: false }),
+    db.from('purchase_items').select('*').eq('is_active', true).order('name'),
   ]);
   state.data.purchases = data || [];
   state.data.purchaseItems = items || [];
@@ -29274,8 +29274,8 @@ window.openPurchaseBatchModal = function() {
     const items = state.data.purchaseItems || [];
     const qs = (q||'').toLowerCase().trim();
     const filtered = qs
-      ? items.filter(it => (it.name||'').toLowerCase().includes(qs) || (it.category||'').toLowerCase().includes(qs)).slice(0, 30)
-      : items.slice(0, 20);
+      ? items.filter(it => (it.name||'').toLowerCase().includes(qs) || (it.category||'').toLowerCase().includes(qs)).sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-TW')).slice(0, 30)
+      : [...items].sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-TW')).slice(0, 20);
     if (!filtered.length) { drop.style.display = 'none'; return; }
     drop.innerHTML = filtered.map(it => `<div style="padding:6px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;font-size:12px"
       onmouseover="this.style.background='#e0f2f1'" onmouseout="this.style.background=''"
