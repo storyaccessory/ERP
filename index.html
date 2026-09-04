@@ -30057,11 +30057,16 @@ window._puInlineStatus = async function(id, newStatus) {
   const upd = { status: newStatus };
   // 到採購 → 沒 purchase_date 帶今天
   if (newStatus === '已採購' && !r.purchase_date) upd.purchase_date = _localToday();
-  // 到貨 → 沒 arrived_date 帶今天,並建 QC 提醒
+  // 到貨 → 沒 arrival_date 帶今天(不動 QC 入庫日期),並建 QC 提醒
   if (newStatus === '已到貨') {
-    if (!r.arrived_date) upd.arrived_date = _localToday();
-    const qcId = await _puCreateQcReminder({ ...r, ...upd });
-    if (qcId) upd.qc_event_id = qcId;
+    if (!r.arrival_date) upd.arrival_date = _localToday();
+    // 採購子任務可視為已完成
+    if (r.calendar_event_id) await _puMarkSubtaskDone(r.calendar_event_id, r.id);
+    // 建 QC 提醒
+    if (!r.qc_event_id) {
+      const qcId = await _puCreateQcReminder({ ...r, ...upd });
+      if (qcId) upd.qc_event_id = qcId;
+    }
   }
   // 到貨/結案 → 標記採購子任務完成
   if (['已到貨','結案'].includes(newStatus) && r.calendar_event_id) {
@@ -30143,8 +30148,8 @@ window._puInlineQcQty = async function(id, value) {
   const upd = { qc_qty: val };
   if (val != null && !isNaN(val)) {
     upd.status = '結案';
-    if (!r.arrived_date) upd.arrived_date = _localToday();
-    if (!r.arrival_date) upd.arrival_date = r.arrival_date || _localToday();
+    if (!r.arrived_date) upd.arrived_date = _localToday();   // QC 入庫日期 = 填入庫數量的時間
+    if (!r.arrival_date) upd.arrival_date = _localToday();   // 到貨日期(若之前沒填)
     if (r.calendar_event_id) await _puMarkSubtaskDone(r.calendar_event_id, r.id);
     let qcId = r.qc_event_id;
     if (!qcId) {
