@@ -29219,8 +29219,13 @@ window.openPurchaseBatchModal = function() {
   };
 
   const html = `
-    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:12px">
-      <div><strong>申請人</strong>:${state.profile?.name||state.user?.email||''} · <strong>日期</strong>:${_localToday()}</div>
+    <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:12px;gap:12px;flex-wrap:wrap">
+      <div style="display:flex;align-items:center;gap:8px">
+        <strong>申請人</strong>:${state.profile?.name||state.user?.email||''}
+        <span style="color:#ccc">·</span>
+        <strong>申請日期</strong>:
+        <input type="date" id="pub-date" value="${_localToday()}" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" title="臨時可修改,匯入舊資料用">
+      </div>
       <span class="tag tag-red">送出後每一項各自成為「待指派」事件</span>
     </div>
     <div style="border:1px solid var(--border);border-radius:6px;overflow:visible">
@@ -29248,12 +29253,13 @@ window.openPurchaseBatchModal = function() {
       const rows = (state.data._puBatchRows||[]).filter(r => r.item_name && r.item_name.trim());
       if (!rows.length) { showToast('至少要填一項','error'); return; }
       const today = _localToday();
+      const chosenDate = document.getElementById('pub-date')?.value || today;
       const reqName = state.profile?.name || state.user?.email || '';
       const inserts = rows.map(r => ({
-        request_no: `PR-${today.replace(/-/g,'')}-${String(Math.floor(Math.random()*900)+100)}`,
+        request_no: `PR-${chosenDate.replace(/-/g,'')}-${String(Math.floor(Math.random()*900)+100)}`,
         requester_id: state.user?.id || null,
         requester_name: reqName,
-        request_date: today,
+        request_date: chosenDate,
         category: r.category || '其他',
         item_name: r.item_name.trim(),
         expected_qty: r.expected_qty || null,
