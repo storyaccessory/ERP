@@ -29106,11 +29106,11 @@ function renderPurchases() {
         <table>
           <thead><tr>
             <th style="width:90px">申請日</th>
+            <th style="width:80px">申請人</th>
             <th style="width:60px">類別</th>
             <th>品項</th>
             <th style="width:70px">預計數</th>
             <th style="width:70px">目前庫存</th>
-            <th style="width:80px">申請人</th>
             <th style="width:90px">負責人</th>
             <th style="width:110px">採購狀態</th>
             <th style="width:110px">實際採購數</th>
@@ -29130,7 +29130,20 @@ function renderPurchases() {
               <td style="font-size:12px;text-align:center">${r.expected_qty||'—'}</td>
               <td style="font-size:12px;text-align:center;color:var(--muted)">${r.current_stock||'—'}</td>
               <td style="font-size:12px">${r.requester_name||'—'}</td>
-              <td style="font-size:12px;font-weight:600">${r.purchaser_name||'<span style="color:var(--warning);font-size:11px">未指派</span>'}</td>
+              <td>
+                <select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${!r.purchaser_id?'#fff3e0':'#e0f2f1'};color:${!r.purchaser_id?'#e65100':'#00695c'};width:100%"
+                  onchange="window._puInlinePurchaser('${r.id}',this)">
+                  <option value="">— 未指派 —</option>
+                  ${(() => {
+                    const active = (users||[]).filter(u=>u.is_active!==false);
+                    const top = PURCHASER_NAMES.map(n => active.find(u=>u.name===n)).filter(Boolean);
+                    const rest = active.filter(u => !PURCHASER_NAMES.includes(u.name));
+                    return [...top, ...rest].map(u =>
+                      `<option value="${u.id}" data-name="${u.name}" ${r.purchaser_id===u.id?'selected':''}>${u.name}</option>`
+                    ).join('');
+                  })()}
+                </select>
+              </td>
               <td>
                 <select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${r.status==='待指派'?'#ffebee':r.status==='待採購'?'#fff8e1':r.status==='已採購'?'#e3f2fd':r.status==='已到貨'?'#e0f2f1':r.status==='結案'?'#e8f5e9':'#f5f5f5'};color:${r.status==='待指派'?'#c62828':r.status==='待採購'?'#e65100':r.status==='已採購'?'#1565c0':r.status==='已到貨'?'#00695c':r.status==='結案'?'#2e7d32':'#616161'}"
                   onchange="window._puInlineStatus('${r.id}',this.value)">
@@ -29332,11 +29345,13 @@ window.openPurchaseModal = async function(id) {
   const _ep = effectiveProfile() || {};
   const isBoss = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com';
   const canEdit = !r.id || isBoss || r.requester_id === state.user?.id || r.purchaser_id === state.user?.id;
-  // 負責人選單:白名單優先,再列出所有 users
-  const purchaserOpts = users.filter(u => u.is_active !== false).map(u => {
-    const isRec = PURCHASER_NAMES.includes(u.name);
-    return `<option value="${u.id}" data-name="${u.name}" ${r.purchaser_id===u.id?'selected':''}>${isRec?'⭐ ':''}${u.name}</option>`;
-  }).join('');
+  // 負責人選單:蔡采玲/劉怡汝 排最上面,再列其他人
+  const purchaserOpts = (() => {
+    const active = users.filter(u => u.is_active !== false);
+    const top = PURCHASER_NAMES.map(n => active.find(u=>u.name===n)).filter(Boolean);
+    const rest = active.filter(u => !PURCHASER_NAMES.includes(u.name));
+    return [...top, ...rest].map(u => `<option value="${u.id}" data-name="${u.name}" ${r.purchaser_id===u.id?'selected':''}>${u.name}</option>`).join('');
+  })();
 
   const html = `
     <div style="display:flex;justify-content:space-between;align-items:center;padding:8px 10px;background:#f8f9fa;border-radius:6px;margin-bottom:12px">
@@ -29385,7 +29400,7 @@ window.openPurchaseModal = async function(id) {
         <option value="">— 選擇負責人 —</option>
         ${purchaserOpts}
       </select>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">⭐ = 建議採購人;指派後會自動加入該負責人的行事曆提醒</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">指派後會自動加入該負責人的行事曆提醒</div>
     </div>
 
     ${['已採購','已到貨','結案'].includes(r.status) || r.actual_qty || r.actual_amount ? `
@@ -29508,6 +29523,37 @@ async function _puSyncCalendar(purchaseRow) {
 async function _puCompleteCalendar(eventId) {
   if (!eventId) return;
   await db.from('calendar_events').update({ completed_at: new Date().toISOString() }).eq('id', eventId);
+}
+
+// 到貨 → 建 QC 提醒給原申請人(2 個工作天內完成)
+async function _puCreateQcReminder(purchaseRow) {
+  if (!purchaseRow.requester_id) return null;
+  const startDate = purchaseRow.arrived_date || _localToday();
+  const dueDate = addWorkdays(new Date(startDate + 'T00:00:00'), 2).toISOString().slice(0,10);
+  const payload = {
+    title: `📦 QC 點收:${purchaseRow.item_name}${purchaseRow.actual_qty?` × ${purchaseRow.actual_qty}`:''}`,
+    event_type: 'qc',
+    start_date: startDate,
+    end_date: dueDate,
+    priority: '高',
+    description: [
+      `採購品項:${purchaseRow.item_name}`,
+      purchaseRow.actual_qty ? `實際採購:${purchaseRow.actual_qty}` : '',
+      `採購負責人:${purchaseRow.purchaser_name||'—'}`,
+      purchaseRow.arrived_note ? `到貨備註:${purchaseRow.arrived_note}` : '',
+      `⏰ 請於 2 個工作天內(${dueDate.slice(5)} 前)完成 QC 點收`,
+    ].filter(Boolean).join('\n'),
+    assigned_to: purchaseRow.requester_id,
+    assignee_ids: [purchaseRow.requester_id],
+    created_by: state.user?.id || null,
+  };
+  // 若已有 qc_event_id → 更新;否則新增
+  if (purchaseRow.qc_event_id) {
+    await db.from('calendar_events').update(payload).eq('id', purchaseRow.qc_event_id);
+    return purchaseRow.qc_event_id;
+  }
+  const { data } = await db.from('calendar_events').insert(payload).select().single();
+  return data?.id || null;
 }
 
 // 品項即時搜尋(輸入框下方顯示下拉)
@@ -29833,6 +29879,35 @@ window._puItemDelete = async function(id, usageCount) {
   showToast('已刪除');
 };
 
+// 清單內直接指派負責人 → 自動改狀態 待指派 → 待採購 + 建行事曆
+window._puInlinePurchaser = async function(id, sel) {
+  const purId = sel.value || null;
+  const purName = sel.selectedOptions[0]?.dataset?.name || null;
+  const r = (state.data.purchases||[]).find(x=>x.id===id);
+  if (!r) return;
+  const upd = { purchaser_id: purId, purchaser_name: purName };
+  // 有指派 + 目前是待指派 → 改為待採購,並建行事曆
+  if (purId && r.status === '待指派') {
+    upd.status = '待採購';
+  }
+  if (purId) {
+    const calId = await _puSyncCalendar({ ...r, ...upd });
+    upd.calendar_event_id = calId;
+  } else {
+    // 取消指派 → 若有行事曆事件,刪掉
+    if (r.calendar_event_id) {
+      await db.from('calendar_events').delete().eq('id', r.calendar_event_id);
+      upd.calendar_event_id = null;
+    }
+    // 狀態退回待指派
+    if (r.status === '待採購') upd.status = '待指派';
+  }
+  const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
+  if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  showToast(purName?`已指派給 ${purName}`:'已取消指派');
+  await loadPurchases(); renderApp();
+};
+
 // 清單內直接切換狀態
 window._puInlineStatus = async function(id, newStatus) {
   const r = (state.data.purchases||[]).find(x=>x.id===id);
@@ -29840,15 +29915,23 @@ window._puInlineStatus = async function(id, newStatus) {
   const upd = { status: newStatus };
   // 到採購 → 沒 purchase_date 帶今天
   if (newStatus === '已採購' && !r.purchase_date) upd.purchase_date = _localToday();
-  // 到貨 → 沒 arrived_date 帶今天
-  if (newStatus === '已到貨' && !r.arrived_date) upd.arrived_date = _localToday();
-  // 到貨/結案 → 標記行事曆完成
+  // 到貨 → 沒 arrived_date 帶今天,並建 QC 提醒
+  if (newStatus === '已到貨') {
+    if (!r.arrived_date) upd.arrived_date = _localToday();
+    const qcId = await _puCreateQcReminder({ ...r, ...upd });
+    if (qcId) upd.qc_event_id = qcId;
+  }
+  // 到貨/結案 → 標記採購行事曆完成
   if (['已到貨','結案'].includes(newStatus) && r.calendar_event_id) {
     await _puCompleteCalendar(r.calendar_event_id);
   }
+  // 結案 → QC 事件也完成
+  if (newStatus === '結案' && r.qc_event_id) {
+    await _puCompleteCalendar(r.qc_event_id);
+  }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
-  showToast(`已改為 ${newStatus}`);
+  showToast(newStatus === '已到貨' ? `已改為到貨 · 已建 QC 提醒給 ${r.requester_name}` : `已改為 ${newStatus}`);
   await loadPurchases(); renderApp();
 };
 
@@ -29868,21 +29951,25 @@ window._puInlineField = async function(id, field, value) {
   await loadPurchases(); renderApp();
 };
 
-// 到貨 QC 輸入 → 自動填 arrived_date + 改狀態
+// 到貨 QC 輸入 → 自動填 arrived_date + 改狀態 + 建 QC 提醒
 window._puInlineArrived = async function(id, note) {
   const upd = { arrived_note: note || null };
-  if (note) {
-    upd.arrived_date = _localToday();
-    const r = (state.data.purchases||[]).find(x=>x.id===id);
-    if (r && ['待採購','已採購'].includes(r.status)) {
+  const r = (state.data.purchases||[]).find(x=>x.id===id);
+  if (note && r) {
+    upd.arrived_date = r.arrived_date || _localToday();
+    if (['待採購','已採購'].includes(r.status)) {
       upd.status = '已到貨';
       if (r.calendar_event_id) await _puCompleteCalendar(r.calendar_event_id);
     }
-  } else {
+    // 建 QC 提醒
+    const qcId = await _puCreateQcReminder({ ...r, ...upd });
+    if (qcId) upd.qc_event_id = qcId;
+  } else if (!note) {
     upd.arrived_date = null;
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  if (note && r && upd.qc_event_id) showToast(`已建 QC 提醒給 ${r.requester_name}(2 個工作天內)`);
   await loadPurchases(); renderApp();
 };
 
