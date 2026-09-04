@@ -29134,12 +29134,13 @@ function renderPurchases() {
             <th style="width:70px">目前庫存</th>
             <th style="width:90px">負責人</th>
             <th style="width:110px">採購狀態</th>
+            <th style="width:90px">採購日期</th>
             <th style="width:110px">實際採購數</th>
             <th style="width:250px">實際到貨 (QC)</th>
             <th style="width:40px"></th>
           </tr></thead>
           <tbody>
-          ${filtered.length===0 ? `<tr><td colspan="11"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
+          ${filtered.length===0 ? `<tr><td colspan="12"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
             filtered.map(r => `<tr>
               <td style="font-size:12px">${r.request_date||''}</td>
               <td style="font-size:12px">${r.requester_name||'—'}</td>
@@ -29172,9 +29173,12 @@ function renderPurchases() {
                 </select>
               </td>
               <td>
+                <input type="date" value="${r.purchase_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px"
+                  onchange="window._puInlineField('${r.id}','purchase_date',this.value)">
+              </td>
+              <td>
                 <input type="text" value="${(r.actual_qty||'').toString().replace(/"/g,'&quot;')}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px"
                   onchange="window._puInlineField('${r.id}','actual_qty',this.value)">
-                ${r.purchase_date?`<div style="font-size:10px;color:var(--muted);text-align:center;margin-top:2px">${r.purchase_date.slice(5)}</div>`:''}
               </td>
               <td>
                 <input type="text" value="${(r.arrived_note||'').toString().replace(/"/g,'&quot;')}" placeholder="QC 備註/實收" style="width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px;background:${r.arrived_date?'#e8f5e9':''}"
