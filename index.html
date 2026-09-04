@@ -29121,6 +29121,7 @@ function renderPurchases() {
           ${filtered.length===0 ? `<tr><td colspan="${isBoss?11:10}"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
             filtered.map(r => `<tr>
               <td style="font-size:12px">${r.request_date||''}</td>
+              <td style="font-size:12px">${r.requester_name||'—'}</td>
               <td><span style="background:${catColor[r.category]||'#f5f5f5'};color:${catText[r.category]||'#666'};padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600">${r.category||'—'}</span></td>
               <td style="cursor:pointer" onclick="window.openPurchaseModal('${r.id}')">
                 <div style="font-size:13px;font-weight:600">${r.item_name}</div>
@@ -29129,7 +29130,6 @@ function renderPurchases() {
               </td>
               <td style="font-size:12px;text-align:center">${r.expected_qty||'—'}</td>
               <td style="font-size:12px;text-align:center;color:var(--muted)">${r.current_stock||'—'}</td>
-              <td style="font-size:12px">${r.requester_name||'—'}</td>
               <td>
                 <select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${!r.purchaser_id?'#fff3e0':'#e0f2f1'};color:${!r.purchaser_id?'#e65100':'#00695c'};width:100%"
                   onchange="window._puInlinePurchaser('${r.id}',this)">
