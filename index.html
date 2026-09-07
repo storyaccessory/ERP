@@ -11702,6 +11702,7 @@ function renderAccounting() {
         ${ymOptions.map(m=>`<option ${m===(ym||thisYm)?'selected':''}>${m}</option>`).join('')}
       </select>` : `<span style="font-size:12px;color:var(--muted);font-weight:500;white-space:nowrap">${ymMode==='all'?'全部':ymMode==='this'?thisYm:prevYm}</span>`}
       <div style="display:flex;gap:6px;align-items:center;margin-left:auto;flex-shrink:0">
+        ${(activeTab === '餐費發票' || activeTab === '代墊金額') ? `<button class="btn btn-outline" onclick="window.acctPrint('${activeTab}')" style="white-space:nowrap" title="列印當月資料">🖨️ 列印</button>` : ''}
         ${(canSeeAP || activeTab === '餐費發票' || activeTab === '代墊金額') ? `<button class="btn btn-primary" id="add-acct-btn" style="white-space:nowrap">+ 新增</button>` : ''}
         ${(canSeeAP && activeTab === '應付帳款') ? `<button class="btn btn-outline" id="ap-template-btn" style="color:var(--accent);white-space:nowrap" title="套用範本">📋</button>` : ''}
         ${isAdmin ? `<button class="btn btn-outline" id="export-acct-btn" style="white-space:nowrap" title="匯出 Excel">↓</button>` : ''}
@@ -30224,6 +30225,89 @@ window.deletePurchase = async function(id) {
   if (r.qc_event_id) await _puRemoveSubtaskFromEvent(r.qc_event_id, r.id);
   await db.from('purchase_requests').delete().eq('id', id);
   showToast('已刪除'); await loadPurchases(); renderApp();
+};
+
+// 🖨️ 餐費/代墊列印
+window.acctPrint = function(tabType) {
+  const isMeal = tabType === '餐費發票';
+  const acctData = state.data.accounting || {};
+  const raw = isMeal ? (acctData.meal || []) : (acctData.advance || []);
+  const ymMode = state.data._acctYmMode || 'this';
+  const now = new Date();
+  const thisYm = now.getFullYear().toString() + String(now.getMonth()+1).padStart(2,'0');
+  const prevYm = (() => { const d = new Date(now.getFullYear(), now.getMonth()-1, 1); return d.getFullYear().toString() + String(d.getMonth()+1).padStart(2,'0'); })();
+  const selectedYm = ymMode === 'this' ? thisYm : ymMode === 'prev' ? prevYm : ymMode === 'all' ? '' : (acctData.ym || thisYm);
+  const rows = raw.filter(r => {
+    if (!selectedYm) return true;
+    const rYm = (r.year_month||'').slice(0,6) || (r.item_date||'').slice(0,7).replace('-','');
+    return rYm === selectedYm;
+  }).sort((a,b) => (a.applicant_name||'').localeCompare(b.applicant_name||'','zh-TW') || ((a.item_date||'').localeCompare(b.item_date||'')));
+
+  // 按人員分組
+  const grouped = {};
+  rows.forEach(r => {
+    const n = r.applicant_name || '未指定';
+    if (!grouped[n]) grouped[n] = { rows: [], total: 0 };
+    grouped[n].rows.push(r);
+    grouped[n].total += (r.amount||0);
+  });
+  const totalAll = rows.reduce((s,r)=>s+(r.amount||0), 0);
+  const displayYm = selectedYm ? `${selectedYm.slice(0,4)} 年 ${parseInt(selectedYm.slice(4))} 月` : '全部';
+  const emoji = isMeal ? '🍱' : '💳';
+
+  const groupsHtml = Object.entries(grouped).map(([name, info]) => `
+    <div class="group">
+      <div class="group-header">
+        <span class="name">${name}</span>
+        <span class="count">${info.rows.length} 筆</span>
+        <span class="sum">NT$ ${info.total.toLocaleString()}</span>
+      </div>
+      <table>
+        <thead><tr><th>發票日期</th><th>金額</th><th>品項</th><th>發票號碼</th></tr></thead>
+        <tbody>
+          ${info.rows.map(r => `<tr>
+            <td>${r.item_date?.slice?.(0,10)||'—'}</td>
+            <td class="amt">${(r.amount||0).toLocaleString()}</td>
+            <td class="desc">${r.item_desc||'—'}</td>
+            <td class="inv">${r.invoice_no||'—'}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `).join('');
+
+  const w = window.open('','_blank','width=800,height=1000');
+  w.document.write(`<!DOCTYPE html><html><head><meta charset="utf-8"><title>${displayYm} ${tabType}</title>
+    <style>
+      @page{size:A4 portrait;margin:10mm}
+      *{-webkit-print-color-adjust:exact !important;print-color-adjust:exact !important}
+      body{font-family:Arial,sans-serif;margin:0;padding:0}
+      h1{font-size:22px;text-align:center;margin:0 0 4px;font-weight:800}
+      .sub{font-size:9px;text-align:center;color:#666;margin-bottom:8px;padding-bottom:8px;border-bottom:3px solid ${isMeal?'#a5d6a7':'#90caf9'}}
+      .top-total{text-align:right;font-size:14px;font-weight:700;margin:8px 0;color:#c62828}
+      .group{margin-bottom:14px;page-break-inside:avoid}
+      .group-header{background:${isMeal?'#e8f5e9':'#e3f2fd'};padding:6px 10px;font-size:13px;font-weight:700;color:${isMeal?'#2e7d32':'#1565c0'};display:flex;justify-content:space-between;align-items:center;border-radius:4px 4px 0 0}
+      .group-header .name{font-size:14px}
+      .group-header .count{font-size:11px;color:#666;font-weight:400}
+      .group-header .sum{font-size:13px}
+      table{width:100%;border-collapse:collapse;font-size:11px;table-layout:fixed}
+      colgroup col:nth-child(1){width:15%}
+      colgroup col:nth-child(2){width:12%}
+      colgroup col:nth-child(3){width:43%}
+      colgroup col:nth-child(4){width:30%}
+      th,td{border:1px solid #999;padding:3px 6px}
+      th{background:#f5f5f5;color:#333;font-weight:700;text-align:left}
+      td.amt{text-align:right;font-weight:600}
+      td.desc{word-break:break-all}
+      td.inv{font-family:monospace;font-size:10px;color:#666}
+    </style></head><body>
+    <h1>${displayYm} · ${tabType}</h1>
+    <div class="sub">${state.profile?.name || state.user?.email || '—'} · 列印日期:${_localToday()}</div>
+    <div class="top-total">${emoji} 總金額:NT$ ${totalAll.toLocaleString()} · 共 ${rows.length} 筆</div>
+    ${rows.length === 0 ? '<div style="text-align:center;padding:40px;color:#999">尚無資料</div>' : groupsHtml}
+    <script>window.onload=()=>{setTimeout(()=>window.print(),300)}<\/script>
+    </body></html>`);
+  w.document.close();
 };
 
 // 🖨️ 體驗店月報列印
