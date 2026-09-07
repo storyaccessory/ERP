@@ -30261,10 +30261,56 @@ window.acctPrint = function(tabType) {
     grouped[n].total += (r.amount||0);
   });
   const totalAll = rows.reduce((s,r)=>s+(r.amount||0), 0);
+
+  // 餐費:把「有預算 > 0」但這個月沒申請的員工也列出來(金額 0)
+  if (isMeal) {
+    try {
+      const budgetsRaw = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
+      Object.entries(budgetsRaw).forEach(([name, budget]) => {
+        if ((budget||0) > 0 && !grouped[name]) {
+          grouped[name] = { rows: [], total: 0, budget };
+        } else if (grouped[name]) {
+          grouped[name].budget = budget;
+        }
+      });
+    } catch (e) {}
+  }
   const displayYm = selectedYm ? `${selectedYm.slice(0,4)} 年 ${parseInt(selectedYm.slice(4))} 月` : '全部';
   const emoji = isMeal ? '🍱' : '💳';
 
-  const groupsHtml = Object.entries(grouped).map(([name, info]) => `
+  // 依總金額排序(高→低)
+  const groupedSorted = Object.entries(grouped).sort((a,b) => b[1].total - a[1].total);
+
+  // 員工小結表格(頂部)
+  const summaryHtml = `
+    <div class="summary">
+      <div class="summary-title">📊 員工小結</div>
+      <table class="summary-tbl">
+        <thead><tr><th>員工</th><th>筆數</th><th>合計</th><th>佔比</th></tr></thead>
+        <tbody>
+          ${groupedSorted.map(([name, info]) => {
+            const pct = totalAll > 0 ? Math.round(info.total / totalAll * 100) : 0;
+            return `<tr>
+              <td class="name">${name}</td>
+              <td class="cnt">${info.rows.length}</td>
+              <td class="amt">${info.total.toLocaleString()}</td>
+              <td class="pct">${pct}%</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+        <tfoot>
+          <tr>
+            <td>總計</td>
+            <td class="cnt">${rows.length}</td>
+            <td class="amt">${totalAll.toLocaleString()}</td>
+            <td class="pct">100%</td>
+          </tr>
+        </tfoot>
+      </table>
+    </div>
+  `;
+
+  const groupsHtml = groupedSorted.map(([name, info]) => `
     <div class="group">
       <div class="group-header">
         <span class="name">${name}</span>
@@ -30272,6 +30318,7 @@ window.acctPrint = function(tabType) {
         <span class="sum">NT$ ${info.total.toLocaleString()}</span>
       </div>
       <table>
+        <colgroup><col><col><col><col></colgroup>
         <thead><tr><th>發票日期</th><th>金額</th><th>品項</th><th>發票號碼</th></tr></thead>
         <tbody>
           ${info.rows.map(r => `<tr>
@@ -30309,11 +30356,22 @@ window.acctPrint = function(tabType) {
       td.amt{text-align:right;font-weight:600}
       td.desc{word-break:break-all}
       td.inv{font-family:monospace;font-size:10px;color:#666}
+      /* 員工小結 */
+      .summary{margin-bottom:14px;page-break-inside:avoid}
+      .summary-title{font-size:13px;font-weight:700;background:${isMeal?'#c8e6c9':'#bbdefb'};color:${isMeal?'#1b5e20':'#0d47a1'};padding:5px 10px;border-radius:4px 4px 0 0}
+      .summary-tbl{width:100%;border-collapse:collapse;font-size:11px}
+      .summary-tbl th,.summary-tbl td{border:1px solid #999;padding:4px 8px}
+      .summary-tbl th{background:${isMeal?'#e8f5e9':'#e3f2fd'};text-align:left;font-weight:700}
+      .summary-tbl td.name{font-weight:600}
+      .summary-tbl td.cnt,.summary-tbl td.amt,.summary-tbl td.pct{text-align:right}
+      .summary-tbl td.amt{font-weight:700;color:#c62828}
+      .summary-tbl td.pct{color:#666;font-size:10px}
+      .summary-tbl tfoot td{background:${isMeal?'#a5d6a7':'#90caf9'};font-weight:800;font-size:12px}
     </style></head><body>
     <h1>${displayYm} · ${tabType}</h1>
     <div class="sub">${state.profile?.name || state.user?.email || '—'} · 列印日期:${_localToday()}</div>
     <div class="top-total">${emoji} 總金額:NT$ ${totalAll.toLocaleString()} · 共 ${rows.length} 筆</div>
-    ${rows.length === 0 ? '<div style="text-align:center;padding:40px;color:#999">尚無資料</div>' : groupsHtml}
+    ${rows.length === 0 ? '<div style="text-align:center;padding:40px;color:#999">尚無資料</div>' : summaryHtml + groupsHtml}
     <script>window.onload=()=>{setTimeout(()=>window.print(),300)}<\/script>
     </body></html>`);
   w.document.close();
