@@ -21758,12 +21758,19 @@ function renderJournal() {
       <span style="font-size:12px;color:var(--muted)">${jd.viewDate&&jd.viewDate!==today?`查看：${jd.viewDate}`:'今天'}</span>
     </div>
     ${!hasSubmitted && (jd.viewDate||today)===today ? `
-    <div style="background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center">
+    <div style="background:linear-gradient(135deg,var(--accent),var(--accent-dark));color:#fff;border-radius:10px;padding:14px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:10px">
       <div>
         <div style="font-weight:700;font-size:14px">你今天還沒填寫日誌 📝</div>
       </div>
-      <button class="btn" style="background:#fff;color:var(--accent-dark);font-weight:700;white-space:nowrap" onclick="window.modalEditJournal()">立即填寫</button>
-    </div>` : ''}
+      <div style="display:flex;gap:8px">
+        <button class="btn" style="background:rgba(255,255,255,.25);color:#fff;font-weight:600;white-space:nowrap;border:1px solid rgba(255,255,255,.4)" onclick="window.modalEditJournal(null,true)">補填舊日誌</button>
+        <button class="btn" style="background:#fff;color:var(--accent-dark);font-weight:700;white-space:nowrap" onclick="window.modalEditJournal()">立即填寫</button>
+      </div>
+    </div>` : (hasSubmitted && (jd.viewDate||today)===today ? `
+    <div style="background:#e8f5e9;border:1px solid #c8e6c9;border-radius:10px;padding:12px 16px;margin-bottom:16px;display:flex;justify-content:space-between;align-items:center;gap:10px">
+      <div style="font-size:13px;color:#2e7d32">✅ 今天日誌已完成</div>
+      <button class="btn btn-outline btn-sm" style="white-space:nowrap;color:#2e7d32;border-color:#a5d6a7" onclick="window.modalEditJournal(null,true)">📝 補填舊日誌</button>
+    </div>` : '')}
     ${todayView()}` : historyView()}`;
 }
 
@@ -21821,17 +21828,23 @@ window._jnlAddRow = function(fieldKey, hasQty, descVal='', qtyVal='', placeholde
   container.appendChild(row);
 };
 
-window.modalEditJournal = async function(existingId = null) {
+window.modalEditJournal = async function(existingId = null, forceNew = false) {
   const jd = state.data.journal || {};
   const myId = effectiveUserId();
   const today = _localToday();
   let existing = null;
   if (existingId) {
     existing = (jd.history||[]).find(l=>l.id===existingId);
-  } else {
+  } else if (!forceNew) {
     existing = (jd.today||[]).find(l=>l.user_id===myId);
   }
-  const logDate = existing?.date || today;
+  // 補填模式:預設帶入昨天(工作天)
+  const defaultDate = forceNew ? (() => {
+    const d = new Date(today+'T00:00:00');
+    do { d.setDate(d.getDate()-1); } while (d.getDay()===0 || d.getDay()===6);
+    return _localDateStr(d);
+  })() : today;
+  const logDate = existing?.date || defaultDate;
   const myProfile = (jd.profiles||[]).find(p=>p.id===myId);
   const myName = myProfile?.name || state.user?.email || '—';
   const tplKey = existing?.template_type || myProfile?.journal_template || ROLE_TO_JOURNAL_TEMPLATE[myProfile?.role] || 'general';
@@ -21976,14 +21989,23 @@ window.modalEditJournal = async function(existingId = null) {
         showToast('只能補填今天起前 2 個工作天內的日誌(週末不計入)', 'error');
         return;
       }
+      // 若補填的那天已有 log → 改為更新那筆
+      let updateTargetId = existing?.id;
+      if (!existing) {
+        const { data: dupCheck } = await db.from('work_journals').select('id').eq('user_id', myId).eq('date', _dateToUse).maybeSingle();
+        if (dupCheck) {
+          if (!confirm(`${_dateToUse} 已經填過日誌了,要覆蓋原本的內容嗎?`)) return;
+          updateTargetId = dupCheck.id;
+        }
+      }
       const payload = {
         user_id: myId, user_name: myName,
         date: _dateToUse, template_type: tplKey,
         fields, updated_at: new Date().toISOString(),
       };
       let dbErr;
-      if (existing) {
-        const { error } = await db.from('work_journals').update(payload).eq('id', existing.id);
+      if (updateTargetId) {
+        const { error } = await db.from('work_journals').update(payload).eq('id', updateTargetId);
         dbErr = error;
       } else {
         const { error } = await db.from('work_journals').insert(payload);
