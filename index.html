@@ -21838,8 +21838,17 @@ window.modalEditJournal = async function(existingId = null) {
   const tpl = JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
   const existingFields = existing?.fields || {};
 
-  // 補填:可選今天起往前 2 天內;未來日期不允許
-  const _jnlMinDate = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()-2); return _localDateStr(d); })();
+  // 補填:可選今天起往前 2 個「工作天」(週六日不算);未來日期不允許
+  const _jnlMinDate = (() => {
+    const d = new Date(today+'T00:00:00');
+    let workDaysBack = 0;
+    while (workDaysBack < 2) {
+      d.setDate(d.getDate() - 1);
+      const dow = d.getDay();
+      if (dow !== 0 && dow !== 6) workDaysBack++;
+    }
+    return _localDateStr(d);
+  })();
 
   showModal(`${existing?'修改':'填寫'}工作日誌`, `
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
@@ -21848,7 +21857,7 @@ window.modalEditJournal = async function(existingId = null) {
         ? `<span style="font-size:13px;color:var(--text);font-weight:600">${logDate}</span>`
         : `<input type="date" id="jnl-log-date" value="${today}" min="${_jnlMinDate}" max="${today}"
              style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;color:var(--text)">
-           <span style="font-size:11px;color:var(--muted)">(可補填近 2 天內,選非今天會自動標記)</span>`}
+           <span style="font-size:11px;color:var(--muted)">(可補填近 2 個工作天內,週末不計入)</span>`}
       <span style="color:var(--muted)">·</span>
       <span>${myName}</span>
     </div>
@@ -21964,7 +21973,7 @@ window.modalEditJournal = async function(existingId = null) {
       const _picked = document.getElementById('jnl-log-date')?.value || '';
       const _dateToUse = existing ? logDate : (_picked || today);
       if (!existing && (_dateToUse > today || _dateToUse < _jnlMinDate)) {
-        showToast('只能補填今天起前 2 天內的日誌', 'error');
+        showToast('只能補填今天起前 2 個工作天內的日誌(週末不計入)', 'error');
         return;
       }
       const payload = {
