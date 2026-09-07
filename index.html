@@ -30262,15 +30262,14 @@ window.acctPrint = function(tabType) {
   });
   const totalAll = rows.reduce((s,r)=>s+(r.amount||0), 0);
 
-  // 餐費:把「有預算 > 0」但這個月沒申請的員工也列出來(金額 0)
+  // 小結名單 = grouped ∪ 有預算 > 0 的員工(餐費才加,只補到小結,不建空白明細)
+  const summaryMap = { ...grouped };
   if (isMeal) {
     try {
       const budgetsRaw = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
       Object.entries(budgetsRaw).forEach(([name, budget]) => {
-        if ((budget||0) > 0 && !grouped[name]) {
-          grouped[name] = { rows: [], total: 0, budget };
-        } else if (grouped[name]) {
-          grouped[name].budget = budget;
+        if ((budget||0) > 0 && !summaryMap[name]) {
+          summaryMap[name] = { rows: [], total: 0 };
         }
       });
     } catch (e) {}
@@ -30278,7 +30277,8 @@ window.acctPrint = function(tabType) {
   const displayYm = selectedYm ? `${selectedYm.slice(0,4)} 年 ${parseInt(selectedYm.slice(4))} 月` : '全部';
   const emoji = isMeal ? '🍱' : '💳';
 
-  // 依總金額排序(高→低)
+  // 小結:含 0 金額的員工;明細:只有有資料的
+  const summarySorted = Object.entries(summaryMap).sort((a,b) => b[1].total - a[1].total);
   const groupedSorted = Object.entries(grouped).sort((a,b) => b[1].total - a[1].total);
 
   // 員工小結表格(頂部)
@@ -30288,9 +30288,10 @@ window.acctPrint = function(tabType) {
       <table class="summary-tbl">
         <thead><tr><th>員工</th><th>筆數</th><th>合計</th><th>佔比</th></tr></thead>
         <tbody>
-          ${groupedSorted.map(([name, info]) => {
+          ${summarySorted.map(([name, info]) => {
             const pct = totalAll > 0 ? Math.round(info.total / totalAll * 100) : 0;
-            return `<tr>
+            const isZero = info.total === 0;
+            return `<tr${isZero?' class="zero"':''}>
               <td class="name">${name}</td>
               <td class="cnt">${info.rows.length}</td>
               <td class="amt">${info.total.toLocaleString()}</td>
@@ -30367,6 +30368,8 @@ window.acctPrint = function(tabType) {
       .summary-tbl td.amt{font-weight:700;color:#c62828}
       .summary-tbl td.pct{color:#666;font-size:10px}
       .summary-tbl tfoot td{background:${isMeal?'#a5d6a7':'#90caf9'};font-weight:800;font-size:12px}
+      .summary-tbl tr.zero td{color:#aaa}
+      .summary-tbl tr.zero td.amt{color:#bbb;font-weight:400}
     </style></head><body>
     <h1>${displayYm} · ${tabType}</h1>
     <div class="sub">${state.profile?.name || state.user?.email || '—'} · 列印日期:${_localToday()}</div>
