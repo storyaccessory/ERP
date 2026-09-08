@@ -29932,8 +29932,8 @@ window._puMoveStatus = async function(id, existing, newStatus) {
 
 // ⚙️ 品項庫管理(老闆可編輯/停用/刪除)
 window.openPurchaseItemsAdmin = async function() {
-  const { data } = await db.from('purchase_items').select('*').order('category').order('usage_count',{ascending:false});
-  state.data.purchaseItems = data || [];
+  const { data } = await db.from('purchase_items').select('*').order('name');
+  state.data.purchaseItems = (data || []).sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-TW'));
   window._puItemsFilter = '';
   // 只重繪表格內容(不動搜尋框,避免注音輸入被中斷)
   window._renderPuItemsRows = function() {
@@ -29998,14 +29998,27 @@ window.openPurchaseItemsAdmin = async function() {
   showModal('⚙️ 採購品項庫管理', `<div id="pi-body">${window._renderPuItemsBody()}</div>`, [
     { label:'關閉', onclick: closeModal },
   ], { wide: true });
+  // 還原捲動位置
+  setTimeout(() => {
+    const wrap = document.querySelector('#pi-body > div:nth-child(2)');
+    if (wrap && window._puItemsScrollY) wrap.scrollTop = window._puItemsScrollY;
+  }, 60);
 };
 
+// 記住品項庫捲動位置(避免編輯後跳回頂端)
+window._puItemsScrollY = 0;
+function _puSaveScroll() {
+  const wrap = document.querySelector('#pi-body > div:nth-child(2)');
+  if (wrap) window._puItemsScrollY = wrap.scrollTop;
+}
 // 新增品項
 window._puItemNew = function() {
+  _puSaveScroll();
   window._puItemEditRaw({ id:null, name:'', category:'其他', reference_link:'', note:'', is_active:true });
 };
 // 編輯品項
 window._puItemEdit = function(id) {
+  _puSaveScroll();
   const it = (state.data.purchaseItems||[]).find(x=>x.id===id);
   if (it) window._puItemEditRaw(it);
 };
@@ -30053,8 +30066,8 @@ window._puItemEditRaw = function(it) {
 };
 window._puItemToggle = async function(id, active) {
   await db.from('purchase_items').update({ is_active: active }).eq('id', id);
-  const { data } = await db.from('purchase_items').select('*').order('category').order('usage_count',{ascending:false});
-  state.data.purchaseItems = data || [];
+  const { data } = await db.from('purchase_items').select('*').order('name');
+  state.data.purchaseItems = (data || []).sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-TW'));
   document.getElementById('pi-body').innerHTML = window._renderPuItemsBody();
 };
 window._puItemDelete = async function(id, usageCount) {
@@ -30064,8 +30077,8 @@ window._puItemDelete = async function(id, usageCount) {
   if (usageCount > 0) msg += `\n⚠️ 此品項已被申請過 ${usageCount} 次(申請紀錄不受影響,只是下拉選單不再出現)`;
   if (!confirm(msg)) return;
   await db.from('purchase_items').delete().eq('id', id);
-  const { data } = await db.from('purchase_items').select('*').order('category').order('usage_count',{ascending:false});
-  state.data.purchaseItems = data || [];
+  const { data } = await db.from('purchase_items').select('*').order('name');
+  state.data.purchaseItems = (data || []).sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-TW'));
   document.getElementById('pi-body').innerHTML = window._renderPuItemsBody();
   showToast('已刪除');
 };
