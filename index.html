@@ -5242,6 +5242,7 @@ function renderParts() {
         ✅ 只顯示有庫存
       </label>
       <button class="btn btn-primary" id="add-part-btn">+ 新增零件</button>
+      <button class="btn btn-outline" onclick="window.modalPartsToPurchase()" style="background:#fff3e0;color:#e65100;border-color:#ffb74d;font-weight:600" title="缺料零件建成採購申請">🛒 建採購申請</button>
       <button class="btn btn-outline" onclick="modalManagePartCategories()" style="background:#e8f5f4;color:#00695c" title="新增/重命名/合併/刪除分類">📚 分類管理</button>
       <button class="btn btn-outline" onclick="modalBatchEditUnit()" style="background:#fff8e1;color:#e65100" title="批次改單位">📏 批次改單位</button>
       <button class="btn btn-outline" id="import-parts-btn">↑ 批次匯入</button>
@@ -5664,6 +5665,7 @@ function renderRestock() {
         oninput="_searchHandler('restockSearch','restock-search-input',event)"
         oncompositionend="_searchHandler('restockSearch','restock-search-input',event)">
       ${canManageRestock()?`<button class="btn btn-primary" id="add-restock-btn">+ 新增${tab==='外購零件清單'?'採購單':tab}</button>`:''}
+      ${tab==='商品補貨單'&&canManageRestock()?`<button class="btn btn-outline" onclick="window.modalRestockPartsToPurchase()" style="background:#fff3e0;color:#e65100;border-color:#ffb74d;font-weight:600" title="從進行中補貨單找缺料零件,建成採購申請">🛒 缺料建採購</button>`:''}
       ${tab==='商品補貨單'&&!canManageRestock()?`<span style="font-size:12px;color:var(--muted)">（需要權限才能開立補貨單）</span>`:''}
     </div>
     ${tab==='商品補貨單'?`<div style="display:flex;gap:6px;flex-wrap:wrap;padding:0 2px 10px">
@@ -10124,6 +10126,11 @@ function renderPickup() {
     <div class="page-header"><h2>📋 抓料清單</h2></div>
     <div class="card"><div class="empty"><div class="empty-icon">✅</div><p>目前沒有待抓料的補貨單</p></div></div>`;
 
+  // 頂部按鈕列
+  const topBar = `<div style="display:flex;justify-content:flex-end;margin-bottom:10px">
+    <button class="btn btn-outline" onclick="window.modalRestockPartsToPurchase()" style="background:#fff3e0;color:#e65100;border-color:#ffb74d;font-weight:600">🛒 缺料建採購申請</button>
+  </div>`;
+
   function bomDetail(castings, parts) {
     const rows = [...castings.map(c => ({...c, type:'鑄件'})), ...parts.map(c => ({...c, type:'零件'}))];
     return rows.map(c => `
@@ -10240,6 +10247,7 @@ function renderPickup() {
       <h2>📋 抓料清單</h2>
       <p style="color:var(--muted);font-size:13px">共 ${restock.length} 張補貨單待抓料</p>
     </div>
+    ${topBar}
     ${cards}`;
 }
 
@@ -30202,12 +30210,203 @@ window._puInlineField = async function(id, field, value) {
   await loadPurchases(); renderApp();
 };
 
-// 填實際入庫數(qc_qty)→ 結案 + 兩個子任務都打勾 + 自動填 QC 入庫日期
+// 🛒 從補貨單缺料建採購申請(觸發點 ②:補貨管理頁)
+window.modalRestockPartsToPurchase = async function() {
+  // 找進行中的補貨單(待抓料/缺零件/缺鑄件)
+  const activeOrders = (state.data.restock || []).filter(r => ['待抓料','缺零件','缺鑄件'].includes(r.status));
+  if (!activeOrders.length) { showToast('目前沒有需要抓料的補貨單','info'); return; }
+
+  // 逐張單計算需要的零件量
+  const partsNeeded = {};   // part_id → { need, related_orders:[{no, qty}], part }
+  const parts = state.data.parts || [];
+  activeOrders.forEach(r => {
+    (r.restock_order_items || []).forEach(it => {
+      const qty = it.confirmed_qty ?? it.qty ?? 1;
+      const partList = it.products?.product_parts || [];
+      partList.forEach(pp => {
+        const pid = pp.part_id || pp.parts?.id;
+        if (!pid) return;
+        const part = parts.find(p => p.id === pid) || pp.parts;
+        if (!part) return;
+        const need = (pp.qty||1) * qty;
+        if (!partsNeeded[pid]) partsNeeded[pid] = { need: 0, related_orders: [], part };
+        partsNeeded[pid].need += need;
+        const exists = partsNeeded[pid].related_orders.find(o => o.no === r.order_no);
+        if (exists) exists.qty += need;
+        else if (r.order_no) partsNeeded[pid].related_orders.push({ no: r.order_no, qty: need, restock_id: r.id });
+      });
+    });
+  });
+
+  // 篩選出缺料的(需要量 > 現有庫存)
+  const shortList = Object.values(partsNeeded)
+    .map(x => {
+      const stock = x.part.stock || 0;
+      const shortage = Math.max(0, x.need - stock);
+      return { part: x.part, need: x.need, stock, shortage, related_orders: x.related_orders };
+    })
+    .filter(x => x.shortage > 0)
+    .sort((a,b) => (a.part.category||'').localeCompare(b.part.category||'','zh-TW') || (a.part.name||'').localeCompare(b.part.name||'','zh-TW'));
+
+  if (!shortList.length) { showToast('目前所有進行中補貨單的零件都夠 👍','info'); return; }
+
+  state.data._puRestockPickList = shortList.map(x => ({
+    ...x,
+    _picked: true,
+    _qty: x.shortage,
+  }));
+
+  const _renderRows = () => (state.data._puRestockPickList||[]).map((r, i) => `<tr style="border-top:1px solid #eee">
+    <td style="padding:5px;text-align:center">
+      <input type="checkbox" ${r._picked?'checked':''} onchange="state.data._puRestockPickList[${i}]._picked=this.checked">
+    </td>
+    <td style="padding:5px 6px;font-size:12px">${r.part.category||'—'}</td>
+    <td style="padding:5px 6px;font-weight:600">${r.part.name}${r.part.spec?`<div style="font-size:10px;color:var(--muted)">${r.part.spec}</div>`:''}
+      <div style="font-size:10px;color:#e65100;margin-top:2px">📋 ${r.related_orders.map(o=>`${o.no}×${o.qty}`).join(', ')}</div>
+    </td>
+    <td style="padding:5px;text-align:center;font-size:12px">${r.stock}</td>
+    <td style="padding:5px;text-align:center;font-size:12px">${r.need}</td>
+    <td style="padding:5px;text-align:center;color:var(--danger);font-weight:700">-${r.shortage}</td>
+    <td style="padding:5px">
+      <input type="number" min="1" value="${r._qty}" style="width:70px;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px"
+        onchange="state.data._puRestockPickList[${i}]._qty=parseInt(this.value)||0">
+    </td>
+  </tr>`).join('');
+
+  showModal('🛒 從補貨單缺料建採購申請', `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">✅ 已勾選的零件會建成採購申請,並自動連結到對應的補貨單</div>
+    <div style="border:1px solid var(--border);border-radius:6px;max-height:60vh;overflow-y:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="position:sticky;top:0;background:#f5f5f5"><tr>
+          <th style="padding:6px;width:40px"></th>
+          <th style="padding:6px;text-align:left;width:90px">分類</th>
+          <th style="padding:6px;text-align:left">零件 · 相關補貨單</th>
+          <th style="padding:6px;text-align:center;width:60px">現有</th>
+          <th style="padding:6px;text-align:center;width:60px">需要</th>
+          <th style="padding:6px;text-align:center;width:60px">缺</th>
+          <th style="padding:6px;text-align:center;width:100px">預計採購</th>
+        </tr></thead>
+        <tbody>${_renderRows()}</tbody>
+      </table>
+    </div>
+  `, [
+    { label:'📤 送出全部勾選', primary:true, onclick: async () => {
+      const list = (state.data._puRestockPickList || []).filter(p => p._picked && p._qty > 0);
+      if (!list.length) { showToast('請至少勾選一項','error'); return; }
+      const today = _localToday();
+      const inserts = list.map(r => ({
+        request_no: `PR-${today.replace(/-/g,'')}-${String(Math.floor(Math.random()*900)+100)}`,
+        requester_id: state.user?.id || null,
+        requester_name: state.profile?.name || state.user?.email || '',
+        request_date: today,
+        category: '零件',
+        item_name: r.part.name + (r.part.spec?` (${r.part.spec})`:''),
+        expected_qty: String(r._qty),
+        current_stock: String(r.stock),
+        notes: `補貨單:${r.related_orders.map(o=>o.no).join(', ')}`,
+        status: '待指派',
+        part_id: r.part.id,
+        related_restock_id: r.related_orders[0]?.restock_id || null,
+      }));
+      const { error } = await db.from('purchase_requests').insert(inserts);
+      if (error) { showToast('送出失敗:'+error.message,'error'); return; }
+      showToast(`✅ 已送出 ${inserts.length} 筆採購申請`);
+      state.data._puRestockPickList = null;
+      closeModal(); await loadPurchases?.(); renderApp();
+    }},
+    { label:'取消', onclick: () => { state.data._puRestockPickList = null; closeModal(); } },
+  ], { width: '1000px' });
+};
+
+// 🛒 從零件缺料建立採購申請(觸發點 ①:零件管理頁)
+window.modalPartsToPurchase = async function(preFilteredIds = null) {
+  await loadParts?.().catch(()=>{});
+  const parts = state.data.parts || [];
+  // 計算缺料
+  const shortList = parts
+    .filter(p => (p.safety_stock||0) > 0)
+    .filter(p => (p.stock||0) < (p.safety_stock||0))
+    .filter(p => !preFilteredIds || preFilteredIds.includes(p.id))
+    .map(p => ({
+      ...p,
+      short: Math.max(0, (p.safety_stock||0) - (p.stock||0)),
+      _picked: true,
+      _qty: Math.max(0, (p.safety_stock||0) - (p.stock||0)),
+    }))
+    .sort((a,b) => (a.category||'').localeCompare(b.category||'','zh-TW') || (a.name||'').localeCompare(b.name||'','zh-TW'));
+
+  if (!shortList.length) { showToast('目前沒有低於安全庫存的零件 👍', 'info'); return; }
+  state.data._puPartsPickList = shortList;
+
+  const _renderRows = () => {
+    const list = state.data._puPartsPickList || [];
+    return list.map((p, i) => `<tr style="border-top:1px solid #eee">
+      <td style="padding:5px;text-align:center">
+        <input type="checkbox" ${p._picked?'checked':''} onchange="state.data._puPartsPickList[${i}]._picked=this.checked">
+      </td>
+      <td style="padding:5px 6px;font-size:12px">${p.category||'—'}</td>
+      <td style="padding:5px 6px;font-weight:600">${p.name}${p.spec?`<div style="font-size:10px;color:var(--muted)">${p.spec}</div>`:''}</td>
+      <td style="padding:5px;text-align:center;font-size:12px">${p.stock||0}</td>
+      <td style="padding:5px;text-align:center;font-size:12px">${p.safety_stock||0}</td>
+      <td style="padding:5px;text-align:center;color:var(--danger);font-weight:700">-${p.short}</td>
+      <td style="padding:5px">
+        <input type="number" min="1" value="${p._qty}" style="width:70px;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px"
+          onchange="state.data._puPartsPickList[${i}]._qty=parseInt(this.value)||0">
+      </td>
+    </tr>`).join('');
+  };
+
+  showModal('🛒 缺料零件建採購申請', `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:8px">✅ 已勾選 = 送出後會建成採購申請(狀態:待指派,類別:零件)</div>
+    <div style="border:1px solid var(--border);border-radius:6px;max-height:60vh;overflow-y:auto">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="position:sticky;top:0;background:#f5f5f5"><tr>
+          <th style="padding:6px;width:40px"></th>
+          <th style="padding:6px;text-align:left;width:90px">分類</th>
+          <th style="padding:6px;text-align:left">零件</th>
+          <th style="padding:6px;text-align:center;width:60px">目前</th>
+          <th style="padding:6px;text-align:center;width:60px">安庫</th>
+          <th style="padding:6px;text-align:center;width:60px">缺</th>
+          <th style="padding:6px;text-align:center;width:100px">預計採購</th>
+        </tr></thead>
+        <tbody id="pu-parts-tbody">${_renderRows()}</tbody>
+      </table>
+    </div>
+  `, [
+    { label:'📤 送出全部勾選', primary:true, onclick: async () => {
+      const list = (state.data._puPartsPickList || []).filter(p => p._picked && p._qty > 0);
+      if (!list.length) { showToast('請至少勾選一項','error'); return; }
+      const today = _localToday();
+      const inserts = list.map(p => ({
+        request_no: `PR-${today.replace(/-/g,'')}-${String(Math.floor(Math.random()*900)+100)}`,
+        requester_id: state.user?.id || null,
+        requester_name: state.profile?.name || state.user?.email || '',
+        request_date: today,
+        category: '零件',
+        item_name: p.name + (p.spec?` (${p.spec})`:''),
+        expected_qty: String(p._qty),
+        current_stock: String(p.stock||0),
+        notes: p.notes || null,
+        status: '待指派',
+        part_id: p.id,
+      }));
+      const { error } = await db.from('purchase_requests').insert(inserts);
+      if (error) { showToast('送出失敗:'+error.message,'error'); return; }
+      showToast(`✅ 已送出 ${inserts.length} 筆採購申請,老闆會收到通知`);
+      state.data._puPartsPickList = null;
+      closeModal(); await loadPurchases?.(); renderApp();
+    }},
+    { label:'取消', onclick: () => { state.data._puPartsPickList = null; closeModal(); } },
+  ], { width: '900px' });
+};
+
+// 填實際入庫數(qc_qty)→ 結案 + 兩個子任務都打勾 + 自動填 QC 入庫日期 + 若有 part_id 自動加庫存
 window._puInlineQcQty = async function(id, value) {
   const r = (state.data.purchases||[]).find(x=>x.id===id);
   if (!r) return;
   const val = value === '' ? null : parseFloat(value);
   const upd = { qc_qty: val };
+  let stockAdded = 0;
   if (val != null && !isNaN(val)) {
     upd.status = '結案';
     if (!r.arrived_date) upd.arrived_date = _localToday();   // QC 入庫日期 = 填入庫數量的時間
@@ -30219,15 +30418,38 @@ window._puInlineQcQty = async function(id, value) {
       if (qcId) upd.qc_event_id = qcId;
     }
     if (qcId) await _puMarkSubtaskDone(qcId, r.id);
+    // 🎯 若此採購連到零件 → 自動加零件庫存
+    if (r.part_id) {
+      // 先扣掉前次已加的(避免多次填數重複加)
+      const prevQty = r.qc_qty ? parseFloat(r.qc_qty) : 0;
+      const delta = val - prevQty;
+      if (delta !== 0) {
+        const { data: partRow } = await db.from('parts').select('stock').eq('id', r.part_id).maybeSingle();
+        const newStock = (partRow?.stock || 0) + delta;
+        await db.from('parts').update({ stock: newStock }).eq('id', r.part_id);
+        stockAdded = delta;
+      }
+    }
   } else {
-    // 清空 → 退回已到貨
+    // 清空 → 退回已到貨 + 扣回庫存
     if (r.status === '結案') upd.status = '已到貨';
     if (r.qc_event_id) await _puUncheckSubtask(r.qc_event_id, r.id);
+    if (r.part_id && r.qc_qty) {
+      const prevQty = parseFloat(r.qc_qty);
+      const { data: partRow } = await db.from('parts').select('stock').eq('id', r.part_id).maybeSingle();
+      const newStock = Math.max(0, (partRow?.stock || 0) - prevQty);
+      await db.from('parts').update({ stock: newStock }).eq('id', r.part_id);
+      stockAdded = -prevQty;
+    }
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
-  if (val != null) showToast(`已入庫 ${val} · 結案 ✅`);
-  await loadPurchases(); renderApp();
+  if (val != null) {
+    showToast(`已入庫 ${val} · 結案 ✅${stockAdded ? ` · 零件庫存 +${stockAdded}`:''}`);
+  }
+  await loadPurchases();
+  if (r.part_id) await loadParts?.().catch(()=>{});  // 重新載入零件庫存顯示
+  renderApp();
 };
 
 // 取消勾選事件中某採購的子任務,母任務也退回未完成
