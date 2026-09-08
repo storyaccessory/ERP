@@ -29935,17 +29935,45 @@ window.openPurchaseItemsAdmin = async function() {
   const { data } = await db.from('purchase_items').select('*').order('category').order('usage_count',{ascending:false});
   state.data.purchaseItems = data || [];
   window._puItemsFilter = '';
-  window._renderPuItemsBody = function() {
+  // 只重繪表格內容(不動搜尋框,避免注音輸入被中斷)
+  window._renderPuItemsRows = function() {
     const items = state.data.purchaseItems || [];
     const q = (window._puItemsFilter||'').toLowerCase().trim();
     const filtered = q
       ? items.filter(it => (it.name||'').toLowerCase().includes(q) || (it.category||'').toLowerCase().includes(q))
       : items;
+    const cnt = document.getElementById('pi-count');
+    if (cnt) cnt.textContent = `共 ${filtered.length} 項`;
+    return filtered.length===0
+      ? `<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--muted)">沒有符合的品項</td></tr>`
+      : filtered.map(it => `<tr style="border-top:1px solid #eee;${!it.is_active?'opacity:.5':''}">
+        <td style="padding:5px 6px">${it.category||'—'}</td>
+        <td style="padding:5px 6px;font-weight:600">${it.name}${it.note?`<div style="font-size:10px;color:var(--muted)">${it.note}</div>`:''}</td>
+        <td style="padding:5px 6px;text-align:center;color:var(--muted)">${it.usage_count||0}</td>
+        <td style="padding:5px 6px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.reference_link||''}</td>
+        <td style="padding:5px 6px;text-align:center">
+          <span class="tag ${it.is_active?'tag-green':'tag-grey'}" style="font-size:10px">${it.is_active?'啟用':'停用'}</span>
+        </td>
+        <td style="padding:5px 6px;text-align:center;white-space:nowrap">
+          <button class="btn-table" style="padding:2px 6px;font-size:11px" onclick="window._puItemEdit('${it.id}')">編輯</button>
+          <button class="btn-table" style="padding:2px 6px;font-size:11px" onclick="window._puItemToggle('${it.id}',${!it.is_active})">${it.is_active?'停用':'啟用'}</button>
+          <button class="btn-table danger" style="padding:2px 6px;font-size:11px" onclick="window._puItemDelete('${it.id}',${it.usage_count||0})">刪</button>
+        </td>
+      </tr>`).join('');
+  };
+
+  // 兼容舊呼叫:如果 body 存在,重建 tbody 而非整個 body
+  window._renderPuItemsBody = function() {
+    const tb = document.getElementById('pi-tbody');
+    if (tb) { tb.innerHTML = window._renderPuItemsRows(); return ''; }
+    // 初始渲染(整個 body)
     return `
       <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
-        <input class="form-control" id="pi-search" value="${q}" placeholder="搜尋名稱 / 類別…" oninput="window._puItemsFilter=this.value;document.getElementById('pi-body').innerHTML=window._renderPuItemsBody()">
+        <input class="form-control" id="pi-search" placeholder="搜尋名稱 / 類別…" autocomplete="off"
+          oninput="window._puItemsFilter=this.value;window._renderPuItemsRows();window._renderPuItemsBodyRefresh();"
+          oncompositionend="window._puItemsFilter=this.value;window._renderPuItemsRows();window._renderPuItemsBodyRefresh();">
         <button class="btn btn-primary btn-sm" onclick="window._puItemNew()">+ 新增品項</button>
-        <span style="font-size:12px;color:var(--muted);white-space:nowrap">共 ${filtered.length} 項</span>
+        <span id="pi-count" style="font-size:12px;color:var(--muted);white-space:nowrap">共 ${(state.data.purchaseItems||[]).length} 項</span>
       </div>
       <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
         <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -29957,26 +29985,15 @@ window.openPurchaseItemsAdmin = async function() {
             <th style="padding:6px;text-align:center;width:60px">狀態</th>
             <th style="padding:6px;text-align:center;width:120px">操作</th>
           </tr></thead>
-          <tbody>
-            ${filtered.length===0 ? `<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--muted)">沒有符合的品項</td></tr>` :
-              filtered.map(it => `<tr style="border-top:1px solid #eee;${!it.is_active?'opacity:.5':''}">
-                <td style="padding:5px 6px">${it.category||'—'}</td>
-                <td style="padding:5px 6px;font-weight:600">${it.name}${it.note?`<div style="font-size:10px;color:var(--muted)">${it.note}</div>`:''}</td>
-                <td style="padding:5px 6px;text-align:center;color:var(--muted)">${it.usage_count||0}</td>
-                <td style="padding:5px 6px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.reference_link||''}</td>
-                <td style="padding:5px 6px;text-align:center">
-                  <span class="tag ${it.is_active?'tag-green':'tag-grey'}" style="font-size:10px">${it.is_active?'啟用':'停用'}</span>
-                </td>
-                <td style="padding:5px 6px;text-align:center;white-space:nowrap">
-                  <button class="btn-table" style="padding:2px 6px;font-size:11px" onclick="window._puItemEdit('${it.id}')">編輯</button>
-                  <button class="btn-table" style="padding:2px 6px;font-size:11px" onclick="window._puItemToggle('${it.id}',${!it.is_active})">${it.is_active?'停用':'啟用'}</button>
-                  <button class="btn-table danger" style="padding:2px 6px;font-size:11px" onclick="window._puItemDelete('${it.id}',${it.usage_count||0})">刪</button>
-                </td>
-              </tr>`).join('')}
-          </tbody>
+          <tbody id="pi-tbody">${window._renderPuItemsRows()}</tbody>
         </table>
       </div>
     `;
+  };
+  // 只更新 tbody(不動搜尋框):給 oninput 呼叫用
+  window._renderPuItemsBodyRefresh = function() {
+    const tb = document.getElementById('pi-tbody');
+    if (tb) tb.innerHTML = window._renderPuItemsRows();
   };
   showModal('⚙️ 採購品項庫管理', `<div id="pi-body">${window._renderPuItemsBody()}</div>`, [
     { label:'關閉', onclick: closeModal },
