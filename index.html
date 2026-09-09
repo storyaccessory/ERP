@@ -29303,6 +29303,82 @@ window.openPurchaseBatchModal = function() {
     state.data._puBatchRows.push({ category:'', item_name:'', expected_qty:'', current_stock:'', reference_link:'', notes:'' });
     window._pubRerender();
   };
+  // 從零件庫挑一或多個零件加進批次列表
+  window._pubPickFromParts = async function() {
+    if (!(state.data.parts||[]).length && typeof loadParts === 'function') { await loadParts(); }
+    const parts = (state.data.parts||[]).slice().sort((a,b)=>(a.category||'').localeCompare(b.category||'','zh-TW') || (a.name||'').localeCompare(b.name||'','zh-TW'));
+    if (!parts.length) { showToast('沒有零件資料,請先到零件管理新增','info'); return; }
+    window._pubPartsFilter = '';
+    const _render = () => {
+      const q = (window._pubPartsFilter||'').toLowerCase().trim();
+      const filtered = q ? parts.filter(p =>
+        (p.name||'').toLowerCase().includes(q) ||
+        (p.spec||'').toLowerCase().includes(q) ||
+        (p.category||'').toLowerCase().includes(q)
+      ) : parts;
+      return `
+        <input class="form-control" id="pub-part-search" placeholder="🔍 搜尋零件名稱/規格/分類..." autocomplete="off"
+          oninput="window._pubPartsFilter=this.value;document.getElementById('pub-part-body').innerHTML=window._pubPartsListRender()"
+          oncompositionend="window._pubPartsFilter=this.value;document.getElementById('pub-part-body').innerHTML=window._pubPartsListRender()"
+          style="margin-bottom:8px">
+        <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead style="position:sticky;top:0;background:#f5f5f5"><tr>
+              <th style="padding:6px;text-align:left;width:90px">分類</th>
+              <th style="padding:6px;text-align:left">零件</th>
+              <th style="padding:6px;text-align:center;width:60px">現有</th>
+              <th style="padding:6px;text-align:center;width:60px">安庫</th>
+              <th style="padding:6px;text-align:center;width:80px"></th>
+            </tr></thead>
+            <tbody id="pub-part-body">${window._pubPartsListRender()}</tbody>
+          </table>
+        </div>
+      `;
+    };
+    window._pubPartsListRender = () => {
+      const q = (window._pubPartsFilter||'').toLowerCase().trim();
+      const filtered = q ? parts.filter(p =>
+        (p.name||'').toLowerCase().includes(q) ||
+        (p.spec||'').toLowerCase().includes(q) ||
+        (p.category||'').toLowerCase().includes(q)
+      ) : parts;
+      if (!filtered.length) return `<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--muted)">沒有符合的零件</td></tr>`;
+      return filtered.slice(0, 200).map(p => `<tr style="border-top:1px solid #eee">
+        <td style="padding:5px 6px">${p.category||'—'}</td>
+        <td style="padding:5px 6px;font-weight:600">${p.name}${p.spec?`<div style="font-size:10px;color:var(--muted)">${p.spec}</div>`:''}</td>
+        <td style="padding:5px;text-align:center;font-size:12px">${p.stock||0}</td>
+        <td style="padding:5px;text-align:center;font-size:12px">${p.safety_stock||0}</td>
+        <td style="padding:5px;text-align:center">
+          <button class="btn btn-sm btn-primary" style="padding:3px 10px;font-size:11px" onclick="window._pubAddPart('${p.id}')">+ 加入</button>
+        </td>
+      </tr>`).join('');
+    };
+    // 停止顯示 modal 中的另一組 rendering
+    showModal('🔧 從零件庫挑選', _render(), [
+      { label:'關閉', onclick: () => {
+        closeModal();
+        setTimeout(() => window.openPurchaseBatchModal && window.openPurchaseBatchModal(), 100);
+      }},
+    ], { width: '900px' });
+  };
+  window._pubAddPart = function(partId) {
+    const parts = state.data.parts || [];
+    const p = parts.find(x => x.id === partId);
+    if (!p) return;
+    const shortage = Math.max(1, (p.safety_stock||0) - (p.stock||0));
+    // 加到 batch 列表
+    if (!state.data._puBatchRows) state.data._puBatchRows = [];
+    state.data._puBatchRows.push({
+      category: '零件',
+      item_name: p.name + (p.spec?` (${p.spec})`:''),
+      expected_qty: String(shortage),
+      current_stock: String(p.stock||0),
+      reference_link: '',
+      notes: '',
+      part_id: p.id,
+    });
+    showToast(`已加入 ${p.name}`);
+  };
   window._pubRemove = (i) => {
     if (state.data._puBatchRows.length <= 1) { showToast('至少要有一項','info'); return; }
     state.data._puBatchRows.splice(i, 1);
@@ -29367,6 +29443,7 @@ window.openPurchaseBatchModal = function() {
     </div>
     <div style="margin-top:8px">
       <button class="btn btn-outline btn-sm" onclick="window._pubAdd()">+ 加一列品項</button>
+      <button class="btn btn-outline btn-sm" onclick="window._pubPickFromParts()" style="margin-left:8px;background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7">🔧 從零件庫挑</button>
     </div>
   `;
 
@@ -29398,6 +29475,7 @@ window.openPurchaseBatchModal = function() {
         reference_link: r.reference_link || null,
         notes: r.notes || null,
         status: '待指派',
+        part_id: r.part_id || null,   // ← 從零件庫挑的會帶 part_id
       }));
       const { error } = await db.from('purchase_requests').insert(inserts);
       if (error) { showToast('送出失敗:'+error.message,'error'); return; }
