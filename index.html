@@ -29215,7 +29215,7 @@ function renderPurchases() {
               <td style="font-size:13px;text-align:center;color:#c62828;font-weight:700">${r.expected_qty||'—'}</td>
               <td style="font-size:12px;text-align:center;color:var(--muted)">${r.current_stock||'—'}</td>
               <td>
-                <select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${!r.purchaser_id?'#fff3e0':'#e0f2f1'};color:${!r.purchaser_id?'#e65100':'#00695c'};width:100%"
+                ${isAdminOnly ? `<select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${!r.purchaser_id?'#fff3e0':'#e0f2f1'};color:${!r.purchaser_id?'#e65100':'#00695c'};width:100%"
                   onchange="window._puInlinePurchaser('${r.id}',this)">
                   <option value="">未指派</option>
                   ${(() => {
@@ -29226,7 +29226,7 @@ function renderPurchases() {
                       `<option value="${u.id}" data-name="${u.name}" ${r.purchaser_id===u.id?'selected':''}>${u.name}</option>`
                     ).join('');
                   })()}
-                </select>
+                </select>` : `<div style="font-size:12px;padding:4px 6px;color:${r.purchaser_name?'#00695c':'#e65100'};font-weight:600;text-align:center" title="僅老闆可指派負責人">${r.purchaser_name||'未指派'}</div>`}
               </td>
               <td>
                 <select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${r.status==='待指派'?'#ffebee':r.status==='待採購'?'#fff8e1':r.status==='已採購'?'#e3f2fd':r.status==='已到貨'?'#e0f2f1':r.status==='結案'?'#e8f5e9':'#f5f5f5'};color:${r.status==='待指派'?'#c62828':r.status==='待採購'?'#e65100':r.status==='已採購'?'#1565c0':r.status==='已到貨'?'#00695c':r.status==='結案'?'#2e7d32':'#616161'}"
@@ -29532,6 +29532,7 @@ window.openPurchaseModal = async function(id) {
   const purchaseItems = state.data.purchaseItems || [];
   const _ep = effectiveProfile() || {};
   const isBoss = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com';
+  const isAdminOnly = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
   const canEdit = !r.id || isBoss || r.requester_id === state.user?.id || r.purchaser_id === state.user?.id;
   // 負責人選單:蔡采玲/劉怡汝 排最上面,再列其他人
   const purchaserOpts = (() => {
@@ -29584,11 +29585,11 @@ window.openPurchaseModal = async function(id) {
 
     <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:14px 0 6px">🎯 指派採購負責人</div>
     <div class="form-group">
-      <select class="form-control" id="pu-purchaser">
+      <select class="form-control" id="pu-purchaser" ${isAdminOnly?'':'disabled style="background:#f5f5f5;cursor:not-allowed"'}>
         <option value="">— 選擇負責人 —</option>
         ${purchaserOpts}
       </select>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px">指派後會自動加入該負責人的行事曆提醒</div>
+      <div style="font-size:11px;color:${isAdminOnly?'var(--muted)':'#e65100'};margin-top:4px">${isAdminOnly?'指派後會自動加入該負責人的行事曆提醒':'🔒 僅老闆可指派負責人'}</div>
     </div>
 
     ${['已採購','已到貨','結案'].includes(r.status) || r.actual_qty || r.actual_amount ? `
@@ -30179,6 +30180,10 @@ window._puItemDelete = async function(id, usageCount) {
 
 // 清單內直接指派負責人 → 自動改狀態 待指派 → 待採購 + 建行事曆
 window._puInlinePurchaser = async function(id, sel) {
+  // 權限守門:只有老闆可指派
+  const _ep = effectiveProfile() || {};
+  const isAdminOnly = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
+  if (!isAdminOnly) { showToast('僅老闆可指派採購負責人','error'); renderApp(); return; }
   const purId = sel.value || null;
   const purName = sel.selectedOptions[0]?.dataset?.name || null;
   const r = (state.data.purchases||[]).find(x=>x.id===id);
