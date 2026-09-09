@@ -29681,7 +29681,8 @@ window._puCollect = function(existing) {
 async function _puSyncCalendar(purchaseRow) {
   if (!purchaseRow.purchaser_id) return null;
   const today = _localToday();
-  const dueDate = addWorkdays(new Date(today + 'T00:00:00'), 3).toISOString().slice(0,10);
+  const _dueD = addWorkdays(new Date(today + 'T00:00:00'), 3);
+  const dueDate = `${_dueD.getFullYear()}-${String(_dueD.getMonth()+1).padStart(2,'0')}-${String(_dueD.getDate()).padStart(2,'0')}`;
   const subtaskText = `${purchaseRow.item_name}${purchaseRow.expected_qty?` × ${purchaseRow.expected_qty}`:''}${purchaseRow.reference_link?` 🔗`:''}`;
   const newSub = {
     id: `pu_${purchaseRow.id}`,
@@ -29771,7 +29772,8 @@ async function _puCompleteCalendar(eventId) {
 async function _puCreateQcReminder(purchaseRow) {
   if (!purchaseRow.requester_id) return null;
   const startDate = purchaseRow.arrival_date || purchaseRow.arrived_date || _localToday();
-  const dueDate = addWorkdays(new Date(startDate + 'T00:00:00'), 3).toISOString().slice(0,10);
+  const _dueD = addWorkdays(new Date(startDate + 'T00:00:00'), 3);
+  const dueDate = `${_dueD.getFullYear()}-${String(_dueD.getMonth()+1).padStart(2,'0')}-${String(_dueD.getDate()).padStart(2,'0')}`;
   const subtaskText = `${purchaseRow.item_name}${purchaseRow.actual_qty?` × ${purchaseRow.actual_qty}`:''}${purchaseRow.arrived_note?` (${purchaseRow.arrived_note})`:''}`;
   const newSub = {
     id: `qc_${purchaseRow.id}`,
