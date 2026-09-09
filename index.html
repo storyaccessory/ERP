@@ -29249,10 +29249,12 @@ function renderPurchases() {
                 </select>` : `<div style="font-size:12px;padding:4px 6px;color:${r.purchaser_name?'#00695c':'#e65100'};font-weight:600;text-align:center" title="僅老闆可指派負責人">${r.purchaser_name||'未指派'}</div>`}
               </td>
               <td>
-                <select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${r.status==='待指派'?'#ffebee':r.status==='待採購'?'#fff8e1':r.status==='已採購'?'#e3f2fd':r.status==='已到貨'?'#e0f2f1':r.status==='結案'?'#e8f5e9':'#f5f5f5'};color:${r.status==='待指派'?'#c62828':r.status==='待採購'?'#e65100':r.status==='已採購'?'#1565c0':r.status==='已到貨'?'#00695c':r.status==='結案'?'#2e7d32':'#616161'}"
-                  onchange="window._puInlineStatus('${r.id}',this.value)">
-                  ${PURCHASE_STATUSES.map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}
-                </select>
+                ${['已採購','結案'].includes(r.status)
+                  ? `<div style="font-size:11px;padding:4px 6px;border-radius:4px;font-weight:600;text-align:center;background:${r.status==='已採購'?'#e3f2fd':'#e8f5e9'};color:${r.status==='已採購'?'#1565c0':'#2e7d32'};cursor:pointer" onclick="showToast('${r.status==='已採購'?'請填寫「實際採購數量」自動轉為已採購':'請填寫「實際入庫數」自動結案'}','info')">${r.status}</div>`
+                  : `<select style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:4px;font-weight:600;background:${r.status==='待指派'?'#ffebee':r.status==='待採購'?'#fff8e1':r.status==='已到貨'?'#e0f2f1':'#f5f5f5'};color:${r.status==='待指派'?'#c62828':r.status==='待採購'?'#e65100':r.status==='已到貨'?'#00695c':'#616161'}"
+                    onchange="window._puInlineStatus('${r.id}',this.value)">
+                    ${PURCHASE_STATUSES.map(s=>`<option ${r.status===s?'selected':''}>${s}</option>`).join('')}
+                  </select>`}
               </td>
               <td>
                 <input type="date" value="${r.purchase_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px"
@@ -30237,6 +30239,11 @@ window._puInlinePurchaser = async function(id, sel) {
 window._puInlineStatus = async function(id, newStatus) {
   const r = (state.data.purchases||[]).find(x=>x.id===id);
   if (!r) return;
+  // 已採購 / 結案 不能手動指定,需靠實際採購數 / 實際入庫數觸發
+  if (['已採購','結案'].includes(newStatus)) {
+    showToast(newStatus==='已採購' ? '請填寫「實際採購數量」自動轉為已採購' : '請填寫「實際入庫數」自動結案','info');
+    renderApp(); return;
+  }
   const upd = { status: newStatus };
   // 到採購 → 沒 purchase_date 帶今天
   if (newStatus === '已採購' && !r.purchase_date) upd.purchase_date = _localToday();
