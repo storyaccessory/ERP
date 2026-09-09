@@ -2930,12 +2930,12 @@ function renderIPTreeForModal(product, searchQ) {
     function searchTree(node, depth) {
       const nameMatch = node.name.toLowerCase().includes(q);
       const codeMatch = node.code?.toLowerCase().includes(q);
-      if (depth === 2 && (nameMatch || codeMatch)) {
-        // 顯示角色本身（含其系列）
+      const parentMatched = depth === 2 && (nameMatch || codeMatch);
+      if (parentMatched) {
+        // 角色符合 → 顯示角色本身(含全部系列),個別系列就不再重複列出
         results.push({ node, depth });
-      }
-      // 搜尋系列
-      if (node.series) {
+      } else if (node.series) {
+        // 只有父層沒 match 時,才個別列符合的系列
         node.series.forEach(s => {
           if (s.name.toLowerCase().includes(q)) results.push({ node, series: s, depth });
         });
@@ -4884,17 +4884,21 @@ function renderIPTreeForCasting(casting, searchQ) {
 
   if (q) {
     let html = '';
+    const matchedParentIds = new Set();
     function searchNode(node, depth) {
       const match = node.name.toLowerCase().includes(q) || node.code?.toLowerCase().includes(q);
       if (depth === 2 && match) {
         html += renderNode(node, depth);
+        matchedParentIds.add(node.id);
         const childDiv = document.getElementById(`cs-ip-children-${node.id}`);
         if (childDiv) { childDiv.style.display='block'; }
       }
       (node.children||[]).forEach(child=>searchNode(child, depth+1));
     }
     tree.forEach(n=>searchNode(n,0));
+    // 個別系列僅在其父角色未被 match 時才列出,避免重複
     (state.data.series||[]).filter(s=>s.name.toLowerCase().includes(q)).forEach(s=>{
+      if (s.category_id && matchedParentIds.has(s.category_id)) return;
       html += `<div style="padding:7px 14px;background:#fff;border-bottom:1px solid #f5f5f5;cursor:pointer" onclick="csSelectSeries('${s.id}','${s.name.replace(/'/g,"\\'")}')">
         <span style="font-size:12px;color:#546e7a">${s.name}</span></div>`;
     });
