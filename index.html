@@ -1451,6 +1451,8 @@ function canAccessPage(pageKey) {
   if (pageKey === 'journal')  return true;  // 工作日誌全員可見
   if (pageKey === 'sales')    return true;  // 業績儀表板全員可見
   if (pageKey === 'approvals') return true; // 審核管理:老闆看全部 + 審批,員工看自己送的
+  if (pageKey === 'purchases') return true; // 採購申請:全員可用
+  if (pageKey === 'pickup') return true;    // 抓料清單:全員可用
   if (pageKey === 'users') return role === 'admin' || adminEmails.includes(email);
   // 沒有任何 permissions 設定時，顯示全部（避免鎖死）
   if (!perms || perms.length === 0) return true;
