@@ -22783,6 +22783,12 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
       if (dbErr) { showToast('儲存失敗：'+dbErr.message, 'error'); return; }
       showToast(targetExisting?'已合併更新':'已新增'); closeModal(); await loadPostage(); renderApp();
     }},
+    ...(existing ? [{ label:'<span style="color:#c62828">🗑 刪除此筆</span>', onclick: async () => {
+      if (!confirm(`確定要刪除 ${existing.date} 這筆郵資支出?此動作無法復原。`)) return;
+      const { error } = await db.from('postage_expenses').delete().eq('id', existing.id);
+      if (error) { showToast('刪除失敗:'+error.message,'error'); return; }
+      showToast('已刪除'); closeModal(); await loadPostage(); renderApp();
+    } }] : []),
     { label:'取消', onclick: closeModal },
   ]);
 };
