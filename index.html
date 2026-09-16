@@ -30099,10 +30099,9 @@ async function _puSyncCalendar(purchaseRow) {
     await _puRemoveSubtaskFromEvent(purchaseRow.calendar_event_id, purchaseRow.id);
   }
 
-  // 找同截止日既有的採購事件(同負責人)
+  // 找同截止日既有的採購事件(不再限定負責人 → 同天所有負責人共用一個事件)
   const { data: existing } = await db.from('calendar_events').select('*')
     .eq('event_type', 'purchase')
-    .eq('assigned_to', purchaseRow.purchaser_id)
     .eq('event_date', dueDate)
     .is('completed_at', null)
     .maybeSingle();
@@ -30111,8 +30110,10 @@ async function _puSyncCalendar(purchaseRow) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
     const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
     if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
+    // 更新 assignee_ids = 所有子任務負責人聯集(去重)
+    const assigneeIds = [...new Set(subs.map(s => s.assignee_id).filter(Boolean))];
     const title = `外購品採購需求`;
-    await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
+    await db.from('calendar_events').update({ subtasks: subs, title, assignee_ids: assigneeIds }).eq('id', existing.id);
     return existing.id;
   } else {
     const payload = {
@@ -30122,8 +30123,8 @@ async function _puSyncCalendar(purchaseRow) {
       start_date: dueDate,
       end_date: dueDate,
       priority: '中',
-      description: `⏰ 採購截止日 ${dueDate},每項打勾表示完成`,
-      assigned_to: purchaseRow.purchaser_id,
+      description: `⏰ 採購截止日 ${dueDate},每項打勾表示完成(各項負責人可能不同)`,
+      assigned_to: null, // 不再指派給單一人,靠 subtask 各自的 assignee_id
       assignee_ids: [purchaseRow.purchaser_id],
       subtasks: [newSub],
       created_by: state.user?.id || null,
@@ -30169,7 +30170,8 @@ async function _puCompleteCalendar(eventId) {
   await db.from('calendar_events').update({ completed_at: new Date().toISOString() }).eq('id', eventId);
 }
 
-// 到貨 → 建 QC 提醒給原申請人(3 個工作天內完成)· 同一天同申請人合併為一個事件
+// 到貨 → 建 QC 提醒(3 個工作天內完成)
+// 規則:同一天所有 QC → 只有一個事件,子任務各自帶負責人(不同申請人各自看得到自己的)
 async function _puCreateQcReminder(purchaseRow) {
   if (!purchaseRow.requester_id) return null;
   const startDate = purchaseRow.arrival_date || purchaseRow.arrived_date || _localToday();
@@ -30190,10 +30192,9 @@ async function _puCreateQcReminder(purchaseRow) {
     await _puRemoveSubtaskFromEvent(purchaseRow.qc_event_id, purchaseRow.id);
   }
 
-  // 找同截止日既有 QC 事件(同申請人)
+  // 找同截止日既有 QC 事件(不再限定申請人 → 同天所有申請人共用一個事件)
   const { data: existing } = await db.from('calendar_events').select('*')
     .eq('event_type', 'qc')
-    .eq('assigned_to', purchaseRow.requester_id)
     .eq('event_date', dueDate)
     .is('completed_at', null)
     .maybeSingle();
@@ -30202,8 +30203,10 @@ async function _puCreateQcReminder(purchaseRow) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
     const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
     if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
+    // 更新 assignee_ids = 所有子任務負責人聯集(去重)
+    const assigneeIds = [...new Set(subs.map(s => s.assignee_id).filter(Boolean))];
     const title = `外購品點數量入庫`;
-    await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', existing.id);
+    await db.from('calendar_events').update({ subtasks: subs, title, assignee_ids: assigneeIds }).eq('id', existing.id);
     return existing.id;
   } else {
     const payload = {
@@ -30213,8 +30216,8 @@ async function _puCreateQcReminder(purchaseRow) {
       start_date: dueDate,
       end_date: dueDate,
       priority: '高',
-      description: `⏰ QC 截止日 ${dueDate},每項打勾表示完成`,
-      assigned_to: purchaseRow.requester_id,
+      description: `⏰ QC 截止日 ${dueDate},每項打勾表示完成(各項負責人可能不同)`,
+      assigned_to: null, // 不再指派給單一人,靠 subtask 各自的 assignee_id
       assignee_ids: [purchaseRow.requester_id],
       subtasks: [newSub],
       created_by: state.user?.id || null,
