@@ -30657,6 +30657,16 @@ window._puInlineField = async function(id, field, value) {
   const r = (state.data.purchases||[]).find(x=>x.id===id);
   if (!r) return;
 
+  // ── 前置檢查:採購日期需先填實際採購數量;QC 入庫日期需先填實際入庫數 ──
+  if (field === 'purchase_date' && value && !r.actual_qty) {
+    showToast('請先填寫「實際採購數量」才能設定採購日期','error');
+    renderApp(); return;
+  }
+  if (field === 'arrived_date' && value && !r.qc_qty) {
+    showToast('請先填寫「實際入庫數」才能設定 QC 入庫日期','error');
+    renderApp(); return;
+  }
+
   // ── 填 actual_qty:狀態→已採購 + 採購子任務打勾 ──
   if (field === 'actual_qty' && value) {
     if (r.status === '待採購') {
