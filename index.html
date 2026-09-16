@@ -28773,11 +28773,10 @@ function modalImportCastings() {
 // ═══════════════════════════════════════════════
 const CASTING_IMPORT_COLS = [
   { key:'sku',            label:'貨號 *',       required:true, sample:'KL1N2401-2-1' },
-  { key:'name',           label:'品名 *',       required:true, sample:'KL-莫桑石項鍊_主墜' },
+  { key:'name',           label:'品名 *',       required:true, sample:'爪台-4mm愛心(10)', hint:'穴數自動從結尾 (N) 抓,如 (10)=10 穴' },
   { key:'casting_type',   label:'類型',         sample:'鑄件', hint:'鑄件 / 改蠟(留空預設鑄件)' },
   { key:'ip_code',        label:'角色代碼',     sample:'KL', hint:'如 KL、KU、CH(找 IP 樹)' },
   { key:'series_name',    label:'系列名稱',     sample:'Kuromi經典', hint:'完整系列名(找系列)' },
-  { key:'mold_yield',     label:'每模穴數',     sample:1, hint:'數字,預設 1' },
   { key:'mold_fee',       label:'模具工錢',     sample:45, hint:'單模一次總工錢' },
   { key:'silver_weight',  label:'銀重(台兩TL)', sample:0.043 },
   { key:'mold_flat_fee',  label:'模具費(一次性)', sample:200 },
@@ -28787,6 +28786,12 @@ const CASTING_IMPORT_COLS = [
   { key:'safety_stock',   label:'安全庫存',     sample:0 },
   { key:'notes',          label:'備註',         sample:'' },
 ];
+
+// 從品名尾端 (N) 抓穴數,沒括號就是 1
+function _extractMoldYield(name) {
+  const m = String(name||'').match(/\((\d+)\)\s*$/);
+  return m ? parseInt(m[1]) : 1;
+}
 
 function modalBatchImportCastings() {
   const _ep = effectiveProfile() || {};
@@ -28892,7 +28897,7 @@ function _bicRenderPreview(rows) {
           <th style="padding:4px 6px;border:1px solid #ddd">貨號</th>
           <th style="padding:4px 6px;border:1px solid #ddd">品名</th>
           <th style="padding:4px 6px;border:1px solid #ddd">類型</th>
-          <th style="padding:4px 6px;border:1px solid #ddd">穴數</th>
+          <th style="padding:4px 6px;border:1px solid #ddd" title="從品名尾端 (N) 自動抓">穴數(自動)</th>
           <th style="padding:4px 6px;border:1px solid #ddd">工錢</th>
           <th style="padding:4px 6px;border:1px solid #ddd">系列</th>
           <th style="padding:4px 6px;border:1px solid #ddd">問題</th>
@@ -28920,7 +28925,7 @@ function _bicRenderPreview(rows) {
             <td style="padding:3px 6px;border:1px solid #eee;font-family:monospace">${sku||'—'}</td>
             <td style="padding:3px 6px;border:1px solid #eee">${name||'—'}</td>
             <td style="padding:3px 6px;border:1px solid #eee;text-align:center">${r.casting_type||'鑄件'}</td>
-            <td style="padding:3px 6px;border:1px solid #eee;text-align:center">${r.mold_yield||1}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:center;color:#00695c;font-weight:600">${_extractMoldYield(name)}</td>
             <td style="padding:3px 6px;border:1px solid #eee;text-align:right">${r.mold_fee||''}</td>
             <td style="padding:3px 6px;border:1px solid #eee">${seriesMatch||seriesName||'—'}</td>
             <td style="padding:3px 6px;border:1px solid #eee;color:${errs.length?'#c62828':'#888'};font-size:10px">${errs.join(' · ')||'—'}</td>
@@ -28962,7 +28967,7 @@ async function _bicDoImport() {
     const setStr = (k, v) => { const s = String(v||'').trim(); if (s) payload[k] = s; };
 
     if (String(r.casting_type||'').trim()) payload.casting_type = String(r.casting_type).trim();
-    setInt('mold_yield', r.mold_yield);
+    payload.mold_yield = _extractMoldYield(name);  // 完全自動從品名尾端 (N) 抓
     setNum('mold_fee', r.mold_fee);
     setInt('stock', r.stock);
     setInt('safety_stock', r.safety_stock);
