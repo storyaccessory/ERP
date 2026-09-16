@@ -2237,7 +2237,7 @@ function renderProducts() {
         oninput="_searchHandler('productSearch','product-search',event)"
         oncompositionend="_searchHandler('productSearch','product-search',event)">
       <button class="btn btn-primary" id="add-product-btn">+ 新增商品</button>
-      <button class="btn btn-outline" onclick="modalImportProducts()" style="background:#e8f5f4;color:#00695c">↑ 批次匯入</button>
+      <button class="btn btn-outline" onclick="modalImportProducts()" style="background:#e8f5e9;color:#1b5e20;border-color:#a5d6a7">📥 批次匯入 (Excel)</button>
       <button class="btn btn-outline" onclick="modalRetroFillFromSku()" style="background:#fff8e1;color:#e65100" title="從貨號自動補品類/顏色">🔧 補填品類/顏色</button>
       <button class="btn btn-outline" onclick="modalRetroFillDefaultParts()" style="background:#e3f2fd;color:#1565c0" title="依分類補預設零件">🔩 補預設零件</button>
       <button class="btn btn-outline" onclick="modalImportShopUrls()" style="background:#f3e5f5;color:#6a1b9a" title="批次匯入官網連結">🔗 匯入官網連結</button>
@@ -4252,142 +4252,273 @@ window.parseSku = function(sku) {
 };
 
 // ─────────────────────────────────────────────
-// 商品批次匯入
-// 格式:貨號  系列  品名  售價  別名  (以 tab 分隔,可從 Excel 直接複製)
+// 商品批次匯入 (Excel)
 // ─────────────────────────────────────────────
+const PRODUCT_IMPORT_COLS = [
+  { key:'sku',          label:'貨號 *',  required:true, sample:'AP1N2101W16', hint:'唯一必填;會自動從貨號抓品類、電鍍色' },
+  { key:'series_name',  label:'系列',    sample:'Pekkle經典', hint:'完整系列名(找不到會空白,可之後手動綁)' },
+  { key:'name',         label:'品名',    sample:'貝克鴨晶鑽純銀項鍊', hint:'貨號已存在可空白(只更新其他有填的欄位);新增時必填' },
+  { key:'retail_price', label:'售價',    sample:3380, hint:'>0 才寫入;有變動會記價格歷程' },
+  { key:'alias',        label:'別名',    sample:'貝克鴨經典純銀晶鑽項鍊', hint:'可空' },
+  { key:'shop_url',     label:'官網連結', sample:'11481940', hint:'可只填官網商品代碼(數字),系統自動補完整 URL(storyplus.com.tw/SalePage/Index/...);或直接貼完整網址' },
+];
+
 window.modalImportProducts = function() {
-  showModal('↑ 批次匯入商品', `
-    <div style="font-size:13px;color:var(--muted);margin-bottom:12px;line-height:1.8">
-      <strong style="color:var(--accent-dark)">📋 格式(以 tab 或逗號分隔):</strong>
-      <code style="background:#f0faf9;padding:2px 6px;border-radius:4px;color:var(--accent-dark)">貨號&nbsp;&nbsp;系列&nbsp;&nbsp;品名&nbsp;&nbsp;售價&nbsp;&nbsp;別名</code>
-      <br><br>
-      <strong style="color:var(--accent-dark)">✅ 範例:</strong>
-      <div style="font-family:monospace;font-size:12px;background:#f5f5f5;padding:6px 10px;border-radius:4px;margin-top:4px">
-        AP1N2101W16	Pekkle經典	貝克鴨晶鑽純銀項鍊	3380	貝克鴨經典純銀晶鑽項鍊<br>
-        AP1R2402W09	Pekkle莫桑鑽	貝克鴨莫桑石單鑽純銀戒指#09	4580
+  showModal('📥 批次匯入商品 (Excel)', `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.8">
+      <div style="padding:10px 12px;background:#e8f5e9;border-left:3px solid #43a047;border-radius:4px;margin-bottom:12px">
+        <strong style="color:#1b5e20">操作步驟</strong>
+        <ol style="margin:6px 0 0 20px;padding:0;line-height:1.7;color:#555">
+          <li>按「⬇ 下載範本」拿到 Excel 範本</li>
+          <li>在 Excel 填好資料(每行一筆)後存檔</li>
+          <li>按「📂 選擇檔案」上傳,系統會預覽</li>
+          <li>確認無誤後按「確認匯入」</li>
+        </ol>
       </div>
-      <div style="background:#fff8e1;border-left:3px solid #f57c00;padding:8px 12px;margin-top:10px;font-size:12px;line-height:1.6">
-        <strong>🔑 自動處理:</strong><br>
-        · 用<u>貨號</u>當唯一 key(存在 → 更新;不存在 → 新增)<br>
-        · 系列自動配對現有系列 ID(找不到會標示)<br>
-        · 售價 > 0 才寫入,同時記一筆歷程<br>
-        · 狀態預設「販售中(active)」<br>
-        · 別名可空
+      <div style="padding:10px 12px;background:#fff8e1;border-left:3px solid #f57c00;border-radius:4px;font-size:12px;line-height:1.7;color:#444">
+        <strong>比對邏輯與自動處理</strong>
+        <br>• 用<u>貨號</u>當唯一 key:存在 → 更新;不存在 → 新增
+        <br>• 系列自動配對現有系列 ID(找不到會標示)
+        <br>• 從貨號自動判斷「品類」與「電鍍色」
+        <br>• 售價 > 0 才寫入,同時記一筆價格歷程
+        <br>• 狀態預設「販售中」
       </div>
     </div>
-    <textarea class="form-control" id="import-products-text" rows="12"
-      placeholder="貼上 Excel 資料(貨號 tab 系列 tab 品名 tab 售價 tab 別名)"
-      style="font-family:monospace;font-size:12px;line-height:1.5"></textarea>
-    <div id="import-products-result" style="margin-top:10px;font-size:12px"></div>
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <button class="btn btn-outline" onclick="downloadProductImportTemplate()" style="background:#e3f2fd;color:#1565c0;border-color:#90caf9">⬇ 下載範本 (.xlsx)</button>
+      <label class="btn btn-outline" style="background:#f3e5f5;color:#6a1b9a;border-color:#ce93d8;cursor:pointer;margin:0">
+        📂 選擇檔案
+        <input type="file" id="bip-file" accept=".xlsx,.xls" style="display:none" onchange="_bipReadFile(this)">
+      </label>
+      <span id="bip-filename" style="font-size:12px;color:var(--muted);align-self:center"></span>
+    </div>
+    <div id="bip-preview" style="max-height:400px;overflow:auto"></div>
   `, [
-    { label: '開始匯入', primary: true, onclick: async () => {
-      const text = document.getElementById('import-products-text').value.trim();
-      if (!text) { showToast('請貼上資料','error'); return; }
-      const lines = text.split('\n').map(l=>l.trim()).filter(Boolean);
-      const resultEl = document.getElementById('import-products-result');
-      resultEl.innerHTML = '<div style="color:var(--muted)">處理中… 0 / '+lines.length+'</div>';
-
-      const series = state.data.series || [];
-      let created = 0, updated = 0, priceLogged = 0, errors = [];
-      const noSeries = [];
-
-      for (let idx = 0; idx < lines.length; idx++) {
-        const line = lines[idx];
-        // 支援 tab 或逗號分隔
-        const cols = line.split(/\t|,/).map(s=>s.trim());
-        if (cols.length < 3) { errors.push(`欄位不足:${line.slice(0,60)}`); continue; }
-        const [sku, seriesName, name, priceStr, alias] = cols;
-        if (!sku) { errors.push(`缺貨號:${line.slice(0,60)}`); continue; }
-        if (!name) { errors.push(`缺品名:${line.slice(0,60)}`); continue; }
-
-        // 找系列(完全符合優先,再試去空格比對)
-        let seriesId = null;
-        if (seriesName) {
-          const norm = s => (s||'').replace(/\s/g,'').replace(/系列$/,'').toLowerCase();
-          const target = norm(seriesName);
-          const found = series.find(x => norm(x.name) === target);
-          if (found) seriesId = found.id;
-          else noSeries.push(seriesName);
-        }
-
-        const price = priceStr && parseFloat(priceStr) > 0 ? parseFloat(priceStr) : null;
-
-        // ─── 從貨號自動判斷品類 + 電鍍色 ───
-        const skuInfo = window.parseSku(sku);
-        let catId = null;
-        let colorValue = null;
-        if (skuInfo) {
-          // 品類 → 找 categories 表對應 id
-          if (skuInfo.category_name) {
-            const cat = (state.data.categories||[]).find(c => c.name === skuInfo.category_name);
-            if (cat) catId = cat.id;
-          }
-          // 電鍍色 → 存 color 欄位
-          if (skuInfo.plating_name) {
-            colorValue = skuInfo.plating_name;
-          }
-        }
-
-        const payload = {
-          sku,
-          name,
-          series_id: seriesId,
-          alias: alias || null,
-          retail_price: price,
-          retail_price_currency: 'TWD',
-          status: 'active',
-          updated_at: new Date().toISOString(),
-        };
-        if (catId) payload.category_id = catId;
-        if (colorValue) payload.color = colorValue;
-
-        // 用 sku 找有無現有商品
-        const { data: existing } = await db.from('products').select('id, retail_price').eq('sku', sku).maybeSingle();
-
-        let productId = existing?.id;
-        const priceChanged = existing && (existing.retail_price ?? null) !== price;
-
-        if (existing) {
-          const { error } = await db.from('products').update(payload).eq('id', existing.id);
-          if (error) { errors.push(`更新失敗 ${sku}:${error.message}`); continue; }
-          updated++;
-        } else {
-          payload.created_by = state.user?.id;
-          const { data: inserted, error } = await db.from('products').insert(payload).select('id').single();
-          if (error) { errors.push(`新增失敗 ${sku}:${error.message}`); continue; }
-          productId = inserted?.id;
-          created++;
-        }
-
-        // 寫價格歷程(新增 or 價格有變)
-        if (productId && price !== null && (!existing || priceChanged)) {
-          await db.from('product_price_history').insert({
-            product_id: productId,
-            retail_price: price,
-            currency: 'TWD',
-            changed_by: state.user?.id || null,
-            changed_by_name: state.profile?.name || state.user?.email || '',
-            note: existing ? '匯入更新' : '匯入新增',
-          });
-          priceLogged++;
-        }
-
-        if ((idx+1) % 20 === 0) {
-          resultEl.innerHTML = `<div style="color:var(--muted)">處理中… ${idx+1} / ${lines.length}</div>`;
-        }
-      }
-
-      await loadProducts();
-      const noSeriesUniq = [...new Set(noSeries)];
-      const msg = `完成:新增 ${created} 筆,更新 ${updated} 筆,價格歷程 ${priceLogged} 筆${errors.length?`,失敗 ${errors.length} 筆`:''}${noSeriesUniq.length?`,找不到系列 ${noSeriesUniq.length} 個`:''}`;
-      resultEl.innerHTML = `<div style="color:${errors.length?'var(--warning)':'var(--success)'};font-weight:600">${msg}</div>`
-        + (noSeriesUniq.length ? `<div style="color:#f57c00;margin-top:6px;font-size:11px;padding:6px 10px;background:#fff8e1;border-radius:4px">找不到的系列(商品已匯入,系列為空,可之後手動綁):<br>${noSeriesUniq.slice(0,20).join('、')}${noSeriesUniq.length>20?'…':''}</div>` : '')
-        + (errors.length ? `<div style="color:var(--danger);margin-top:6px;max-height:200px;overflow-y:auto;padding:6px 10px;background:#ffebee;border-radius:4px">${errors.slice(0,30).join('<br>')}${errors.length>30?'<br>…':''}</div>` : '');
-      renderApp();
-    }},
-    { label: '關閉', onclick: closeModal },
+    { label:'確認匯入', primary:true, onclick: _bipDoImport },
+    { label:'取消', onclick: closeModal },
   ]);
+  window._bipRows = null;
 };
+
+window.downloadProductImportTemplate = function() {
+  const headers = PRODUCT_IMPORT_COLS.map(c => c.label);
+  const hints   = PRODUCT_IMPORT_COLS.map(c => c.hint || '');
+  const sample  = PRODUCT_IMPORT_COLS.map(c => c.sample);
+  const aoa = [headers, hints, sample];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = PRODUCT_IMPORT_COLS.map(c => ({ wch: Math.max(c.label.length*2, 14) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '商品匯入');
+  XLSX.writeFile(wb, `商品批次匯入範本_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('範本已下載');
+};
+
+window._bipReadFile = function(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  document.getElementById('bip-filename').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+      if (!rows.length) throw new Error('檔案是空的');
+      const headerRow = rows[0].map(h => String(h||'').trim());
+      const dataRows = rows.slice(2).filter(r => r.some(v => String(v||'').trim()));
+      const colMap = {};
+      PRODUCT_IMPORT_COLS.forEach(c => {
+        const idx = headerRow.findIndex(h => h === c.label || h.replace(/\s*\*/,'')===c.label.replace(/\s*\*/,''));
+        if (idx >= 0) colMap[c.key] = idx;
+      });
+      const parsed = dataRows.map((r, i) => {
+        const obj = { _row: i+3 };
+        Object.entries(colMap).forEach(([key, idx]) => { obj[key] = r[idx]; });
+        return obj;
+      });
+      window._bipRows = parsed;
+      _bipRenderPreview(parsed);
+    } catch(err) {
+      document.getElementById('bip-preview').innerHTML = `<div style="color:var(--danger);padding:10px">讀取失敗:${err.message}</div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+};
+
+function _bipRenderPreview(rows) {
+  if (!rows.length) {
+    document.getElementById('bip-preview').innerHTML = `<div style="color:var(--muted);padding:10px">檔案沒有資料列</div>`;
+    return;
+  }
+  const seriesCache = state.data.series || [];
+  const norm = s => (s||'').replace(/\s/g,'').replace(/系列$/,'').toLowerCase();
+  const html = `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">共 ${rows.length} 筆待匯入,綠色=新增,藍色=更新(需上傳後才實際比對)</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead style="background:#f5f5f5;position:sticky;top:0">
+        <tr>
+          <th style="padding:4px 6px;border:1px solid #ddd">#</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">貨號</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">系列</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">品名</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">售價</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">別名</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">官網連結</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">問題</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => {
+          const sku = String(r.sku||'').trim();
+          const name = String(r.name||'').trim();
+          const errs = [];
+          if (!sku) errs.push('貨號空白');
+          // 品名空白時,若貨號已存在則允許(只更新其他欄位);若不存在則會在匯入時擋下
+          const seriesName = String(r.series_name||'').trim();
+          let seriesMatch = '';
+          if (seriesName) {
+            const target = norm(seriesName);
+            const s = seriesCache.find(x => norm(x.name) === target);
+            if (s) seriesMatch = s.name;
+            else errs.push(`系列「${seriesName}」找不到`);
+          }
+          let shopUrl = String(r.shop_url||'').trim();
+          const isNumOnly = shopUrl && /^\d+$/.test(shopUrl);
+          if (isNumOnly) shopUrl = `https://www.storyplus.com.tw/SalePage/Index/${shopUrl}`;
+          return `<tr style="background:${errs.length?'#fff3e0':'#fff'}">
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:center">${r._row}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;font-family:monospace">${sku||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee">${seriesMatch||seriesName||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee">${name||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:right">${r.retail_price||''}</td>
+            <td style="padding:3px 6px;border:1px solid #eee">${r.alias||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;font-size:10px;color:#1565c0" title="${shopUrl||''}">${shopUrl ? (isNumOnly?'🔗 自動補':'🔗') : '—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;color:${errs.length?'#c62828':'#888'};font-size:10px">${errs.join(' · ')||'—'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+  document.getElementById('bip-preview').innerHTML = html;
+}
+
+async function _bipDoImport() {
+  const rows = window._bipRows;
+  if (!rows || !rows.length) { showToast('請先選擇檔案','error'); return; }
+
+  const series = state.data.series || [];
+  const norm = s => (s||'').replace(/\s/g,'').replace(/系列$/,'').toLowerCase();
+  let created = 0, updated = 0, priceLogged = 0;
+  const errors = [];
+  const noSeries = [];
+  const previewEl = document.getElementById('bip-preview');
+  previewEl.innerHTML = `<div style="color:var(--muted);padding:10px">處理中… 0 / ${rows.length}</div>`;
+
+  for (let idx = 0; idx < rows.length; idx++) {
+    const r = rows[idx];
+    const sku = String(r.sku||'').trim();
+    const name = String(r.name||'').trim();
+    const seriesName = String(r.series_name||'').trim();
+    const priceStr = String(r.retail_price||'').trim();
+    const alias = String(r.alias||'').trim();
+    let shopUrl = String(r.shop_url||'').trim();
+    // 只填數字 → 補成完整官網 URL
+    if (shopUrl && /^\d+$/.test(shopUrl)) {
+      shopUrl = `https://www.storyplus.com.tw/SalePage/Index/${shopUrl}`;
+    }
+
+    if (!sku) { errors.push(`第 ${r._row} 列:貨號空白`); continue; }
+
+    // 找系列
+    let seriesId = null;
+    if (seriesName) {
+      const target = norm(seriesName);
+      const found = series.find(x => norm(x.name) === target);
+      if (found) seriesId = found.id;
+      else noSeries.push(seriesName);
+    }
+
+    const price = priceStr && parseFloat(priceStr) > 0 ? parseFloat(priceStr) : null;
+
+    // 從貨號自動判斷品類 + 電鍍色
+    const skuInfo = window.parseSku(sku);
+    let catId = null;
+    let colorValue = null;
+    if (skuInfo) {
+      if (skuInfo.category_name) {
+        const cat = (state.data.categories||[]).find(c => c.name === skuInfo.category_name);
+        if (cat) catId = cat.id;
+      }
+      if (skuInfo.plating_name) colorValue = skuInfo.plating_name;
+    }
+
+    const { data: existing } = await db.from('products').select('id, retail_price').eq('sku', sku).maybeSingle();
+    let productId = existing?.id;
+    const priceChanged = existing && price !== null && (existing.retail_price ?? null) !== price;
+
+    if (existing) {
+      // 已存在 → 只更新有填的欄位
+      const payload = { updated_at: new Date().toISOString() };
+      if (name) payload.name = name;
+      if (seriesId) payload.series_id = seriesId;
+      if (alias) payload.alias = alias;
+      if (price !== null) { payload.retail_price = price; payload.retail_price_currency = 'TWD'; }
+      if (catId) payload.category_id = catId;
+      if (colorValue) payload.color = colorValue;
+      if (shopUrl) payload.shop_url = shopUrl;
+      const { error } = await db.from('products').update(payload).eq('id', existing.id);
+      if (error) { errors.push(`第 ${r._row} 列更新失敗 ${sku}:${error.message}`); continue; }
+      updated++;
+    } else {
+      // 新增 → 品名必填
+      if (!name) { errors.push(`第 ${r._row} 列:貨號「${sku}」在系統中不存在,新增時「品名」必填`); continue; }
+      const payload = {
+        sku, name,
+        series_id: seriesId,
+        alias: alias || null,
+        retail_price: price,
+        retail_price_currency: 'TWD',
+        status: 'active',
+        updated_at: new Date().toISOString(),
+        created_by: state.user?.id,
+      };
+      if (catId) payload.category_id = catId;
+      if (colorValue) payload.color = colorValue;
+      if (shopUrl) payload.shop_url = shopUrl;
+      const { data: inserted, error } = await db.from('products').insert(payload).select('id').single();
+      if (error) { errors.push(`第 ${r._row} 列新增失敗 ${sku}:${error.message}`); continue; }
+      productId = inserted?.id;
+      created++;
+    }
+
+    if (productId && price !== null && (!existing || priceChanged)) {
+      await db.from('product_price_history').insert({
+        product_id: productId,
+        retail_price: price,
+        currency: 'TWD',
+        changed_by: state.user?.id || null,
+        changed_by_name: state.profile?.name || state.user?.email || '',
+        note: existing ? '匯入更新' : '匯入新增',
+      });
+      priceLogged++;
+    }
+
+    if ((idx+1) % 20 === 0) {
+      previewEl.innerHTML = `<div style="color:var(--muted);padding:10px">處理中… ${idx+1} / ${rows.length}</div>`;
+    }
+  }
+
+  await loadProducts();
+  const noSeriesUniq = [...new Set(noSeries)];
+  const summary = `完成:新增 ${created} 筆,更新 ${updated} 筆,價格歷程 ${priceLogged} 筆${errors.length?`,失敗 ${errors.length} 筆`:''}${noSeriesUniq.length?`,找不到系列 ${noSeriesUniq.length} 個`:''}`;
+  showToast(summary, errors.length ? 'error' : 'success');
+  if (errors.length || noSeriesUniq.length) {
+    previewEl.innerHTML = `<div style="color:${errors.length?'var(--warning)':'var(--success)'};font-weight:600;padding:8px 10px;background:#f5f5f5;border-radius:4px;margin-bottom:8px">${summary}</div>`
+      + (noSeriesUniq.length ? `<div style="color:#f57c00;margin-top:6px;font-size:11px;padding:6px 10px;background:#fff8e1;border-radius:4px">找不到的系列(商品已匯入,系列為空):<br>${noSeriesUniq.slice(0,20).join('、')}${noSeriesUniq.length>20?'…':''}</div>` : '')
+      + (errors.length ? `<div style="color:var(--danger);margin-top:6px;max-height:200px;overflow-y:auto;padding:6px 10px;background:#ffebee;border-radius:4px">${errors.slice(0,30).join('<br>')}${errors.length>30?'<br>…':''}</div>` : '');
+  } else {
+    closeModal(); renderApp();
+  }
+}
 
 // 商品詳情 Side Panel
 function modalViewProduct(productId) {
