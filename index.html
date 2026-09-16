@@ -5332,6 +5332,7 @@ function renderCastings() {
         oninput="_searchHandler('castingSearch','casting-search',event)"
         oncompositionend="_searchHandler('castingSearch','casting-search',event)">
       <button class="btn btn-primary" id="add-casting-btn">+ 新增鑄件</button>
+      <button class="btn btn-outline" id="batch-import-castings-btn" style="background:#e8f5e9;color:#1b5e20;border-color:#a5d6a7">📥 批次匯入 (Excel)</button>
       <button class="btn btn-outline" id="import-castings-btn">↑ 匯入工錢清單</button>
       <button class="btn btn-outline" id="new-casting-restock-btn" style="background:#ffebee;color:#b71c1c;border-color:#ffcdd2">⚙ 開立鑄件補貨單</button>
     </div>
@@ -26897,6 +26898,7 @@ function bindEvents() {
   document.getElementById('export-products-btn')?.addEventListener('click', exportProductsCSV);
   document.getElementById('add-casting-btn')?.addEventListener('click', () => modalEditCasting(null));
   document.getElementById('import-castings-btn')?.addEventListener('click', modalImportCastings);
+  document.getElementById('batch-import-castings-btn')?.addEventListener('click', modalBatchImportCastings);
   document.getElementById('new-casting-restock-btn')?.addEventListener('click', () => modalNewCastingRestock());
   document.getElementById('add-part-btn')?.addEventListener('click', () => modalEditPart(null));
   // part-search 已改為 inline onkeyup/oncompositionend
@@ -28764,6 +28766,240 @@ function modalImportCastings() {
     }},
     { label: '關閉', onclick: closeModal },
   ]);
+}
+
+// ═══════════════════════════════════════════════
+// 批次匯入鑄件 (Excel) — 完整欄位
+// ═══════════════════════════════════════════════
+const CASTING_IMPORT_COLS = [
+  { key:'sku',            label:'貨號 *',       required:true, sample:'KL1N2401-2-1' },
+  { key:'name',           label:'品名 *',       required:true, sample:'KL-莫桑石項鍊_主墜' },
+  { key:'casting_type',   label:'類型',         sample:'鑄件', hint:'鑄件 / 改蠟(留空預設鑄件)' },
+  { key:'ip_code',        label:'角色代碼',     sample:'KL', hint:'如 KL、KU、CH(找 IP 樹)' },
+  { key:'series_name',    label:'系列名稱',     sample:'Kuromi經典', hint:'完整系列名(找系列)' },
+  { key:'mold_yield',     label:'每模穴數',     sample:1, hint:'數字,預設 1' },
+  { key:'mold_fee',       label:'模具工錢',     sample:45, hint:'單模一次總工錢' },
+  { key:'silver_weight',  label:'銀重(台兩TL)', sample:0.043 },
+  { key:'mold_flat_fee',  label:'模具費(一次性)', sample:200 },
+  { key:'master_3d_fee',  label:'3D母版費',     sample:200 },
+  { key:'mold_sizes',     label:'模具戒圍',     sample:'#6-#12' },
+  { key:'stock',          label:'目前庫存',     sample:0 },
+  { key:'safety_stock',   label:'安全庫存',     sample:0 },
+  { key:'notes',          label:'備註',         sample:'' },
+];
+
+function modalBatchImportCastings() {
+  const _ep = effectiveProfile() || {};
+  const isBoss = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com';
+  showModal('📥 批次匯入鑄件 (Excel)', `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.8">
+      <div style="padding:10px 12px;background:#e8f5e9;border-left:3px solid #43a047;border-radius:4px;margin-bottom:12px">
+        <strong style="color:#1b5e20">操作步驟</strong>
+        <ol style="margin:6px 0 0 20px;padding:0;line-height:1.7;color:#555">
+          <li>按「⬇ 下載範本」拿到 Excel 範本</li>
+          <li>在 Excel 填好資料(每行一筆)後存檔</li>
+          <li>按「📂 選擇檔案」上傳,系統會預覽</li>
+          <li>確認無誤後按「確認匯入」</li>
+        </ol>
+      </div>
+      <div style="padding:10px 12px;background:#fff8e1;border-left:3px solid #f57c00;border-radius:4px;font-size:12px;line-height:1.7;color:#444">
+        <strong>比對邏輯:</strong>用「貨號」當唯一識別
+        <br>• 貨號已存在 → 更新填有內容的欄位(空欄位不動)
+        <br>• 貨號不存在 → 新增鑄件
+        ${isBoss?'':'<br><span style="color:#c62828">⚠ 你不是主管,成本欄位(銀重/模具費/3D母版費)會被忽略</span>'}
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <button class="btn btn-outline" onclick="downloadCastingImportTemplate()" style="background:#e3f2fd;color:#1565c0;border-color:#90caf9">⬇ 下載範本 (.xlsx)</button>
+      <label class="btn btn-outline" style="background:#f3e5f5;color:#6a1b9a;border-color:#ce93d8;cursor:pointer;margin:0">
+        📂 選擇檔案
+        <input type="file" id="bic-file" accept=".xlsx,.xls" style="display:none" onchange="_bicReadFile(this)">
+      </label>
+      <span id="bic-filename" style="font-size:12px;color:var(--muted);align-self:center"></span>
+    </div>
+    <div id="bic-preview" style="max-height:400px;overflow:auto"></div>
+  `, [
+    { label: '確認匯入', primary:true, onclick: _bicDoImport },
+    { label: '取消', onclick: closeModal },
+  ]);
+  window._bicRows = null;
+}
+
+window.downloadCastingImportTemplate = function() {
+  const headers = CASTING_IMPORT_COLS.map(c => c.label);
+  const hints   = CASTING_IMPORT_COLS.map(c => c.hint || '');
+  const sample  = CASTING_IMPORT_COLS.map(c => c.sample);
+  const aoa = [headers, hints, sample];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  // 欄寬
+  ws['!cols'] = CASTING_IMPORT_COLS.map(c => ({ wch: Math.max(c.label.length*2, 12) }));
+  // 前兩行標色(header + hint 提示)
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '鑄件匯入');
+  XLSX.writeFile(wb, `鑄件批次匯入範本_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('範本已下載');
+};
+
+window._bicReadFile = function(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  document.getElementById('bic-filename').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+      if (!rows.length) throw new Error('檔案是空的');
+      const headerRow = rows[0].map(h => String(h||'').trim());
+      // 從第 3 行開始才是資料(第 2 行是提示)
+      const dataRows = rows.slice(2).filter(r => r.some(v => String(v||'').trim()));
+      // header → key 對應
+      const colMap = {};
+      CASTING_IMPORT_COLS.forEach(c => {
+        const idx = headerRow.findIndex(h => h === c.label || h.replace(/\s*\*/,'')===c.label.replace(/\s*\*/,''));
+        if (idx >= 0) colMap[c.key] = idx;
+      });
+      const parsed = dataRows.map((r, i) => {
+        const obj = { _row: i+3 };
+        Object.entries(colMap).forEach(([key, idx]) => { obj[key] = r[idx]; });
+        return obj;
+      });
+      window._bicRows = parsed;
+      _bicRenderPreview(parsed);
+    } catch(err) {
+      document.getElementById('bic-preview').innerHTML = `<div style="color:var(--danger);padding:10px">讀取失敗:${err.message}</div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+};
+
+function _bicRenderPreview(rows) {
+  if (!rows.length) {
+    document.getElementById('bic-preview').innerHTML = `<div style="color:var(--muted);padding:10px">檔案沒有資料列</div>`;
+    return;
+  }
+  const castingsCache = state.data.castings || [];
+  const seriesCache = state.data.series || [];
+  const ipCache = state.data.ipCategories || [];
+  const html = `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">共 ${rows.length} 筆待匯入,綠色=新增,藍色=更新</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead style="background:#f5f5f5;position:sticky;top:0">
+        <tr>
+          <th style="padding:4px 6px;border:1px solid #ddd">#</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">狀態</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">貨號</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">品名</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">類型</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">穴數</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">工錢</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">系列</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">問題</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => {
+          const sku = String(r.sku||'').trim();
+          const name = String(r.name||'').trim();
+          const errs = [];
+          if (!sku) errs.push('貨號空白');
+          if (!name) errs.push('品名空白');
+          const existing = castingsCache.find(c => c.sku === sku);
+          const seriesName = String(r.series_name||'').trim();
+          let seriesMatch = '';
+          if (seriesName) {
+            const s = seriesCache.find(x => x.name === seriesName);
+            if (s) seriesMatch = s.name;
+            else errs.push(`系列「${seriesName}」找不到`);
+          }
+          const badge = existing ? '<span style="background:#e3f2fd;color:#1565c0;padding:2px 6px;border-radius:3px">更新</span>' : '<span style="background:#e8f5e9;color:#1b5e20;padding:2px 6px;border-radius:3px">新增</span>';
+          return `<tr style="background:${errs.length?'#ffebee':'#fff'}">
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:center">${r._row}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:center">${badge}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;font-family:monospace">${sku||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee">${name||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:center">${r.casting_type||'鑄件'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:center">${r.mold_yield||1}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:right">${r.mold_fee||''}</td>
+            <td style="padding:3px 6px;border:1px solid #eee">${seriesMatch||seriesName||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;color:${errs.length?'#c62828':'#888'};font-size:10px">${errs.join(' · ')||'—'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+  document.getElementById('bic-preview').innerHTML = html;
+}
+
+async function _bicDoImport() {
+  const rows = window._bicRows;
+  if (!rows || !rows.length) { showToast('請先選擇檔案','error'); return; }
+  const _ep = effectiveProfile() || {};
+  const isBoss = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com';
+
+  const castingsCache = state.data.castings || [];
+  const seriesCache = state.data.series || [];
+
+  let created = 0, updated = 0, skipped = 0;
+  const errors = [];
+
+  for (const r of rows) {
+    const sku = String(r.sku||'').trim();
+    const name = String(r.name||'').trim();
+    if (!sku || !name) { skipped++; errors.push(`第 ${r._row} 列:貨號或品名空白`); continue; }
+
+    // 系列比對
+    let seriesId = null, ipId = null;
+    const seriesName = String(r.series_name||'').trim();
+    if (seriesName) {
+      const s = seriesCache.find(x => x.name === seriesName);
+      if (s) { seriesId = s.id; ipId = s.ip_id; }
+    }
+
+    const payload = { sku, name };
+    const setNum = (k, v) => { const n = parseFloat(v); if (!isNaN(n)) payload[k] = n; };
+    const setInt = (k, v) => { const n = parseInt(v); if (!isNaN(n)) payload[k] = n; };
+    const setStr = (k, v) => { const s = String(v||'').trim(); if (s) payload[k] = s; };
+
+    if (String(r.casting_type||'').trim()) payload.casting_type = String(r.casting_type).trim();
+    setInt('mold_yield', r.mold_yield);
+    setNum('mold_fee', r.mold_fee);
+    setInt('stock', r.stock);
+    setInt('safety_stock', r.safety_stock);
+    setStr('mold_sizes', r.mold_sizes);
+    setStr('notes', r.notes);
+    if (seriesId) { payload.series_id = seriesId; payload.ip_id = ipId; }
+
+    // 成本欄位 — 只有主管以上才寫入
+    if (isBoss) {
+      setNum('silver_weight', r.silver_weight);
+      setNum('mold_flat_fee', r.mold_flat_fee);
+      setNum('master_3d_fee', r.master_3d_fee);
+    }
+
+    const existing = castingsCache.find(c => c.sku === sku);
+    if (existing) {
+      const { error } = await db.from('castings').update(payload).eq('id', existing.id);
+      if (error) { errors.push(`第 ${r._row} 列更新失敗:${error.message}`); }
+      else updated++;
+    } else {
+      if (!payload.casting_type) payload.casting_type = '鑄件';
+      if (payload.mold_yield == null) payload.mold_yield = 1;
+      if (payload.stock == null) payload.stock = 0;
+      if (payload.safety_stock == null) payload.safety_stock = 0;
+      const { error } = await db.from('castings').insert(payload);
+      if (error) { errors.push(`第 ${r._row} 列新增失敗:${error.message}`); }
+      else created++;
+    }
+  }
+  await loadCastings();
+  const summary = `完成:新增 ${created} 筆、更新 ${updated} 筆${skipped?`、跳過 ${skipped} 筆`:''}${errors.length?`、失敗 ${errors.length} 筆`:''}`;
+  showToast(summary, errors.length ? 'error' : 'success');
+  if (errors.length) {
+    document.getElementById('bic-preview').innerHTML = `<div style="color:var(--danger);padding:8px;background:#ffebee;border-radius:4px;margin-bottom:8px">${summary}</div><div style="max-height:200px;overflow-y:auto;font-size:12px;color:#c62828">${errors.join('<br>')}</div>`;
+  } else {
+    closeModal(); renderApp();
+  }
 }
 
 // 匯出零件 CSV
