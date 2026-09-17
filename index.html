@@ -23446,49 +23446,178 @@ function _renderPlateContent() {
   `;
 }
 
-// ── Tab 1:電鍍金額填寫(日單清單)──
+// ── Tab 1:電鍍金額填寫(可展開內嵌表格逐項填單號+單價)──
 function _pltRenderDaily(records, TYPE_TAG, COLOR_TAG) {
   if (!records.length) {
     return `<div class="card"><div class="empty"><div class="empty-icon">⚡</div><p>本月尚無電鍍單</p></div></div>`;
   }
-  // 依日期排序(新到舊)
+  const expanded = state.data.plateDailyExpanded || {};
   const sorted = [...records].sort((a,b) => (b.invoice_date||'').localeCompare(a.invoice_date||''));
   return `<div class="card" style="padding:0">
     ${sorted.map(r => {
       const items = r.items || [];
       const totalQty = items.reduce((s,i) => s + (parseFloat(i.qty)||0), 0);
-      const missing = items.filter(i => !i.unit_price).length;
+      const filled = items.filter(i => i.unit_price).length;
+      const missing = items.length - filled;
+      const dayTotal = items.reduce((s,i) => s + (parseFloat(i.subtotal)||0), 0);
       const status = missing > 0
         ? `<span style="color:#c62828;font-weight:600">⚠ 金額未填 ${missing} 件</span>`
         : `<span style="color:#2e7d32;font-weight:600">✅ 已完成</span>`;
-      const tt = TYPE_TAG[r.order_type] || TYPE_TAG['其它'];
-      return `<div style="padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap">
-        <div style="display:flex;align-items:center;gap:10px">
-          <span style="font-size:15px;font-weight:600;color:var(--accent-dark);font-family:monospace">${r.invoice_date||'—'}</span>
-          ${r.order_type?`<span class="tag" style="background:${tt.bg};color:${tt.fg};font-size:11px">${r.order_type}</span>`:''}
-          <span style="font-size:12px;color:var(--muted)">${items.length} 項 · ${totalQty} 件</span>
+      const isOpen = expanded[r.id];
+      return `<div style="border-bottom:1px solid var(--border)">
+        <div style="padding:12px 16px;display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;cursor:pointer" onclick="window._pltToggleDaily('${r.id}')">
+          <div style="display:flex;align-items:center;gap:10px">
+            <span style="font-size:11px;color:var(--muted);width:12px">${isOpen?'▼':'▶'}</span>
+            <span style="font-size:15px;font-weight:600;color:var(--accent-dark);font-family:monospace">${r.invoice_date||'—'}</span>
+            <span style="font-size:12px;color:var(--muted)">${items.length} 項 · ${totalQty} 件</span>
+          </div>
+          <div style="display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
+            ${status}
+            <button class="btn-table" onclick="editPlate('${r.id}')" title="編輯品項">✏️</button>
+            <button class="btn-table danger" onclick="deletePlate('${r.id}')" title="刪除">✕</button>
+          </div>
         </div>
-        <div style="display:flex;align-items:center;gap:8px">
-          ${status}
-          <button class="btn-table" onclick="editPlate('${r.id}')" title="編輯">✏️</button>
-          <button class="btn-table danger" onclick="deletePlate('${r.id}')" title="刪除">✕</button>
-        </div>
+        ${isOpen ? `
+          <div style="background:#fafafa;padding:0 16px 12px">
+            <table style="width:100%;font-size:12px;border-collapse:collapse;background:#fff;border:1px solid var(--border);border-radius:4px;overflow:hidden">
+              <thead>
+                <tr style="background:#f5f5f5">
+                  <th style="padding:6px 8px;text-align:left">品項</th>
+                  <th style="padding:6px 8px;text-align:center;width:60px">數量</th>
+                  <th style="padding:6px 8px;text-align:center;width:80px">電鍍色</th>
+                  <th style="padding:6px 8px;text-align:center;width:100px">單號</th>
+                  <th style="padding:6px 8px;text-align:center;width:100px">單價</th>
+                  <th style="padding:6px 8px;text-align:right;width:80px">小計</th>
+                  <th style="padding:6px 8px;text-align:center;width:40px"></th>
+                </tr>
+              </thead>
+              <tbody>
+                ${items.map((i, idx) => {
+                  const tt = TYPE_TAG[i.order_type] || TYPE_TAG['其它'];
+                  const ct = COLOR_TAG[i.color] || { bg:'#f5f5f5', fg:'#546e7a' };
+                  const sub = parseFloat(i.subtotal || (i.qty && i.unit_price ? i.qty*i.unit_price : 0)) || 0;
+                  const isFilled = !!(i.unit_price && i.vendor_order_no);
+                  return `<tr style="border-bottom:1px solid #f0f0f0">
+                    <td style="padding:5px 8px">
+                      ${i.order_type?`<span class="tag" style="background:${tt.bg};color:${tt.fg};font-size:10px;margin-right:5px;padding:1px 6px;border-radius:8px">${i.order_type}</span>`:''}
+                      ${i.product_name||'—'}
+                    </td>
+                    <td style="padding:5px 8px;text-align:center">${i.qty||0}</td>
+                    <td style="padding:5px 8px;text-align:center"><span class="tag" style="background:${ct.bg};color:${ct.fg};font-size:10px;padding:1px 6px;border-radius:8px">${i.color||'—'}</span></td>
+                    <td style="padding:5px 8px;text-align:center">
+                      <input value="${(i.vendor_order_no||'').replace(/"/g,'&quot;')}" placeholder="單號"
+                        onchange="window._pltUpdateItem('${r.id}',${idx},'vendor_order_no',this.value)"
+                        style="width:90px;padding:3px 6px;font-size:11px;text-align:center;border:1px solid ${i.vendor_order_no?'#a5d6a7':'var(--border)'};border-radius:3px;background:${i.vendor_order_no?'#e8f5e9':'#fff'}">
+                    </td>
+                    <td style="padding:5px 8px;text-align:center">
+                      <input type="number" min="0" step="1" value="${i.unit_price||''}" placeholder="單價"
+                        onchange="window._pltUpdateItem('${r.id}',${idx},'unit_price',this.value)"
+                        style="width:80px;padding:3px 6px;font-size:11px;text-align:right;border:1px solid ${i.unit_price?'#a5d6a7':'#ffab91'};border-radius:3px;background:${i.unit_price?'#e8f5e9':'#fff3e0'}">
+                    </td>
+                    <td style="padding:5px 8px;text-align:right;font-weight:600;color:${sub>0?'#2e7d32':'var(--muted)'}">${sub>0?'NT$ '+sub.toLocaleString():'—'}</td>
+                    <td style="padding:5px 8px;text-align:center">${isFilled ? '<span style="color:#2e7d32;font-size:14px">✓</span>' : '<span style="color:#ccc">—</span>'}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+              <tfoot>
+                <tr style="background:#f5f5f5">
+                  <td colspan="5" style="padding:6px 8px;font-size:11px;color:var(--muted)">${filled}/${items.length} 項已填寫</td>
+                  <td style="padding:6px 8px;text-align:right;font-weight:700;color:#2e7d32">合計 NT$ ${dayTotal.toLocaleString()}</td>
+                  <td></td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        ` : ''}
       </div>`;
     }).join('')}
   </div>`;
 }
 
-// ── Tab 2:電鍍月結資料(依廠商單號分組)──
+// 展開/收合日單
+window._pltToggleDaily = function(id) {
+  if (!state.data.plateDailyExpanded) state.data.plateDailyExpanded = {};
+  state.data.plateDailyExpanded[id] = !state.data.plateDailyExpanded[id];
+  renderApp();
+};
+
+// 內嵌表格:更新單筆品項(vendor_order_no 或 unit_price)
+window._pltUpdateItem = async function(recordId, itemIdx, field, value) {
+  const r = (state.data.plate||[]).find(x => x.id === recordId);
+  if (!r) return;
+  const items = [...(r.items||[])];
+  const cur = items[itemIdx];
+
+  // 若是 unit_price 且比歷史最高高 → 觸發同品項比價 + 通知老闆
+  if (field === 'unit_price') {
+    const price = parseFloat(value) || null;
+    if (price && price > 0) {
+      const history = [];
+      (state.data.plate||[]).forEach(rec => {
+        (rec.items||[]).forEach((it, idx) => {
+          if (rec.id === recordId && idx === itemIdx) return;
+          if (!it.unit_price) return;
+          const sameProduct = cur.product_id
+            ? (it.product_id === cur.product_id)
+            : (it.product_name && it.product_name === cur.product_name);
+          const sameColor = (it.color||'') === (cur.color||'');
+          if (sameProduct && sameColor) {
+            history.push({ price: parseFloat(it.unit_price), date: rec.invoice_date, vendor: it.vendor_order_no });
+          }
+        });
+      });
+      if (history.length) {
+        const maxPrev = Math.max(...history.map(h => h.price));
+        if (price > maxPrev) {
+          const latest = history.sort((a,b) => (b.date||'').localeCompare(a.date||''))[0];
+          const diff = price - maxPrev;
+          const pct = ((diff / maxPrev) * 100).toFixed(1);
+          const ok = confirm(
+            `⚠ 電鍍費比之前紀錄高\n\n` +
+            `${cur.product_name} · ${cur.color||'—'}\n` +
+            `新單價:NT$ ${price}\n` +
+            `歷史最高:NT$ ${maxPrev}(${latest.date||'—'}${latest.vendor?' · '+latest.vendor:''})\n` +
+            `漲幅:+NT$ ${diff}(+${pct}%)\n\n` +
+            `確定要用這個單價?(會通知老闆)`
+          );
+          if (!ok) { renderApp(); return; }
+          try {
+            await db.from('approval_requests').insert({
+              request_type: 'plating_price_up',
+              item_type:    'plate_ledger',
+              item_id:      r.id,
+              item_name:    `${cur.product_name} · ${cur.color||''}(電鍍費)`,
+              current_data: { unit_price: maxPrev, date: latest.date, vendor: latest.vendor },
+              change_data:  { unit_price: price, date: r.invoice_date, vendor: cur.vendor_order_no, product_id: cur.product_id, color: cur.color },
+              note:         `電鍍費上漲 · ${cur.product_name} · ${cur.color||''} · NT$ ${maxPrev}→${price} · 填寫人 ${state.profile?.name || '—'}`,
+              status:       'pending',
+              requested_by: state.user?.id || null,
+            });
+          } catch(e) { console.warn(e); }
+        }
+      }
+    }
+    items[itemIdx] = { ...cur, unit_price: price, subtotal: price ? (parseFloat(cur.qty)||0) * price : null };
+  } else {
+    items[itemIdx] = { ...cur, [field]: value || null };
+  }
+  const total = items.reduce((s,i) => s + (parseFloat(i.subtotal)||0), 0);
+  const { error } = await db.from('plate_ledger').update({ items, total }).eq('id', recordId);
+  if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  await loadPlate(); renderApp();
+};
+
+// ── Tab 2:電鍍月結資料(依「每項的 vendor_order_no」分組)──
 function _pltRenderMonthly(records, ym, TYPE_TAG, COLOR_TAG) {
-  // 展開所有品項並依 廠商單號 → 日期 分組
+  // 展開所有品項並依「品項本身的 vendor_order_no」→ 日期 分組
   const byVendor = {};
   records.forEach(r => {
-    const vendor = r.internal_order_no || '(未填廠商單號)';
-    if (!byVendor[vendor]) byVendor[vendor] = { vendor, total:0, qty:0, items:0, byDate:{} };
-    const dt = r.invoice_date || '';
-    if (!byVendor[vendor].byDate[dt]) byVendor[vendor].byDate[dt] = { date:dt, records:[], qty:0, total:0, items:0 };
-    byVendor[vendor].byDate[dt].records.push(r);
     (r.items||[]).forEach(i => {
+      const vendor = i.vendor_order_no || '(未填廠商單號)';
+      if (!byVendor[vendor]) byVendor[vendor] = { vendor, total:0, qty:0, items:0, byDate:{} };
+      const dt = r.invoice_date || '';
+      if (!byVendor[vendor].byDate[dt]) byVendor[vendor].byDate[dt] = { date:dt, itemsList:[], qty:0, total:0, items:0 };
+      byVendor[vendor].byDate[dt].itemsList.push({ item:i, record:r });
       const qty = parseFloat(i.qty)||0;
       const sub = parseFloat(i.subtotal || (i.qty && i.unit_price ? i.qty*i.unit_price : 0)) || 0;
       byVendor[vendor].byDate[dt].qty += qty;
@@ -23549,26 +23678,27 @@ function _pltRenderMonthly(records, ym, TYPE_TAG, COLOR_TAG) {
               </tr>
             </thead>
             <tbody>
-              ${dg.records.flatMap(r => (r.items||[]).map((i, idx) => {
-                const tt = TYPE_TAG[r.order_type] || TYPE_TAG['其它'];
+              ${dg.itemsList.map(({item:i, record:r}) => {
+                const itemIdx = (r.items||[]).findIndex(x => x === i);
+                const tt = TYPE_TAG[i.order_type||r.order_type] || TYPE_TAG['其它'];
                 const ct = COLOR_TAG[i.color] || { bg:'#f5f5f5', fg:'#546e7a' };
                 const sub = parseFloat(i.subtotal || (i.qty && i.unit_price ? i.qty*i.unit_price : 0)) || 0;
                 return `<tr>
                   <td style="padding:4px 8px">
-                    ${r.order_type?`<span class="tag" style="background:${tt.bg};color:${tt.fg};font-size:10px;margin-right:4px">${r.order_type}</span>`:''}
+                    ${(i.order_type||r.order_type)?`<span class="tag" style="background:${tt.bg};color:${tt.fg};font-size:10px;margin-right:4px">${i.order_type||r.order_type}</span>`:''}
                     ${i.product_name||'—'}
-                    ${i.extra_note?`<span style="font-size:10px;color:var(--muted);margin-left:4px">${i.extra_note}</span>`:''}
+                    <span style="font-size:10px;color:var(--muted);margin-left:4px">${r.invoice_date||''}</span>
                   </td>
                   <td style="padding:4px 8px;text-align:center">${i.qty||0}</td>
                   <td style="padding:4px 8px;text-align:center"><span class="tag" style="background:${ct.bg};color:${ct.fg};font-size:10px">${i.color||'—'}</span></td>
                   <td style="padding:4px 8px;text-align:right">
                     <input type="number" min="0" step="1" value="${i.unit_price||''}" placeholder="—"
-                      onchange="window._pltUpdateUnitPrice('${r.id}',${idx},this.value)"
+                      onchange="window._pltUpdateItem('${r.id}',${itemIdx},'unit_price',this.value)"
                       style="width:70px;padding:2px 4px;font-size:11px;text-align:right;border:1px solid ${i.unit_price?'#a5d6a7':'#ffab91'};border-radius:3px;background:${i.unit_price?'#e8f5e9':'#fff3e0'}">
                   </td>
                   <td style="padding:4px 8px;text-align:right;font-weight:600;color:${sub>0?'#2e7d32':'var(--muted)'}">${sub>0?'NT$ '+sub.toLocaleString():'—'}</td>
                 </tr>`;
-              })).join('')}
+              }).join('')}
             </tbody>
           </table>
         `).join('') : ''}
@@ -23737,7 +23867,6 @@ function _pltCartRowsHtml() {
         <option ${it.color==='玫瑰金'?'selected':''}>玫瑰金</option>
         <option ${it.color==='純銀'?'selected':''}>純銀</option>
       </select>
-      <input value="${(it.extra_note||'').replace(/"/g,'&quot;')}" placeholder="附註" onchange="window._pltCartSet(${i},'extra_note',this.value)" style="width:90px;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px" title="內部單號,如 0908補">
       <div style="display:flex;align-items:center;gap:3px">
         <button onclick="window._pltCartQty(${i},-1)" style="width:22px;height:22px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-weight:600">−</button>
         <input value="${it.qty||1}" type="number" min="1" onchange="window._pltCartSet(${i},'qty',parseInt(this.value)||1)" style="width:40px;padding:3px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px">
@@ -23829,10 +23958,10 @@ window.modalAddPlate = async function(existing = null) {
   window._pltRerender = rerender;
 
   showModal(id ? '編輯電鍍單' : '建立電鍍單', `
-    <!-- 頂:日期 + 廠商單號 -->
-    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+    <!-- 頂:日期(單號改在每項填) -->
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
       <input class="form-control" id="plt-date" type="date" value="${existing?.invoice_date||today}" style="width:160px">
-      <input class="form-control" id="plt-order" value="${existing?.internal_order_no||''}" placeholder="輸入單號(廠商回單後才填)" style="flex:1;min-width:180px">
+      <span style="font-size:11px;color:var(--muted)">廠商單號 & 單價在「電鍍金額填寫」清單裡逐項填(廠商回單後)</span>
     </div>
 
     <!-- 送料類型 + 品類 tag(同尺寸,並列) -->
@@ -23903,7 +24032,7 @@ window.modalAddPlate = async function(existing = null) {
           order_type: c.order_type || null,
           color: c.color,
           qty: parseInt(c.qty)||1,
-          extra_note: c.extra_note || null,
+          vendor_order_no: c.vendor_order_no || null,   // 每項的廠商單號(廠商回單時填)
           unit_price: c.unit_price || null,
           subtotal: sub,
         };
@@ -23912,7 +24041,6 @@ window.modalAddPlate = async function(existing = null) {
       const payload = {
         year_month: ym2,
         invoice_date: date,
-        internal_order_no: document.getElementById('plt-order').value.trim()||null,
         order_type: state.data._pltCurType || null,
         items: itemsData, total,
       };
