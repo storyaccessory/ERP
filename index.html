@@ -19223,8 +19223,8 @@ function renderApprovals() {
 
   const filtered = list.filter(r => r.status === tab);
 
-  const typeLabel = { price_change:'價格變動', stock_adjust:'庫存調整', casting_restock:'鑄件補貨單', calendar_edit:'行事曆修改' };
-  const itemLabel = { casting:'鑄件', part:'零件', product:'商品', casting_restock_order:'補貨單', calendar_event:'行事曆' };
+  const typeLabel = { price_change:'價格變動', stock_adjust:'庫存調整', casting_restock:'鑄件補貨單', calendar_edit:'行事曆修改', plating_price_up:'電鍍費上漲' };
+  const itemLabel = { casting:'鑄件', part:'零件', product:'商品', casting_restock_order:'補貨單', calendar_event:'行事曆', plate_ledger:'電鍍單' };
 
   const rows = filtered.map(r => {
     const chg = r.change_data || {};
@@ -19246,12 +19246,14 @@ function renderApprovals() {
     const chgText = r.request_type === 'price_change'
       ? [
           cur.unit_price != null || chg.unit_price != null
-            ? `單價：${cur.unit_price!=null?'$'+cur.unit_price:'—'} → ${chg.unit_price!=null?'$'+chg.unit_price:'—'}`
+            ? `單價:${cur.unit_price!=null?'$'+cur.unit_price:'—'} → ${chg.unit_price!=null?'$'+chg.unit_price:'—'}`
             : null,
           cur.mold_fee != null || chg.mold_fee != null
-            ? `模具工錢：${cur.mold_fee!=null?'$'+cur.mold_fee:'—'} → ${chg.mold_fee!=null?'$'+chg.mold_fee:'—'}`
+            ? `模具工錢:${cur.mold_fee!=null?'$'+cur.mold_fee:'—'} → ${chg.mold_fee!=null?'$'+chg.mold_fee:'—'}`
             : null,
-        ].filter(Boolean).join('；')
+        ].filter(Boolean).join(';')
+      : r.request_type === 'plating_price_up'
+      ? `電鍍費 $${cur.unit_price ?? '—'} → $${chg.unit_price ?? '—'}(${chg.date||'—'}${chg.vendor?' · '+chg.vendor:''})`
       : r.request_type === 'calendar_edit'
       ? Object.keys(chg).map(k => `${_calFieldLabel[k]||k}：${_fmtVal(k, cur[k])} → ${_fmtVal(k, chg[k])}`).join('；')
       : (r.note || '');
@@ -23575,16 +23577,75 @@ function _pltRenderMonthly(records, ym, TYPE_TAG, COLOR_TAG) {
   </div>`;
 }
 
-// 月結:即時更新單價
+// 月結:即時更新單價 + 同品項歷史比價提醒
 window._pltUpdateUnitPrice = async function(recordId, itemIdx, value) {
   const r = (state.data.plate||[]).find(x => x.id === recordId);
   if (!r) return;
   const items = [...(r.items||[])];
   const price = parseFloat(value) || null;
+  const cur = items[itemIdx];
+
+  // ── 同品相(product_id + color)歷史單價比對 ──
+  if (price && price > 0) {
+    const history = [];
+    (state.data.plate||[]).forEach(rec => {
+      (rec.items||[]).forEach((it, idx) => {
+        if (rec.id === recordId && idx === itemIdx) return; // 跳過自己
+        if (!it.unit_price) return;
+        // 用 product_id 比對優先,沒有就退回 product_name;color 也要相同
+        const sameProduct = cur.product_id
+          ? (it.product_id === cur.product_id)
+          : (it.product_name && it.product_name === cur.product_name);
+        const sameColor = (it.color||'') === (cur.color||'');
+        if (sameProduct && sameColor) {
+          history.push({ price: parseFloat(it.unit_price), date: rec.invoice_date, vendor: rec.internal_order_no });
+        }
+      });
+    });
+
+    if (history.length) {
+      const maxPrev = Math.max(...history.map(h => h.price));
+      if (price > maxPrev) {
+        const latest = history.sort((a,b) => (b.date||'').localeCompare(a.date||''))[0];
+        const diff = price - maxPrev;
+        const pct = ((diff / maxPrev) * 100).toFixed(1);
+        const ok = confirm(
+          `⚠ 電鍍費比之前紀錄高\n\n` +
+          `${cur.product_name} · ${cur.color||'—'}\n` +
+          `新單價:NT$ ${price}\n` +
+          `歷史最高:NT$ ${maxPrev}(${latest.date||'—'}${latest.vendor?' · '+latest.vendor:''})\n` +
+          `漲幅:+NT$ ${diff}(+${pct}%)\n\n` +
+          `確定要用這個單價?(會通知老闆)`
+        );
+        if (!ok) { renderApp(); return; }
+
+        // ── 通知老闆:寫入 approval_requests 讓老闆在「審核管理」看得到 ──
+        try {
+          const noteText = `電鍍費上漲提醒 · ${cur.product_name} · ${cur.color||'—'}\n`
+            + `新單價 NT$ ${price} ← 舊最高 NT$ ${maxPrev}(${latest.date||'—'}${latest.vendor?' · '+latest.vendor:''})\n`
+            + `漲幅 +NT$ ${diff}(+${pct}%)\n`
+            + `送料日 ${r.invoice_date||'—'} · 廠商單號 ${r.internal_order_no||'(未填)'}\n`
+            + `填寫人:${state.profile?.name || state.user?.email || '—'}`;
+          await db.from('approval_requests').insert({
+            request_type: 'plating_price_up',
+            item_type:    'plate_ledger',
+            item_id:      r.id,
+            item_name:    `${cur.product_name} · ${cur.color||''}(電鍍費)`,
+            current_data: { unit_price: maxPrev, date: latest.date, vendor: latest.vendor },
+            change_data:  { unit_price: price, date: r.invoice_date, vendor: r.internal_order_no, product_id: cur.product_id, color: cur.color },
+            note:         noteText,
+            status:       'pending',
+            requested_by: state.user?.id || null,
+          });
+        } catch(e) { console.warn('plating price notify failed', e); }
+      }
+    }
+  }
+
   items[itemIdx] = {
-    ...items[itemIdx],
+    ...cur,
     unit_price: price,
-    subtotal: price ? (parseFloat(items[itemIdx].qty)||0) * price : null,
+    subtotal: price ? (parseFloat(cur.qty)||0) * price : null,
   };
   const total = items.reduce((s,i) => s + (parseFloat(i.subtotal)||0), 0);
   const { error } = await db.from('plate_ledger').update({ items, total }).eq('id', recordId);
@@ -23592,27 +23653,92 @@ window._pltUpdateUnitPrice = async function(recordId, itemIdx, value) {
   await loadPlate(); renderApp();
 };
 
-function _pltItemHtml(i = {}) {
-  const name = (i.product_name||'').replace(/"/g,'&quot;');
-  const note = (i.extra_note||'').replace(/"/g,'&quot;');
-  // 送料類型 tag(單一 item 也可以有自己的類型;預設繼承表頭)
-  return `<div class="plt-row" style="display:grid;grid-template-columns:1.4fr 90px 60px 90px auto;gap:5px;margin-bottom:8px;align-items:start">
-    <div style="position:relative">
-      <input class="form-control plt-product" placeholder="輸入關鍵字搜尋商品…" value="${name}" oninput="pltSearch(this)" autocomplete="off" onfocus="pltSearch(this)">
-      <input type="hidden" class="plt-product-id" value="${i.product_id||''}">
-      <div class="plt-drop" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1px solid var(--border);border-radius:6px;z-index:200;max-height:160px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15)"></div>
-    </div>
-    <select class="form-control plt-color">
-      <option value="" ${!i.color?'selected':''}>— 顏色 —</option>
-      <option ${i.color==='白K金'?'selected':''}>白K金</option>
-      <option ${i.color==='黃22K金'?'selected':''}>黃22K金</option>
-      <option ${i.color==='黃18K金'?'selected':''}>黃18K金</option>
-      <option ${i.color==='玫瑰金'?'selected':''}>玫瑰金</option>
-      <option ${i.color==='純銀'?'selected':''}>純銀</option>
-    </select>
-    <input class="form-control plt-qty" type="number" placeholder="數量" min="0" value="${i.qty||0}" oninput="updatePltSummary()">
-    <input class="form-control plt-note" placeholder="附註單號" value="${note}" title="內部單號,如 0908補、0909 訂製 47+1">
-    <button onclick="this.closest('.plt-row').remove();updatePltSummary()" style="background:var(--danger);color:#fff;border:none;border-radius:4px;padding:0 10px;cursor:pointer;height:36px">✕</button>
+// ── 電鍍單狀態(在 modalAddPlate 打開時初始化) ──
+const PLT_COLOR_TAG = {
+  '白K金':   { bg:'#e0f2f1', fg:'#00695c' },
+  '黃22K金': { bg:'#fff8e1', fg:'#e65100' },
+  '黃18K金': { bg:'#fff3e0', fg:'#bf360c' },
+  '玫瑰金':  { bg:'#fce4ec', fg:'#ad1457' },
+  '純銀':    { bg:'#f5f5f5', fg:'#546e7a' },
+};
+const PLT_TYPE_TAG = {
+  '臨單': { bg:'#e3f2fd', fg:'#1565c0' },
+  '訂製': { bg:'#fce4ec', fg:'#ad1457' },
+  '補貨': { bg:'#e8f5e9', fg:'#2e7d32' },
+  '其它': { bg:'#f5f5f5', fg:'#546e7a' },
+};
+
+// 篩選商品(依 品類 / 分類IP / 系列 / 搜尋關鍵字)
+function _pltFilterProducts() {
+  const all = state.data.products || [];
+  const cat  = state.data._pltFilterCat  || '';   // 戒指/手鍊/耳環/項鍊
+  const ip   = state.data._pltFilterIp   || '';   // ip_id
+  const sr   = state.data._pltFilterSer  || '';   // series_id
+  const q    = (state.data._pltSearch || '').trim().toLowerCase();
+  return all.filter(p => {
+    if (cat) {
+      const catObj = (state.data.categories||[]).find(c => c.id === p.category_id);
+      if (!catObj || catObj.name !== cat) return false;
+    }
+    if (ip && p.ip_id !== ip) return false;
+    if (sr && p.series_id !== sr) return false;
+    if (q) {
+      const hay = `${p.name||''} ${p.sku||''} ${(state.data.series||[]).find(s=>s.id===p.series_id)?.name||''}`.toLowerCase();
+      if (!hay.includes(q)) return false;
+    }
+    return true;
+  });
+}
+
+// 電鍍清單 rows -> HTML
+function _pltCartRowsHtml() {
+  const cart = state.data._pltCart || [];
+  if (!cart.length) return `<div style="text-align:center;color:var(--muted);font-size:12px;padding:16px">點上方商品加入清單</div>`;
+  return cart.map((it, i) => {
+    const tt = PLT_TYPE_TAG[it.order_type] || PLT_TYPE_TAG['其它'];
+    const ct = PLT_COLOR_TAG[it.color] || { bg:'#eee', fg:'#666' };
+    return `<div class="plt-cart-row" data-idx="${i}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border:1px solid var(--border);border-radius:6px;margin-bottom:5px">
+      <span class="tag" style="background:${tt.bg};color:${tt.fg};font-size:10px;font-weight:600;flex-shrink:0">${it.order_type||'其它'}</span>
+      <span style="flex:1;font-size:13px;font-weight:500">${it.product_name}</span>
+      <select onchange="window._pltCartSet(${i},'color',this.value)" style="width:80px;padding:3px 6px;font-size:11px;border:1px solid ${it.color?'#a5d6a7':'#ffab91'};border-radius:4px;background:${it.color?PLT_COLOR_TAG[it.color]?.bg||'#fff':'#fff3e0'};color:${it.color?PLT_COLOR_TAG[it.color]?.fg||'#333':'#bf360c'};font-weight:600">
+        <option value="" ${!it.color?'selected':''}>顏色</option>
+        <option ${it.color==='白K金'?'selected':''}>白K金</option>
+        <option ${it.color==='黃22K金'?'selected':''}>黃22K金</option>
+        <option ${it.color==='黃18K金'?'selected':''}>黃18K金</option>
+        <option ${it.color==='玫瑰金'?'selected':''}>玫瑰金</option>
+        <option ${it.color==='純銀'?'selected':''}>純銀</option>
+      </select>
+      <input value="${(it.extra_note||'').replace(/"/g,'&quot;')}" placeholder="附註" onchange="window._pltCartSet(${i},'extra_note',this.value)" style="width:90px;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px" title="內部單號,如 0908補">
+      <div style="display:flex;align-items:center;gap:3px">
+        <button onclick="window._pltCartQty(${i},-1)" style="width:22px;height:22px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-weight:600">−</button>
+        <input value="${it.qty||1}" type="number" min="1" onchange="window._pltCartSet(${i},'qty',parseInt(this.value)||1)" style="width:40px;padding:3px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px">
+        <button onclick="window._pltCartQty(${i},1)" style="width:22px;height:22px;border:1px solid var(--border);border-radius:3px;background:#fff;cursor:pointer;font-weight:600">+</button>
+      </div>
+      <button onclick="window._pltCartRemove(${i})" style="background:#ffebee;color:#c62828;border:none;padding:3px 8px;border-radius:4px;cursor:pointer;font-size:12px">✕</button>
+    </div>`;
+  }).join('');
+}
+
+// 商品清單面板
+function _pltProductsPanel() {
+  const list = _pltFilterProducts();
+  const hasFilter = state.data._pltFilterCat || state.data._pltFilterIp || state.data._pltFilterSer || (state.data._pltSearch||'').trim();
+  if (!hasFilter) {
+    return `<div style="text-align:center;color:var(--muted);font-size:13px;padding:20px">請使用上方篩選或搜尋來顯示商品</div>`;
+  }
+  if (!list.length) {
+    return `<div style="text-align:center;color:var(--muted);font-size:12px;padding:16px">找不到符合的商品</div>`;
+  }
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;padding:2px">
+    ${list.slice(0, 60).map(p => {
+      const cat = (state.data.categories||[]).find(c => c.id === p.category_id)?.name;
+      const ipName = (state.data.ipCategories||[]).find(c => c.id === p.ip_id)?.name;
+      return `<button onclick="window._pltCartAdd('${p.id}')" style="text-align:left;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;transition:all .1s" onmouseover="this.style.background='#e8f5e9';this.style.borderColor='#66bb6a'" onmouseout="this.style.background='#fff';this.style.borderColor='var(--border)'">
+        <div style="font-size:11px;font-weight:600;color:var(--text);line-height:1.3;margin-bottom:2px">${p.name}</div>
+        <div style="font-size:10px;color:var(--muted)">${ipName||'—'}${cat?' · '+cat:''}</div>
+      </button>`;
+    }).join('')}
+    ${list.length > 60 ? `<div style="grid-column:1/-1;text-align:center;font-size:11px;color:var(--muted);padding:8px">還有 ${list.length-60} 個商品,請縮小篩選範圍</div>` : ''}
   </div>`;
 }
 
@@ -23645,70 +23771,113 @@ window.pltSelectProduct = function(e, name, id) {
 
 window.modalAddPlate = async function(existing = null) {
   const id = existing?.id;
-  const items = existing?.items?.length ? existing.items : [{}];
   const today = new Date().toISOString().slice(0,10);
   const ym = new Date().toISOString().slice(0,7);
-  // 確保商品資料已載入
+  // 確保商品/系列/IP 資料已載入
   if (!(state.data.products||[]).length) await loadProducts();
-  const orderType = existing?.order_type || '';
-  const TYPES = ['臨單','訂製','補貨','其它'];
-  showModal(id ? '編輯電鍍單' : '建立電鍍單', `
-    <div class="form-row form-row-2">
-      <div class="form-group"><label>送料日期 *</label><input class="form-control" id="plt-date" type="date" value="${existing?.invoice_date||today}"></div>
-      <div class="form-group"><label>廠商單號 <span style="font-size:11px;color:var(--muted);font-weight:400">(廠商回單後才填,可空)</span></label><input class="form-control" id="plt-order" value="${existing?.internal_order_no||''}" placeholder="例:2609110003"></div>
-    </div>
-    <input type="hidden" id="plt-ym" value="${existing?.year_month||ym}">
-    <div style="margin:12px 0 6px">
-      <label style="font-size:12px;color:var(--muted);display:block;margin-bottom:4px">送料類型</label>
-      <div style="display:flex;gap:6px;flex-wrap:wrap">
-        ${TYPES.map(t => `<label style="padding:5px 12px;border-radius:16px;font-size:12px;border:1.5px solid ${orderType===t?'var(--accent)':'var(--border)'};background:${orderType===t?'var(--accent)':'#fff'};color:${orderType===t?'#fff':'var(--text)'};cursor:pointer;font-weight:600">
-          <input type="radio" name="plt-type" value="${t}" ${orderType===t?'checked':''} style="display:none" onchange="document.querySelectorAll('label[for-plt-type]').forEach(l=>l.style.background='#fff');this.parentNode.style.background='var(--accent)';this.parentNode.style.color='#fff';this.parentNode.style.borderColor='var(--accent)'">${t}
-        </label>`).join('')}
-      </div>
-    </div>
-    <div class="form-group" style="margin-top:10px"><label style="font-size:12px">備註</label><input class="form-control" id="plt-notes" value="${existing?.notes||''}"></div>
 
-    <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:14px 0 4px;padding-bottom:6px;border-bottom:1px solid var(--border)">電鍍明細 <span style="font-size:11px;color:var(--muted);font-weight:400">(此階段只填品項/顏色/數量,單價在「電鍍月結資料」廠商回單時填)</span></div>
-    <div style="display:grid;grid-template-columns:1.4fr 90px 60px 90px auto;gap:5px;margin-bottom:4px">
-      <div style="font-size:11px;color:var(--muted)">商品名稱</div>
-      <div style="font-size:11px;color:var(--muted)">電鍍色</div>
-      <div style="font-size:11px;color:var(--muted)">數量</div>
-      <div style="font-size:11px;color:var(--muted)">附註單號</div>
-      <div></div>
+  // 初始化編輯狀態
+  state.data._pltCart = existing?.items ? existing.items.map(i => ({...i})) : [];
+  state.data._pltCurType = existing?.order_type || '臨單';
+  state.data._pltFilterCat = '';
+  state.data._pltFilterIp = '';
+  state.data._pltFilterSer = '';
+  state.data._pltSearch = '';
+
+  const TYPES = ['臨單','訂製','補貨','其它'];
+  const CATS  = ['戒指','手鍊','耳環','項鍊'];
+
+  const rerender = () => {
+    const pl = document.getElementById('plt-products-panel');
+    if (pl) pl.innerHTML = _pltProductsPanel();
+    const cl = document.getElementById('plt-cart-list');
+    if (cl) cl.innerHTML = _pltCartRowsHtml();
+    _pltUpdateCartSummary();
+    _pltUpdateFilterUI();
+  };
+  window._pltRerender = rerender;
+
+  showModal(id ? '編輯電鍍單' : '建立電鍍單', `
+    <!-- 頂:日期 + 廠商單號 -->
+    <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap">
+      <input class="form-control" id="plt-date" type="date" value="${existing?.invoice_date||today}" style="width:160px">
+      <input class="form-control" id="plt-order" value="${existing?.internal_order_no||''}" placeholder="輸入單號(廠商回單後才填)" style="flex:1;min-width:180px">
     </div>
-    <div id="plt-items">${items.map(i=>_pltItemHtml(i)).join('')}</div>
-    <button class="btn btn-outline btn-sm" onclick="addPltRow()" style="margin-bottom:12px">+ 新增品項</button>
-    <div style="text-align:right;font-size:13px;padding:8px;background:var(--surface2);border-radius:6px" id="plt-summary">共 0 項 · 0 件</div>
+
+    <!-- 送料類型 tag(定義新加入項目的預設類型) -->
+    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap" id="plt-type-tags">
+      ${TYPES.map(t => `<button type="button" data-type="${t}" onclick="window._pltSetType('${t}')"
+        style="padding:5px 14px;border-radius:16px;font-size:12px;border:1.5px solid var(--border);background:#fff;color:var(--text);cursor:pointer;font-weight:600">
+        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ccc;margin-right:4px" class="plt-type-dot"></span>${t}
+      </button>`).join('')}
+    </div>
+
+    <!-- 品類 filter -->
+    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap" id="plt-cat-tags">
+      ${CATS.map(c => `<button type="button" data-cat="${c}" onclick="window._pltSetFilterCat('${c}')"
+        style="padding:4px 12px;border-radius:14px;font-size:11px;border:1.5px solid var(--border);background:#fff;color:var(--text);cursor:pointer;font-weight:600">
+        <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ccc;margin-right:4px" class="plt-cat-dot"></span>${c}
+      </button>`).join('')}
+    </div>
+
+    <!-- IP + 系列 + 搜尋 -->
+    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
+      <select id="plt-ip-select" onchange="state.data._pltFilterIp=this.value;state.data._pltFilterSer='';window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:120px">
+        <option value="">全部分類</option>
+        ${(state.data.ipCategories||[]).filter(c=>!c.parent_id).map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
+      </select>
+      <select id="plt-series-select" onchange="state.data._pltFilterSer=this.value;window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:120px">
+        <option value="">全部系列</option>
+        ${(state.data.series||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}
+      </select>
+      <input id="plt-search-input" placeholder="搜尋品名/貨號" oninput="state.data._pltSearch=this.value;window._pltRerender()"
+        style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:140px">
+    </div>
+
+    <!-- 商品清單面板(可點擊加入) -->
+    <div id="plt-products-panel" style="max-height:220px;overflow-y:auto;border:1px solid var(--border);border-radius:6px;padding:8px;background:#fafafa;margin-bottom:12px"></div>
+
+    <!-- 分隔 + 電鍍清單標題 -->
+    <div style="display:flex;justify-content:space-between;align-items:center;border-top:2px solid var(--accent);padding-top:10px;margin-bottom:8px">
+      <div style="font-weight:700;font-size:13px;color:var(--accent-dark)">📋 電鍍清單 <span id="plt-cart-summary" style="font-size:11px;color:var(--muted);font-weight:400">0 項 · 0 件</span></div>
+      <div id="plt-cart-colors" style="display:flex;gap:5px;flex-wrap:wrap"></div>
+    </div>
+
+    <!-- 電鍍清單 -->
+    <div id="plt-cart-list" style="min-height:60px"></div>
+
+    <div style="margin-top:10px" id="plt-cart-color-total"></div>
   `, [
     { label: id?'儲存':'建立電鍍單', primary:true, onclick: async () => {
       const date = document.getElementById('plt-date').value;
       if (!date) { showToast('請填送料日期','error'); return; }
       const ym2 = date.slice(0,7);
-      const orderTypeVal = document.querySelector('input[name="plt-type"]:checked')?.value || null;
-      const rows = document.querySelectorAll('.plt-row');
-      const itemsData = []; let total = 0;
-      rows.forEach(r => {
-        const product_name = r.querySelector('.plt-product').value.trim();
-        const product_id = r.querySelector('.plt-product-id').value || null;
-        const color = r.querySelector('.plt-color').value.trim();
-        const qty = parseInt(r.querySelector('.plt-qty').value)||0;
-        const extra_note = r.querySelector('.plt-note')?.value.trim() || null;
-        if (product_name && qty > 0) {
-          // 保留舊 unit_price/subtotal(編輯時不覆蓋)
-          const oldItem = (existing?.items||[]).find(x => x.product_id === product_id && x.color === color) || {};
-          const unit_price = oldItem.unit_price || null;
-          const subtotal = unit_price ? qty * unit_price : null;
-          if (subtotal) total += subtotal;
-          itemsData.push({ product_name, product_id, color, qty, extra_note, unit_price, subtotal });
-        }
+      const cart = state.data._pltCart || [];
+      if (!cart.length) { showToast('請至少加入一筆品項','error'); return; }
+      const missingColor = cart.filter(c => !c.color).length;
+      if (missingColor > 0) { showToast(`還有 ${missingColor} 筆沒選電鍍色`,'error'); return; }
+
+      let total = 0;
+      const itemsData = cart.map(c => {
+        const sub = c.unit_price ? (parseFloat(c.qty)||0) * parseFloat(c.unit_price) : null;
+        if (sub) total += sub;
+        return {
+          product_id: c.product_id || null,
+          product_name: c.product_name,
+          order_type: c.order_type || null,
+          color: c.color,
+          qty: parseInt(c.qty)||1,
+          extra_note: c.extra_note || null,
+          unit_price: c.unit_price || null,
+          subtotal: sub,
+        };
       });
-      if (!itemsData.length) { showToast('請至少加入一筆品項','error'); return; }
+
       const payload = {
         year_month: ym2,
         invoice_date: date,
         internal_order_no: document.getElementById('plt-order').value.trim()||null,
-        order_type: orderTypeVal,
-        notes: document.getElementById('plt-notes').value.trim()||null,
+        order_type: state.data._pltCurType || null,
         items: itemsData, total,
       };
       if (id) {
@@ -23720,21 +23889,105 @@ window.modalAddPlate = async function(existing = null) {
       showToast(id?'已更新':'已建立!'); closeModal(); await loadPlate(); renderApp();
     }},
     { label:'取消', onclick: closeModal },
-  ]);
-  requestAnimationFrame(() => updatePltSummary());
+  ], { wide: true });
+
+  requestAnimationFrame(() => { rerender(); });
 };
 
-window.addPltRow = function() {
-  document.getElementById('plt-items').insertAdjacentHTML('beforeend', _pltItemHtml({}));
-  updatePltSummary();
+// ── 送料類型切換(定義新加入項目的類型) ──
+window._pltSetType = function(t) {
+  state.data._pltCurType = t;
+  _pltUpdateFilterUI();
 };
-window.updatePltSummary = function() {
-  const rows = document.querySelectorAll('.plt-row');
-  let qty = 0;
-  rows.forEach(r => { qty += parseInt(r.querySelector('.plt-qty').value)||0; });
-  const el = document.getElementById('plt-summary');
-  if (el) el.textContent = `共 ${rows.length} 項 · ${qty} 件`;
+
+// ── 品類篩選(切換/取消) ──
+window._pltSetFilterCat = function(c) {
+  state.data._pltFilterCat = state.data._pltFilterCat === c ? '' : c;
+  window._pltRerender();
 };
+
+// 更新 filter UI 樣式
+function _pltUpdateFilterUI() {
+  const curType = state.data._pltCurType;
+  document.querySelectorAll('#plt-type-tags button').forEach(btn => {
+    const t = btn.dataset.type;
+    const active = t === curType;
+    btn.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
+    btn.style.background  = active ? 'var(--accent)' : '#fff';
+    btn.style.color       = active ? '#fff' : 'var(--text)';
+    const dot = btn.querySelector('.plt-type-dot');
+    if (dot) dot.style.background = active ? '#fff' : '#ccc';
+  });
+  const curCat = state.data._pltFilterCat;
+  document.querySelectorAll('#plt-cat-tags button').forEach(btn => {
+    const c = btn.dataset.cat;
+    const active = c === curCat;
+    btn.style.borderColor = active ? 'var(--accent)' : 'var(--border)';
+    btn.style.background  = active ? '#e0f2f1' : '#fff';
+    btn.style.color       = active ? 'var(--accent-dark)' : 'var(--text)';
+    const dot = btn.querySelector('.plt-cat-dot');
+    if (dot) dot.style.background = active ? 'var(--accent)' : '#ccc';
+  });
+}
+
+// ── 電鍍清單操作 ──
+window._pltCartAdd = function(productId) {
+  const p = (state.data.products||[]).find(x => x.id === productId);
+  if (!p) return;
+  if (!state.data._pltCart) state.data._pltCart = [];
+  state.data._pltCart.push({
+    product_id: p.id,
+    product_name: p.name,
+    order_type: state.data._pltCurType || '臨單',
+    color: p.color || '',    // 若商品本身有 default color 就帶入
+    qty: 1,
+    extra_note: '',
+  });
+  window._pltRerender();
+};
+window._pltCartRemove = function(idx) {
+  if (!state.data._pltCart) return;
+  state.data._pltCart.splice(idx, 1);
+  window._pltRerender();
+};
+window._pltCartSet = function(idx, field, value) {
+  if (!state.data._pltCart?.[idx]) return;
+  state.data._pltCart[idx][field] = value;
+  window._pltRerender();
+};
+window._pltCartQty = function(idx, delta) {
+  if (!state.data._pltCart?.[idx]) return;
+  const cur = parseInt(state.data._pltCart[idx].qty) || 1;
+  state.data._pltCart[idx].qty = Math.max(1, cur + delta);
+  window._pltRerender();
+};
+
+function _pltUpdateCartSummary() {
+  const cart = state.data._pltCart || [];
+  const totalQty = cart.reduce((s,i) => s + (parseInt(i.qty)||0), 0);
+  const summary = document.getElementById('plt-cart-summary');
+  if (summary) summary.textContent = `${cart.length} 項 · 共 ${totalQty} 件`;
+  // 顏色 tag 列
+  const byColor = {};
+  cart.forEach(c => { if (c.color) byColor[c.color] = (byColor[c.color]||0) + (parseInt(c.qty)||0); });
+  const colors = document.getElementById('plt-cart-colors');
+  if (colors) {
+    colors.innerHTML = Object.entries(byColor).map(([c,q]) => {
+      const t = PLT_COLOR_TAG[c] || { bg:'#eee', fg:'#666' };
+      return `<span class="tag" style="background:${t.bg};color:${t.fg};font-size:10px;font-weight:600">${c} ${q}</span>`;
+    }).join('');
+  }
+  const total = document.getElementById('plt-cart-color-total');
+  if (total) {
+    const entries = Object.entries(byColor);
+    total.innerHTML = entries.length
+      ? `<div style="font-size:11px;color:var(--muted);padding:6px 10px;background:#f5f5f5;border-radius:6px">顏色合計:${entries.map(([c,q]) => {
+          const t = PLT_COLOR_TAG[c] || { bg:'#eee', fg:'#666' };
+          return `<span class="tag" style="background:${t.bg};color:${t.fg};font-size:10px;margin:0 3px">${c}: ${q} 件</span>`;
+        }).join('')}</div>`
+      : '';
+  }
+}
 window.editPlate = function(id) {
   const rec = (state.data.plate||[]).find(r=>r.id===id);
   if (rec) window.modalAddPlate(rec);
