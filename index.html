@@ -23668,20 +23668,49 @@ const PLT_TYPE_TAG = {
   '其它': { bg:'#f5f5f5', fg:'#546e7a' },
 };
 
-// 篩選商品(依 品類 / 分類IP / 系列 / 搜尋關鍵字)
+// 篩選商品:分類 → 角色 → 系列(層級式,未選則沿用上一層全部) + 品類(獨立軸) + 搜尋
+// _pltFilterTopIp: 頂層 IP 分類(通常是父)
+// _pltFilterRoleIp: 角色 IP(頂層 IP 的 child)
+// _pltFilterSer: 系列
 function _pltFilterProducts() {
   const all = state.data.products || [];
-  const cat  = state.data._pltFilterCat  || '';   // 戒指/手鍊/耳環/項鍊
-  const ip   = state.data._pltFilterIp   || '';   // ip_id
-  const sr   = state.data._pltFilterSer  || '';   // series_id
-  const q    = (state.data._pltSearch || '').trim().toLowerCase();
+  const cat     = state.data._pltFilterCat  || '';       // 品類:戒指/手鍊/耳環/項鍊
+  const topIp   = state.data._pltFilterTopIp || '';      // 頂層分類 IP
+  const roleIp  = state.data._pltFilterRoleIp || '';     // 角色 IP
+  const seriesId= state.data._pltFilterSer  || '';       // 系列
+  const q       = (state.data._pltSearch || '').trim().toLowerCase();
+
+  // 建立「頂層 IP → 所有子角色 IP id 集合」對照
+  const ipCats = state.data.ipCategories || [];
+  const rolesUnderTop = new Set();
+  if (topIp && !roleIp) {
+    // 收集該頂層 IP 底下所有子角色 id
+    ipCats.forEach(c => { if (c.parent_id === topIp) rolesUnderTop.add(c.id); });
+    rolesUnderTop.add(topIp); // 自己也算(以防有商品直接掛在頂層)
+  }
+  // 建立「角色 IP → 該角色下所有系列 id 集合」對照
+  const seriesUnderRole = new Set();
+  if (roleIp && !seriesId) {
+    (state.data.series||[]).forEach(s => { if (s.ip_id === roleIp) seriesUnderRole.add(s.id); });
+  }
+
   return all.filter(p => {
+    // 品類(獨立軸)
     if (cat) {
       const catObj = (state.data.categories||[]).find(c => c.id === p.category_id);
       if (!catObj || catObj.name !== cat) return false;
     }
-    if (ip && p.ip_id !== ip) return false;
-    if (sr && p.series_id !== sr) return false;
+    // 系列(最精細)
+    if (seriesId) {
+      if (p.series_id !== seriesId) return false;
+    } else if (roleIp) {
+      // 沒選系列 → 只要商品的 series 屬於此角色即可,或商品直接掛此 IP
+      const belongs = seriesUnderRole.has(p.series_id) || p.ip_id === roleIp;
+      if (!belongs) return false;
+    } else if (topIp) {
+      // 沒選角色 → 只要商品的 ip 屬於此頂層或其任一子角色
+      if (!rolesUnderTop.has(p.ip_id)) return false;
+    }
     if (q) {
       const hay = `${p.name||''} ${p.sku||''} ${(state.data.series||[]).find(s=>s.id===p.series_id)?.name||''}`.toLowerCase();
       if (!hay.includes(q)) return false;
@@ -23719,18 +23748,15 @@ function _pltCartRowsHtml() {
   }).join('');
 }
 
-// 商品清單面板
+// 商品清單面板 — 沒選任何條件就顯示全部;有選就縮小
 function _pltProductsPanel() {
   const list = _pltFilterProducts();
-  const hasFilter = state.data._pltFilterCat || state.data._pltFilterIp || state.data._pltFilterSer || (state.data._pltSearch||'').trim();
-  if (!hasFilter) {
-    return `<div style="text-align:center;color:var(--muted);font-size:13px;padding:20px">請使用上方篩選或搜尋來顯示商品</div>`;
-  }
   if (!list.length) {
     return `<div style="text-align:center;color:var(--muted);font-size:12px;padding:16px">找不到符合的商品</div>`;
   }
+  const LIMIT = 80;
   return `<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:6px;padding:2px">
-    ${list.slice(0, 60).map(p => {
+    ${list.slice(0, LIMIT).map(p => {
       const cat = (state.data.categories||[]).find(c => c.id === p.category_id)?.name;
       const ipName = (state.data.ipCategories||[]).find(c => c.id === p.ip_id)?.name;
       return `<button onclick="window._pltCartAdd('${p.id}')" style="text-align:left;padding:6px 8px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;transition:all .1s" onmouseover="this.style.background='#e8f5e9';this.style.borderColor='#66bb6a'" onmouseout="this.style.background='#fff';this.style.borderColor='var(--border)'">
@@ -23738,7 +23764,7 @@ function _pltProductsPanel() {
         <div style="font-size:10px;color:var(--muted)">${ipName||'—'}${cat?' · '+cat:''}</div>
       </button>`;
     }).join('')}
-    ${list.length > 60 ? `<div style="grid-column:1/-1;text-align:center;font-size:11px;color:var(--muted);padding:8px">還有 ${list.length-60} 個商品,請縮小篩選範圍</div>` : ''}
+    ${list.length > LIMIT ? `<div style="grid-column:1/-1;text-align:center;font-size:11px;color:var(--muted);padding:8px">顯示 ${LIMIT} / ${list.length},請用篩選/搜尋縮小範圍</div>` : `<div style="grid-column:1/-1;text-align:center;font-size:11px;color:var(--muted);padding:6px">共 ${list.length} 個商品</div>`}
   </div>`;
 }
 
@@ -23780,7 +23806,8 @@ window.modalAddPlate = async function(existing = null) {
   state.data._pltCart = existing?.items ? existing.items.map(i => ({...i})) : [];
   state.data._pltCurType = existing?.order_type || '臨單';
   state.data._pltFilterCat = '';
-  state.data._pltFilterIp = '';
+  state.data._pltFilterTopIp = '';
+  state.data._pltFilterRoleIp = '';
   state.data._pltFilterSer = '';
   state.data._pltSearch = '';
 
@@ -23794,6 +23821,7 @@ window.modalAddPlate = async function(existing = null) {
     if (cl) cl.innerHTML = _pltCartRowsHtml();
     _pltUpdateCartSummary();
     _pltUpdateFilterUI();
+    _pltUpdateCascadeSelects();
   };
   window._pltRerender = rerender;
 
@@ -23804,31 +23832,34 @@ window.modalAddPlate = async function(existing = null) {
       <input class="form-control" id="plt-order" value="${existing?.internal_order_no||''}" placeholder="輸入單號(廠商回單後才填)" style="flex:1;min-width:180px">
     </div>
 
-    <!-- 送料類型 tag(定義新加入項目的預設類型) -->
-    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap" id="plt-type-tags">
+    <!-- 送料類型 + 品類 tag(同尺寸,並列) -->
+    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center" id="plt-type-tags">
+      <span style="font-size:11px;color:var(--muted);margin-right:4px;font-weight:600">類型</span>
       ${TYPES.map(t => `<button type="button" data-type="${t}" onclick="window._pltSetType('${t}')"
         style="padding:5px 14px;border-radius:16px;font-size:12px;border:1.5px solid var(--border);background:#fff;color:var(--text);cursor:pointer;font-weight:600">
         <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ccc;margin-right:4px" class="plt-type-dot"></span>${t}
       </button>`).join('')}
     </div>
 
-    <!-- 品類 filter -->
-    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap" id="plt-cat-tags">
+    <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap;align-items:center" id="plt-cat-tags">
+      <span style="font-size:11px;color:var(--muted);margin-right:4px;font-weight:600">品類</span>
       ${CATS.map(c => `<button type="button" data-cat="${c}" onclick="window._pltSetFilterCat('${c}')"
-        style="padding:4px 12px;border-radius:14px;font-size:11px;border:1.5px solid var(--border);background:#fff;color:var(--text);cursor:pointer;font-weight:600">
+        style="padding:5px 14px;border-radius:16px;font-size:12px;border:1.5px solid var(--border);background:#fff;color:var(--text);cursor:pointer;font-weight:600">
         <span style="display:inline-block;width:6px;height:6px;border-radius:50%;background:#ccc;margin-right:4px" class="plt-cat-dot"></span>${c}
       </button>`).join('')}
     </div>
 
-    <!-- IP + 系列 + 搜尋 -->
+    <!-- 分類 → 角色 → 系列(3 層級聯動)+ 搜尋 -->
     <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
-      <select id="plt-ip-select" onchange="state.data._pltFilterIp=this.value;state.data._pltFilterSer='';window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:120px">
+      <select id="plt-top-select" onchange="state.data._pltFilterTopIp=this.value;state.data._pltFilterRoleIp='';state.data._pltFilterSer='';window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:120px">
         <option value="">全部分類</option>
         ${(state.data.ipCategories||[]).filter(c=>!c.parent_id).map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
       </select>
+      <select id="plt-role-select" onchange="state.data._pltFilterRoleIp=this.value;state.data._pltFilterSer='';window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:120px">
+        <option value="">全部角色</option>
+      </select>
       <select id="plt-series-select" onchange="state.data._pltFilterSer=this.value;window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:120px">
         <option value="">全部系列</option>
-        ${(state.data.series||[]).map(s=>`<option value="${s.id}">${s.name}</option>`).join('')}
       </select>
       <input id="plt-search-input" placeholder="搜尋品名/貨號" oninput="state.data._pltSearch=this.value;window._pltRerender()"
         style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:140px">
@@ -23961,6 +23992,40 @@ window._pltCartQty = function(idx, delta) {
   state.data._pltCart[idx].qty = Math.max(1, cur + delta);
   window._pltRerender();
 };
+
+// 依「頂層分類」聯動「角色」下拉;依「角色」聯動「系列」下拉
+function _pltUpdateCascadeSelects() {
+  const topIp  = state.data._pltFilterTopIp || '';
+  const roleIp = state.data._pltFilterRoleIp || '';
+  const ipCats = state.data.ipCategories || [];
+  const allSeries = state.data.series || [];
+
+  // 角色下拉:top 沒選 → 顯示全部子角色;top 有選 → 只顯示該 top 的 children
+  const roleSel = document.getElementById('plt-role-select');
+  if (roleSel) {
+    const roles = topIp
+      ? ipCats.filter(c => c.parent_id === topIp)
+      : ipCats.filter(c => c.parent_id);   // 有 parent 的就是角色
+    roleSel.innerHTML = `<option value="">全部角色</option>` +
+      roles.map(c => `<option value="${c.id}" ${roleIp===c.id?'selected':''}>${c.name}</option>`).join('');
+    roleSel.disabled = false;
+  }
+
+  // 系列下拉:角色沒選 → 顯示全部;角色有選 → 只顯示該角色的系列
+  const serSel = document.getElementById('plt-series-select');
+  if (serSel) {
+    const series = roleIp
+      ? allSeries.filter(s => s.ip_id === roleIp)
+      : (topIp
+          ? allSeries.filter(s => {
+              const roleIds = new Set(ipCats.filter(c => c.parent_id === topIp).map(c => c.id));
+              return roleIds.has(s.ip_id);
+            })
+          : allSeries);
+    serSel.innerHTML = `<option value="">全部系列</option>` +
+      series.map(s => `<option value="${s.id}" ${state.data._pltFilterSer===s.id?'selected':''}>${s.name}</option>`).join('');
+  }
+}
 
 function _pltUpdateCartSummary() {
   const cart = state.data._pltCart || [];
