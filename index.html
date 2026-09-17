@@ -23744,15 +23744,17 @@ function _pltCartRowsHtml() {
   }).join('');
 }
 
-// 商品清單面板 — 條列式,每列一個商品
+// 商品清單面板 — 條列式,每列一個商品(全部顯示,不限筆數)
 function _pltProductsPanel() {
   const list = _pltFilterProducts();
   if (!list.length) {
     return `<div style="text-align:center;color:var(--muted);font-size:12px;padding:16px">找不到符合的商品</div>`;
   }
-  const LIMIT = 80;
   return `<div>
-    ${list.slice(0, LIMIT).map(p => {
+    <div style="text-align:center;font-size:11px;color:var(--muted);padding:4px 6px 8px;position:sticky;top:0;background:#fafafa;z-index:1">
+      共 ${list.length} 個商品 · 可用上方篩選或搜尋縮小範圍
+    </div>
+    ${list.map(p => {
       const cat = (state.data.categories||[]).find(c => c.id === p.category_id)?.name;
       const seriesName = p.series?.name || '';
       return `<button onclick="window._pltCartAdd('${p.id}')" style="width:100%;text-align:left;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;transition:all .1s;margin-bottom:4px;display:flex;align-items:center;gap:10px" onmouseover="this.style.background='#e8f5e9';this.style.borderColor='#66bb6a'" onmouseout="this.style.background='#fff';this.style.borderColor='var(--border)'">
@@ -23761,7 +23763,6 @@ function _pltProductsPanel() {
         <span style="font-size:13px;font-weight:600;color:var(--text);flex:1">${p.name}</span>
       </button>`;
     }).join('')}
-    ${list.length > LIMIT ? `<div style="text-align:center;font-size:11px;color:var(--muted);padding:8px">顯示 ${LIMIT} / ${list.length},請用篩選/搜尋縮小範圍</div>` : `<div style="text-align:center;font-size:11px;color:var(--muted);padding:6px">共 ${list.length} 個商品</div>`}
   </div>`;
 }
 
