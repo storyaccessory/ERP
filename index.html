@@ -2444,7 +2444,10 @@ window.pmUpdateSpecField = function() {
   }
 
   // ─── 分類切換自動帶預設零件(項鍊/手鍊)───
-  setTimeout(() => pmApplyDefaultParts(catName), 60);
+  // 只在「新增」商品的第一次進來自動帶,編輯既有商品時不強制帶(避免重複覆蓋)
+  if (window._pmIsNewProduct) {
+    setTimeout(() => pmApplyDefaultParts(catName), 60);
+  }
 };
 
 // ─── 分類預設零件對照 ───
@@ -2623,6 +2626,8 @@ window.pmAutoFillFromSku = function(sku) {
 async function modalProduct(productId = null) {
   const isEdit = !!productId;
   const product = isEdit ? (state.data.products||[]).find(p=>p.id===productId) : null;
+  // 記錄目前 modal 是否為「新增」— 影響是否自動帶預設零件(只在新增第一次時帶,編輯時不帶)
+  window._pmIsNewProduct = !isEdit;
 
   // 確保所有資料都載入
   await Promise.all([
