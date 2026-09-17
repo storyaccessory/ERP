@@ -23668,51 +23668,47 @@ const PLT_TYPE_TAG = {
   '其它': { bg:'#f5f5f5', fg:'#546e7a' },
 };
 
-// 篩選商品:分類 → 角色 → 系列(層級式,未選則沿用上一層全部) + 品類(獨立軸) + 搜尋
-// _pltFilterTopIp: 頂層 IP 分類(通常是父)
-// _pltFilterRoleIp: 角色 IP(頂層 IP 的 child)
-// _pltFilterSer: 系列
+// 取一個商品的 4 層 IP 路徑名稱(大→中→角色→系列),邏輯與商品資料庫相同
+function _pltGetLevels(p) {
+  const catMap = state.data.ipCatMap || {};
+  const path = [];
+  let cur = catMap[p.series?.category_id];
+  let guard = 10;
+  while (cur && guard-- > 0) {
+    path.unshift(cur);
+    cur = cur.parent_id ? catMap[cur.parent_id] : null;
+  }
+  const getName = (i) => path[i]?.name || null;
+  return {
+    top: getName(0) || '(未分類)',
+    mid: getName(1) || '(未指定中分類)',
+    chr: getName(2) || getName(path.length-1) || '(未指定角色)',
+    ser: p.series?.name || '(未指定系列)',
+  };
+}
+
+// 篩選商品:大分類 → 中分類 → 角色 → 系列(層級式,依名稱比對,與商品資料庫相同邏輯)+ 品類 + 搜尋
 function _pltFilterProducts() {
   const all = state.data.products || [];
-  const cat     = state.data._pltFilterCat  || '';       // 品類:戒指/手鍊/耳環/項鍊
-  const topIp   = state.data._pltFilterTopIp || '';      // 頂層分類 IP
-  const roleIp  = state.data._pltFilterRoleIp || '';     // 角色 IP
-  const seriesId= state.data._pltFilterSer  || '';       // 系列
-  const q       = (state.data._pltSearch || '').trim().toLowerCase();
-
-  // 建立「頂層 IP → 所有子角色 IP id 集合」對照
-  const ipCats = state.data.ipCategories || [];
-  const rolesUnderTop = new Set();
-  if (topIp && !roleIp) {
-    // 收集該頂層 IP 底下所有子角色 id
-    ipCats.forEach(c => { if (c.parent_id === topIp) rolesUnderTop.add(c.id); });
-    rolesUnderTop.add(topIp); // 自己也算(以防有商品直接掛在頂層)
-  }
-  // 建立「角色 IP → 該角色下所有系列 id 集合」對照
-  const seriesUnderRole = new Set();
-  if (roleIp && !seriesId) {
-    (state.data.series||[]).forEach(s => { if (s.ip_id === roleIp) seriesUnderRole.add(s.id); });
-  }
+  const catP  = state.data._pltFilterCat  || '';        // 品類:戒指/手鍊/耳環/項鍊
+  const top   = state.data._pltFilterTop || '';         // 大分類名
+  const mid   = state.data._pltFilterMid || '';         // 中分類名
+  const chr   = state.data._pltFilterChr || '';         // 角色名
+  const ser   = state.data._pltFilterSer || '';         // 系列名
+  const q     = (state.data._pltSearch || '').trim().toLowerCase();
 
   return all.filter(p => {
-    // 品類(獨立軸)
-    if (cat) {
+    if (catP) {
       const catObj = (state.data.categories||[]).find(c => c.id === p.category_id);
-      if (!catObj || catObj.name !== cat) return false;
+      if (!catObj || catObj.name !== catP) return false;
     }
-    // 系列(最精細)
-    if (seriesId) {
-      if (p.series_id !== seriesId) return false;
-    } else if (roleIp) {
-      // 沒選系列 → 只要商品的 series 屬於此角色即可,或商品直接掛此 IP
-      const belongs = seriesUnderRole.has(p.series_id) || p.ip_id === roleIp;
-      if (!belongs) return false;
-    } else if (topIp) {
-      // 沒選角色 → 只要商品的 ip 屬於此頂層或其任一子角色
-      if (!rolesUnderTop.has(p.ip_id)) return false;
-    }
+    const lv = _pltGetLevels(p);
+    if (top && lv.top !== top) return false;
+    if (mid && lv.mid !== mid) return false;
+    if (chr && lv.chr !== chr) return false;
+    if (ser && lv.ser !== ser) return false;
     if (q) {
-      const hay = `${p.name||''} ${p.sku||''} ${(state.data.series||[]).find(s=>s.id===p.series_id)?.name||''}`.toLowerCase();
+      const hay = `${p.name||''} ${p.sku||''} ${lv.ser||''}`.toLowerCase();
       if (!hay.includes(q)) return false;
     }
     return true;
@@ -23806,8 +23802,9 @@ window.modalAddPlate = async function(existing = null) {
   state.data._pltCart = existing?.items ? existing.items.map(i => ({...i})) : [];
   state.data._pltCurType = existing?.order_type || '臨單';
   state.data._pltFilterCat = '';
-  state.data._pltFilterTopIp = '';
-  state.data._pltFilterRoleIp = '';
+  state.data._pltFilterTop = '';
+  state.data._pltFilterMid = '';
+  state.data._pltFilterChr = '';
   state.data._pltFilterSer = '';
   state.data._pltSearch = '';
 
@@ -23849,16 +23846,18 @@ window.modalAddPlate = async function(existing = null) {
       </button>`).join('')}
     </div>
 
-    <!-- 分類 → 角色 → 系列(3 層級聯動)+ 搜尋 -->
+    <!-- 大分類 → 中分類 → 角色 → 系列(4 層級聯動,與商品資料庫邏輯相同)+ 搜尋 -->
     <div style="display:flex;gap:6px;margin-bottom:10px;flex-wrap:wrap">
-      <select id="plt-top-select" onchange="state.data._pltFilterTopIp=this.value;state.data._pltFilterRoleIp='';state.data._pltFilterSer='';window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:120px">
+      <select id="plt-top-select" onchange="state.data._pltFilterTop=this.value;state.data._pltFilterMid='';state.data._pltFilterChr='';state.data._pltFilterSer='';window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:110px">
         <option value="">全部分類</option>
-        ${(state.data.ipCategories||[]).filter(c=>!c.parent_id).map(c=>`<option value="${c.id}">${c.name}</option>`).join('')}
       </select>
-      <select id="plt-role-select" onchange="state.data._pltFilterRoleIp=this.value;state.data._pltFilterSer='';window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:120px">
+      <select id="plt-mid-select" onchange="state.data._pltFilterMid=this.value;state.data._pltFilterChr='';state.data._pltFilterSer='';window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:110px">
+        <option value="">全部中分類</option>
+      </select>
+      <select id="plt-role-select" onchange="state.data._pltFilterChr=this.value;state.data._pltFilterSer='';window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:110px">
         <option value="">全部角色</option>
       </select>
-      <select id="plt-series-select" onchange="state.data._pltFilterSer=this.value;window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:120px">
+      <select id="plt-series-select" onchange="state.data._pltFilterSer=this.value;window._pltRerender()" style="padding:5px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px;flex:1;min-width:110px">
         <option value="">全部系列</option>
       </select>
       <input id="plt-search-input" placeholder="搜尋品名/貨號" oninput="state.data._pltSearch=this.value;window._pltRerender()"
@@ -23993,38 +23992,47 @@ window._pltCartQty = function(idx, delta) {
   window._pltRerender();
 };
 
-// 依「頂層分類」聯動「角色」下拉;依「角色」聯動「系列」下拉
+// 依商品資料庫的 4 層邏輯(大→中→角色→系列),聯動 4 個下拉;選項限縮在既有商品範圍
 function _pltUpdateCascadeSelects() {
-  const topIp  = state.data._pltFilterTopIp || '';
-  const roleIp = state.data._pltFilterRoleIp || '';
-  const ipCats = state.data.ipCategories || [];
-  const allSeries = state.data.series || [];
+  const products = state.data.products || [];
+  const top = state.data._pltFilterTop || '';
+  const mid = state.data._pltFilterMid || '';
+  const chr = state.data._pltFilterChr || '';
+  const ser = state.data._pltFilterSer || '';
 
-  // 角色下拉:top 沒選 → 顯示全部子角色;top 有選 → 只顯示該 top 的 children
-  const roleSel = document.getElementById('plt-role-select');
-  if (roleSel) {
-    const roles = topIp
-      ? ipCats.filter(c => c.parent_id === topIp)
-      : ipCats.filter(c => c.parent_id);   // 有 parent 的就是角色
-    roleSel.innerHTML = `<option value="">全部角色</option>` +
-      roles.map(c => `<option value="${c.id}" ${roleIp===c.id?'selected':''}>${c.name}</option>`).join('');
-    roleSel.disabled = false;
-  }
+  // 逐層收集實際存在的名稱
+  const tops = new Set();
+  const mids = new Set();
+  const chrs = new Set();
+  const sers = new Set();
+  products.forEach(p => {
+    const lv = _pltGetLevels(p);
+    tops.add(lv.top);
+    if (!top || lv.top === top) {
+      mids.add(lv.mid);
+      if (!mid || lv.mid === mid) {
+        chrs.add(lv.chr);
+        if (!chr || lv.chr === chr) sers.add(lv.ser);
+      }
+    }
+  });
 
-  // 系列下拉:角色沒選 → 顯示全部;角色有選 → 只顯示該角色的系列
-  const serSel = document.getElementById('plt-series-select');
-  if (serSel) {
-    const series = roleIp
-      ? allSeries.filter(s => s.ip_id === roleIp)
-      : (topIp
-          ? allSeries.filter(s => {
-              const roleIds = new Set(ipCats.filter(c => c.parent_id === topIp).map(c => c.id));
-              return roleIds.has(s.ip_id);
-            })
-          : allSeries);
-    serSel.innerHTML = `<option value="">全部系列</option>` +
-      series.map(s => `<option value="${s.id}" ${state.data._pltFilterSer===s.id?'selected':''}>${s.name}</option>`).join('');
-  }
+  const sortNames = (set, last='(未') => Array.from(set).sort((a,b) => {
+    if (a.startsWith(last)) return 1;
+    if (b.startsWith(last)) return -1;
+    return a.localeCompare(b, 'zh-Hant');
+  });
+
+  const fill = (id, cur, list, placeholder) => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    el.innerHTML = `<option value="">${placeholder}</option>` +
+      list.map(n => `<option value="${n}" ${cur===n?'selected':''}>${n}</option>`).join('');
+  };
+  fill('plt-top-select',    top, sortNames(tops), '全部分類');
+  fill('plt-mid-select',    mid, sortNames(mids), '全部中分類');
+  fill('plt-role-select',   chr, sortNames(chrs), '全部角色');
+  fill('plt-series-select', ser, sortNames(sers), '全部系列');
 }
 
 function _pltUpdateCartSummary() {
