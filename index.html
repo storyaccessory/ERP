@@ -4482,6 +4482,28 @@ async function _bipDoImport() {
       if (error) { errors.push(`第 ${r._row} 列新增失敗 ${sku}:${error.message}`); continue; }
       productId = inserted?.id;
       created++;
+
+      // 新品第一次匯入:依品類自動帶入預設零件到 BOM(項鍊→圓扣頭;手鍊→圓扣頭+ST圓牌延長鍊;耳環→耳針+耳後扣)
+      if (catId) {
+        const catName = (state.data.categories||[]).find(c => c.id === catId)?.name || '';
+        const rule = (window.PART_DEFAULTS_BY_CAT||[]).find(r => r.match.test(catName));
+        if (rule) {
+          const partInserts = [];
+          const missingParts = [];
+          rule.parts.forEach(spec => {
+            const part = _findPartByKeyword(spec.nameKw, spec.spec);
+            if (part) partInserts.push({ product_id: productId, part_id: part.id, qty: spec.qty });
+            else missingParts.push(spec.nameKw + (spec.spec?' _ '+spec.spec:''));
+          });
+          if (partInserts.length) {
+            const { error: peErr } = await db.from('product_parts').insert(partInserts);
+            if (peErr) errors.push(`第 ${r._row} 列預設零件寫入失敗:${peErr.message}`);
+          }
+          if (missingParts.length) {
+            errors.push(`第 ${r._row} 列(${sku})預設零件在零件庫找不到:${missingParts.join('、')}`);
+          }
+        }
+      }
     }
 
     if (productId && price !== null && (!existing || priceChanged)) {
