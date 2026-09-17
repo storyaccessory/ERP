@@ -22183,6 +22183,32 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
     { label:'取消', onclick: closeModal },
   ], { confirmClose: true });
 
+  // 找出「上一份日誌」的 in_progress 內容(同一使用者,填 log 日期之前最近的一份)
+  // — 用來自動帶入「🔄 進行中 / 待跟進」欄位,方便延續追蹤
+  const _pickPrevInProgress = () => {
+    if (existing) return [];  // 編輯既有日誌就不要蓋掉
+    const hist = (jd.history||[])
+      .filter(l => l.user_id === myId && l.date && l.date < logDate)
+      .sort((a,b) => (b.date||'').localeCompare(a.date||''));
+    for (const l of hist) {
+      const raw = l.fields?.in_progress;
+      if (!raw) continue;
+      if (Array.isArray(raw)) {
+        const items = raw.filter(i => i?.desc);
+        if (items.length) return items.map(i => ({ desc: i.desc, qty: i.qty||'', _carried: true, _from: l.date }));
+      } else if (typeof raw === 'string' && raw.trim()) {
+        let parts = raw.split(/[\n、]/).map(s => s.trim()).filter(Boolean);
+        if (parts.length === 1) {
+          const bySpace = raw.split(/\s{2,}/).map(s => s.trim()).filter(Boolean);
+          if (bySpace.length > 1) parts = bySpace;
+        }
+        if (parts.length) return parts.map(desc => ({ desc, qty:'', _carried: true, _from: l.date }));
+      }
+    }
+    return [];
+  };
+  const carriedInProgress = _pickPrevInProgress();
+
   // 預填現有資料
   setTimeout(() => {
     tpl.fields.forEach(f => {
@@ -22201,6 +22227,10 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
           items = parts.map(desc => ({ desc, qty: '' }));
         }
       }
+      // 🔄 進行中 / 待跟進:新填日誌時,沒既有資料就自動帶入上一份日誌的待跟進項目
+      if (f.key === 'in_progress' && !existing && items.length === 0 && carriedInProgress.length) {
+        items = carriedInProgress;
+      }
       // 沒資料時給一個空行
       if (items.length === 0) items = [{ desc: '', qty: '' }];
       items.forEach((item, idx) => {
@@ -22208,6 +22238,17 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
         const ph = (idx === 0 && !item.desc) ? (f.placeholder || '描述內容') : '描述內容';
         window._jnlAddRow(f.key, !!f.hasQty, item.desc||'', item.qty||'', ph);
       });
+      // 若是自動帶入的,加個小提示條在欄位頂端
+      if (f.key === 'in_progress' && !existing && carriedInProgress.length) {
+        const container = document.getElementById(`jnl-rows-${f.key}`);
+        if (container && !container.querySelector('.jnl-carry-hint')) {
+          const hint = document.createElement('div');
+          hint.className = 'jnl-carry-hint';
+          hint.style.cssText = 'font-size:11px;color:#e65100;background:#fff8e1;padding:5px 10px;border-radius:6px;margin-bottom:6px;border-left:3px solid #f57c00';
+          hint.innerHTML = `↩ 已自動帶入 <b>${carriedInProgress[0]._from}</b> 的待跟進項目 · 完成的可以刪掉、仍在追的留著`;
+          container.insertBefore(hint, container.firstChild);
+        }
+      }
     });
   }, 60);
 };
