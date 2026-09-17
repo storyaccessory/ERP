@@ -23466,10 +23466,11 @@ function _pltRenderDaily(records, TYPE_TAG, COLOR_TAG) {
       const isOpen = expanded[r.id];
       return `<div style="border-bottom:1px solid var(--border)">
         <div style="padding:12px 16px;display:flex;align-items:center;gap:12px;justify-content:space-between;flex-wrap:wrap;cursor:pointer" onclick="window._pltToggleDaily('${r.id}')">
-          <div style="display:flex;align-items:center;gap:10px">
+          <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
             <span style="font-size:11px;color:var(--muted);width:12px">${isOpen?'▼':'▶'}</span>
             <span style="font-size:15px;font-weight:600;color:var(--accent-dark);font-family:monospace">${r.invoice_date||'—'}</span>
             <span style="font-size:12px;color:var(--muted)">${items.length} 項 · ${totalQty} 件</span>
+            ${r.notes?`<span style="font-size:11px;color:#666;background:#fffde7;padding:1px 8px;border-radius:8px;border:1px solid #ffe082" title="備註">📝 ${r.notes}</span>`:''}
           </div>
           <div style="display:flex;align-items:center;gap:8px" onclick="event.stopPropagation()">
             ${status}
@@ -23958,11 +23959,12 @@ window.modalAddPlate = async function(existing = null) {
   window._pltRerender = rerender;
 
   showModal(id ? '編輯電鍍單' : '建立電鍍單', `
-    <!-- 頂:日期(單號改在每項填) -->
+    <!-- 頂:日期 + 備註(單號改在每項填) -->
     <div style="display:flex;gap:8px;margin-bottom:10px;flex-wrap:wrap;align-items:center">
       <input class="form-control" id="plt-date" type="date" value="${existing?.invoice_date||today}" style="width:160px">
-      <span style="font-size:11px;color:var(--muted)">廠商單號 & 單價在「電鍍金額填寫」清單裡逐項填(廠商回單後)</span>
+      <input class="form-control" id="plt-notes" value="${(existing?.notes||'').replace(/"/g,'&quot;')}" placeholder="備註(可填預先單號、送料人等)" style="flex:1;min-width:200px">
     </div>
+    <div style="font-size:11px;color:var(--muted);margin:-4px 0 8px">廠商單號 & 單價在「電鍍金額填寫」清單裡逐項填(廠商回單後)</div>
 
     <!-- 送料類型 + 品類 tag(同尺寸,並列) -->
     <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center" id="plt-type-tags">
@@ -24042,6 +24044,7 @@ window.modalAddPlate = async function(existing = null) {
         year_month: ym2,
         invoice_date: date,
         order_type: state.data._pltCurType || null,
+        notes: document.getElementById('plt-notes')?.value.trim() || null,
         items: itemsData, total,
       };
       if (id) {
