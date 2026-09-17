@@ -23708,8 +23708,12 @@ function _pltFilterProducts() {
     if (chr && lv.chr !== chr) return false;
     if (ser && lv.ser !== ser) return false;
     if (q) {
-      const hay = `${p.name||''} ${p.sku||''} ${lv.ser||''}`.toLowerCase();
-      if (!hay.includes(q)) return false;
+      // 用空白/全形空白拆多關鍵字,每個關鍵字都要能找到才通過(AND 邏輯)
+      // 例:"學院 美樂蒂" 會同時要求 hay 含「學院」和「美樂蒂」
+      // hay 涵蓋:品名、貨號、大分類、中分類、角色、系列
+      const hay = `${p.name||''} ${p.sku||''} ${lv.top||''} ${lv.mid||''} ${lv.chr||''} ${lv.ser||''}`.toLowerCase();
+      const words = q.split(/[\s　]+/).filter(Boolean);
+      for (const w of words) { if (!hay.includes(w)) return false; }
     }
     return true;
   });
