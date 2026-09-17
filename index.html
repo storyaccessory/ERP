@@ -23756,9 +23756,9 @@ function _pltProductsPanel() {
       const cat = (state.data.categories||[]).find(c => c.id === p.category_id)?.name;
       const seriesName = p.series?.name || '';
       return `<button onclick="window._pltCartAdd('${p.id}')" style="width:100%;text-align:left;padding:8px 12px;border:1px solid var(--border);border-radius:6px;background:#fff;cursor:pointer;transition:all .1s;margin-bottom:4px;display:flex;align-items:center;gap:10px" onmouseover="this.style.background='#e8f5e9';this.style.borderColor='#66bb6a'" onmouseout="this.style.background='#fff';this.style.borderColor='var(--border)'">
+        ${cat?`<span style="font-size:11px;color:#e65100;background:#fff3e0;padding:2px 8px;border-radius:10px;flex-shrink:0;min-width:44px;text-align:center">${cat}</span>`:'<span style="min-width:44px"></span>'}
+        ${seriesName?`<span style="font-size:11px;color:#546e7a;background:#e8f5f4;padding:2px 8px;border-radius:10px;flex-shrink:0">${seriesName}</span>`:'<span></span>'}
         <span style="font-size:13px;font-weight:600;color:var(--text);flex:1">${p.name}</span>
-        ${seriesName?`<span style="font-size:11px;color:#546e7a;background:#e8f5f4;padding:2px 8px;border-radius:10px">${seriesName}</span>`:''}
-        ${cat?`<span style="font-size:11px;color:#e65100;background:#fff3e0;padding:2px 8px;border-radius:10px">${cat}</span>`:''}
       </button>`;
     }).join('')}
     ${list.length > LIMIT ? `<div style="text-align:center;font-size:11px;color:var(--muted);padding:8px">顯示 ${LIMIT} / ${list.length},請用篩選/搜尋縮小範圍</div>` : `<div style="text-align:center;font-size:11px;color:var(--muted);padding:6px">共 ${list.length} 個商品</div>`}
