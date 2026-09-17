@@ -23959,12 +23959,12 @@ window.modalAddPlate = async function(existing = null) {
   window._pltRerender = rerender;
 
   showModal(id ? '編輯電鍍單' : '建立電鍍單', `
-    <!-- 頂:日期 + 備註(必填,單號改在每項填) -->
+    <!-- 頂:日期 + 備註(選填,單號改在每項填) -->
     <div style="display:flex;gap:8px;margin-bottom:6px;flex-wrap:wrap;align-items:center">
       <input class="form-control" id="plt-date" type="date" value="${existing?.invoice_date||today}" style="width:160px">
-      <input class="form-control" id="plt-notes" value="${(existing?.notes||'').replace(/"/g,'&quot;')}" placeholder="備註 * (填單號、送料人、註記等)" style="flex:1;min-width:200px;border-color:#ffab91">
+      <input class="form-control" id="plt-notes" value="${(existing?.notes||'').replace(/"/g,'&quot;')}" placeholder="備註(選填 · 可填單號、送料人、註記等)" style="flex:1;min-width:200px">
     </div>
-    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">備註為必填 · 廠商單號 & 單價在「電鍍金額填寫」清單裡逐項填(廠商回單後)</div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">廠商單號 & 單價在「電鍍金額填寫」清單裡逐項填(廠商回單後)</div>
 
     <!-- 送料類型 + 品類 tag(同尺寸,並列) -->
     <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap;align-items:center" id="plt-type-tags">
@@ -24018,8 +24018,6 @@ window.modalAddPlate = async function(existing = null) {
     { label: id?'儲存':'建立電鍍單', primary:true, onclick: async () => {
       const date = document.getElementById('plt-date').value;
       if (!date) { showToast('請填送料日期','error'); return; }
-      const notes = document.getElementById('plt-notes')?.value.trim();
-      if (!notes) { showToast('請填備註(必填)','error'); document.getElementById('plt-notes')?.focus(); return; }
       const ym2 = date.slice(0,7);
       const cart = state.data._pltCart || [];
       if (!cart.length) { showToast('請至少加入一筆品項','error'); return; }
