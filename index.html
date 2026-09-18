@@ -24831,7 +24831,12 @@ function renderCalendar() {
   // 手機(≤700px)預設用清單檢視(月曆太擠);只有使用者明確指定時才用 month
   const _isMobile = typeof window !== 'undefined' && window.innerWidth <= 700;
   const calView       = state.data.calView       || (_isMobile ? 'list' : 'month'); // 'month' | 'list'
-  const calTypeFilter = state.data.calTypeFilter || null;    // null | event_type key
+  // 分類篩選改為多選:陣列(空=全部)
+  if (!Array.isArray(state.data.calTypeFilter)) {
+    // 相容舊值(字串 or null)
+    state.data.calTypeFilter = state.data.calTypeFilter ? [state.data.calTypeFilter] : [];
+  }
+  const calTypeFilter = state.data.calTypeFilter;    // string[]
   const myId = state.user?.id;
   let allEvents = state.data.calEvents || [];
   // Apply 我的/全公司 filter — 主任務指派給我 或 任一未完成子任務指派給我 都算「我的」
@@ -24843,15 +24848,15 @@ function renderCalendar() {
         return subs.some(s => !s.done && s.text && s.assignee_id === myId);
       })
     : allEvents;
-  // Apply 分類 filter
-  if (calTypeFilter) events = events.filter(ev => ev.event_type === calTypeFilter);
+  // Apply 分類 filter(多選:命中任一即通過;空=全部)
+  if (calTypeFilter.length) events = events.filter(ev => calTypeFilter.includes(ev.event_type));
   let calBookings = state.data.calBookings || [];
-  // 體驗預約：切「我的」時，只顯示負責人（接待人員 staff_id）為自己的預約
+  // 體驗預約:切「我的」時,只顯示負責人(接待人員 staff_id)為自己的預約
   if (calFilter === 'mine') calBookings = calBookings.filter(b => b.staff_id === myId);
-  // 分類篩選:選了其他分類(非 store/門市) → 體驗預約清空
-  if (calTypeFilter && calTypeFilter !== 'store') calBookings = [];
+  // 分類篩選:若有指定分類且沒包含 store → 體驗預約清空
+  if (calTypeFilter.length && !calTypeFilter.includes('store')) calBookings = [];
 
-  // 客服疊加層:套「我的」(建立者或子任務負責人) 與分類篩選(只在 cs/未指定 時顯示)
+  // 客服疊加層:套「我的」(建立者或子任務負責人) 與分類篩選(只在有 cs 時顯示)
   let calCS = state.data.calCS || [];
   if (calFilter === 'mine') {
     calCS = calCS.filter(c => {
@@ -24860,7 +24865,7 @@ function renderCalendar() {
       return subs.some(s => s.assignee_id === myId);
     });
   }
-  if (calTypeFilter && calTypeFilter !== 'cs') calCS = [];
+  if (calTypeFilter.length && !calTypeFilter.includes('cs')) calCS = [];
 
   // build a map: dateStr → events[]
   const eventMap = {};
@@ -25112,7 +25117,7 @@ function renderCalendar() {
     const subs = Array.isArray(ev.subtasks) ? ev.subtasks : [];
     return subs.some(s => !s.done && s.text && s.assignee_id === myId);
   });
-  if (calTypeFilter) upSrc = upSrc.filter(ev => ev.event_type === calTypeFilter);
+  if (calTypeFilter.length) upSrc = upSrc.filter(ev => calTypeFilter.includes(ev.event_type));
   // 「實際排序日期」:主任務 vs 任一未完成子任務 due,取較早
   const _earliestU = ev => {
     const cands = [];
@@ -25181,12 +25186,12 @@ function renderCalendar() {
           ${cells.join('')}
         </div>
         <div style="margin-top:10px;display:flex;gap:6px;align-items:center;${_isMobile?'overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch;padding-bottom:4px':'flex-wrap:wrap'}">
-          <span onclick="state.data.calTypeFilter=null;renderApp()"
-            style="font-size:10px;border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer;border:1px solid ${!calTypeFilter?'var(--accent)':'var(--border)'};background:${!calTypeFilter?'var(--accent)':'#f5f5f5'};color:${!calTypeFilter?'#fff':'#888'};flex-shrink:0;white-space:nowrap">全部</span>
+          <span onclick="state.data.calTypeFilter=[];renderApp()"
+            style="font-size:10px;border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer;border:1px solid ${!calTypeFilter.length?'var(--accent)':'var(--border)'};background:${!calTypeFilter.length?'var(--accent)':'#f5f5f5'};color:${!calTypeFilter.length?'#fff':'#888'};flex-shrink:0;white-space:nowrap" title="清除所有篩選">全部</span>
           ${Object.entries(getCalEventTypes()).map(([k,t])=>{
-            const active = calTypeFilter === k;
-            return `<span onclick="state.data.calTypeFilter=${active?'null':`'${k}'`};renderApp()"
-              style="font-size:10px;border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer;border:1px solid ${active?t.color:'transparent'};background:${active?t.color:t.bg};color:${active?'#fff':t.color};box-shadow:${active?`0 0 0 2px ${t.color}33`:''};transition:.15s;flex-shrink:0;white-space:nowrap">● ${t.label}</span>`;
+            const active = calTypeFilter.includes(k);
+            return `<span onclick="window._calToggleTypeFilter('${k}')"
+              style="font-size:10px;border-radius:4px;padding:3px 8px;font-weight:600;cursor:pointer;border:1px solid ${active?t.color:'transparent'};background:${active?t.color:t.bg};color:${active?'#fff':t.color};box-shadow:${active?`0 0 0 2px ${t.color}33`:''};transition:.15s;flex-shrink:0;white-space:nowrap" title="點擊切換(可複選)">${active?'✓':'●'} ${t.label}</span>`;
           }).join('')}
         </div>` : `
         <!-- 清單視圖 -->
@@ -26059,6 +26064,16 @@ window._calClearAll = function() {
 };
 
 // 在「檢視事項」modal 即時切換子任務完成狀態
+// 行事曆:分類篩選 tag 多選切換
+window._calToggleTypeFilter = function(key) {
+  if (!Array.isArray(state.data.calTypeFilter)) state.data.calTypeFilter = [];
+  const arr = state.data.calTypeFilter;
+  const idx = arr.indexOf(key);
+  if (idx >= 0) arr.splice(idx, 1);
+  else arr.push(key);
+  renderApp();
+};
+
 window._calToggleSubtask = async function(evId, subIdx, checked) {
   // 找事項:先看本地快取,沒有就直接從 DB 抓一筆
   let ev = (state.data.calEvents||[]).find(e=>e.id===evId);
