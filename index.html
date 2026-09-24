@@ -29809,6 +29809,23 @@ function renderPurchases() {
     (r.category||'').toLowerCase().includes(searchQ)
   );
 
+  // 排序:狀態 → 日期(新→舊) → 品項名(相近的放一起)
+  const STATUS_ORDER = { '待指派':0, '待採購':1, '已採購':2, '已到貨':3, '結案':4, '暫不採購':5 };
+  filtered = [...filtered].sort((a,b) => {
+    const sa = STATUS_ORDER[a.status] ?? 99;
+    const sb = STATUS_ORDER[b.status] ?? 99;
+    if (sa !== sb) return sa - sb;
+    // 日期新→舊(當天不同張單看下一階排序)
+    const da = a.request_date || '';
+    const db2 = b.request_date || '';
+    if (da !== db2) return db2.localeCompare(da);
+    // 同一天的類別排在一起,再依品項名稱排(讓「類似品相」自然靠攏)
+    const ca = a.category || '';
+    const cb = b.category || '';
+    if (ca !== cb) return ca.localeCompare(cb, 'zh-TW');
+    return (a.item_name||'').localeCompare(b.item_name||'', 'zh-TW');
+  });
+
   const cnt = s => list.filter(r => r.status === s).length;
   const stats = { 待指派: cnt('待指派'), 待採購: cnt('待採購'), 已採購: cnt('已採購'), 已到貨: cnt('已到貨'), 結案: cnt('結案'), 暫不採購: cnt('暫不採購') };
 
