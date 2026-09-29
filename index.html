@@ -9428,11 +9428,21 @@ async function modalEditVendor(v) {
         </div>
       </div>
       <div class="form-group"><label>地址</label><input class="form-control" id="v-addr" value="${v.address||''}"></div>
+      <div style="font-size:12px;font-weight:600;color:var(--accent-dark);margin-top:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">👤 業務聯絡</div>
       <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group"><label>聯絡人</label><input class="form-control" id="v-contact" value="${v.contact_name||''}"></div>
         <div class="form-group"><label>電話</label><input class="form-control" id="v-phone" value="${v.contact_phone||''}" oninput="window._cleanPhone(this)"></div>
       </div>
-      <div class="form-group"><label>電子發票 Mail</label><input class="form-control" id="v-email" value="${v.email||v.contact_email||''}"></div>
+      <div class="form-group"><label>Mail</label><input class="form-control" id="v-contact-email" type="email" value="${v.contact_email||''}" placeholder="聯絡人 email"></div>
+
+      <div style="font-size:12px;font-weight:600;color:var(--accent-dark);margin-top:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">💰 會計聯絡</div>
+      <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><label>會計聯絡人</label><input class="form-control" id="v-acc-contact" value="${v.accounting_contact||''}"></div>
+        <div class="form-group"><label>會計電話</label><input class="form-control" id="v-acc-phone" value="${v.accounting_phone||''}" oninput="window._cleanPhone(this)"></div>
+      </div>
+      <div class="form-group"><label>會計 Mail</label><input class="form-control" id="v-acc-email" type="email" value="${v.accounting_email||''}" placeholder="會計 email"></div>
+
+      <div class="form-group"><label>電子發票 Mail</label><input class="form-control" id="v-email" value="${v.email||''}" placeholder="電子發票收件 email"></div>
       <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group" style="position:relative">
           <label>往來銀行</label>
@@ -9457,6 +9467,10 @@ async function modalEditVendor(v) {
         address: document.getElementById('v-addr').value.trim() || null,
         contact_name: document.getElementById('v-contact').value.trim() || null,
         contact_phone: document.getElementById('v-phone').value.trim() || null,
+        contact_email: document.getElementById('v-contact-email').value.trim() || null,
+        accounting_contact: document.getElementById('v-acc-contact').value.trim() || null,
+        accounting_phone: document.getElementById('v-acc-phone').value.trim() || null,
+        accounting_email: document.getElementById('v-acc-email').value.trim() || null,
         email: document.getElementById('v-email').value.trim() || null,
         bank_name: document.getElementById('v-bank').value.trim() || null,
         bank_code: document.getElementById('v-bank-code').value.trim() || null,
