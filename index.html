@@ -18961,8 +18961,16 @@ function renderSettingsVendors() {
       + '<td style="padding:6px 8px;font-size:12px;color:var(--muted);">' + (v.name||'') + '</td>'
       + '<td style="padding:6px 8px;font-size:12px;">' + (v.tax_id||'') + '</td>'
       + '<td style="padding:6px 8px;font-size:12px;">' + typeLabel + '</td>'
-      + '<td style="padding:6px 8px;font-size:12px;">' + (v.contact_name||'') + '</td>'
-      + '<td style="padding:6px 8px;font-size:12px;">' + (v.contact_phone||'') + '</td>'
+      + '<td style="padding:6px 8px;font-size:12px;">'
+        + (v.contact_name ? '<div style="font-weight:600">'+v.contact_name+'</div>' : '')
+        + (v.contact_phone ? '<div style="color:var(--muted);font-size:11px">📞 '+v.contact_phone+'</div>' : '')
+        + (v.contact_email ? '<div style="color:var(--muted);font-size:11px">✉ '+v.contact_email+'</div>' : '')
+      + '</td>'
+      + '<td style="padding:6px 8px;font-size:12px;">'
+        + (v.accounting_contact ? '<div style="font-weight:600">'+v.accounting_contact+'</div>' : '')
+        + (v.accounting_phone ? '<div style="color:var(--muted);font-size:11px">📞 '+v.accounting_phone+'</div>' : '')
+        + (v.accounting_email ? '<div style="color:var(--muted);font-size:11px">✉ '+v.accounting_email+'</div>' : '')
+      + '</td>'
       + '<td style="padding:6px 8px;font-size:12px;">' + (v.bank_name||'') + (v.bank_code ? '<br><span style="color:var(--accent);font-size:11px;font-weight:600">'+v.bank_code+'</span>' : '') + '</td>'
       + '<td style="padding:6px 8px;font-size:12px;">' + (v.bank_account||'') + '</td>'
       + '<td style="padding:6px 8px;font-size:12px;color:var(--muted);">' + (v.email||'') + '</td>'
@@ -18988,11 +18996,11 @@ function renderSettingsVendors() {
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">公司簡稱</th>'
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">統編</th>'
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">類型</th>'
-    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">聯絡人</th>'
-    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">電話</th>'
+    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">👤 業務聯絡</th>'
+    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">💰 會計聯絡</th>'
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">往來銀行</th>'
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">帳號</th>'
-    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">MAIL</th>'
+    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">電子發票</th>'
     + '<th style="padding:6px 8px;"></th>'
     + '</tr></thead>'
     + '<tbody id="vendor-sort-tbody">' + (rows || '<tr><td colspan="12" style="text-align:center;padding:20px;color:var(--muted);">尚無廠商資料，請點「+ 新增廠商」</td></tr>') + '</tbody>'
