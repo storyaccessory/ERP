@@ -12175,7 +12175,7 @@ async function _devUpdateEventDateToNextTask(projectId) {
     designer ? `主要設計師:${designer}` : null,
     ...keyMilestones,
     launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('<br>');
 
   const eventIds = [...new Set(tasksAll.map(t => t.calendar_event_id).filter(Boolean))];
   for (const evId of eventIds) {
@@ -12630,11 +12630,21 @@ window._devEditProject = async function(projectId) {
   ]);
 };
 
-// 重建行事曆事件(拿掉舊的,依現在的 tasks 重建)
+// 重建行事曆事件(拿掉舊的,並把 dev_tasks 步驟名/is_milestone 從模板同步再重建)
 window._devRebuildCalendar = async function(id) {
   const p = (state.data.dev||[]).find(x => x.id === id);
   if (!p) return;
-  if (!confirm(`重建行事曆事件?\n將先刪除舊的,再依目前所有任務重新建立。`)) return;
+  if (!confirm(`重建行事曆事件?\n將先刪除舊的行事曆,並把任務的步驟名、里程碑狀態依最新模板同步,再重建行事曆事件。`)) return;
+
+  // 先把 dev_tasks 的 step_name / is_milestone 從模板同步(避免任務名稱過時)
+  for (const t of (p.dev_tasks||[])) {
+    const stepDef = _findStepDef(t.pipeline, t.step_key);
+    if (!stepDef) continue;
+    const upd = {};
+    if (stepDef.name && stepDef.name !== t.step_name) upd.step_name = stepDef.name;
+    if ((!!stepDef.milestone) !== (!!t.is_milestone)) upd.is_milestone = !!stepDef.milestone;
+    if (Object.keys(upd).length) await db.from('dev_tasks').update(upd).eq('id', t.id);
+  }
 
   // 刪除舊 events
   const oldIds = [...new Set((p.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
@@ -12642,9 +12652,11 @@ window._devRebuildCalendar = async function(id) {
     await db.from('calendar_events').delete().in('id', oldIds);
   }
 
-  // 重建 · 用目前所有 tasks(含已完成)
-  await _buildDevCalendarEvents(p, p.dev_tasks||[], p.name);
-  showToast('✓ 行事曆事件已重建');
+  // 重新讀取 tasks(拿到剛更新的 step_name)
+  await loadDev();
+  const p2 = (state.data.dev||[]).find(x => x.id === id);
+  await _buildDevCalendarEvents(p2, p2.dev_tasks||[], p2.name);
+  showToast('✓ 已同步任務名稱並重建行事曆');
   await loadDev();
   try { await loadCalendarEvents?.(); } catch(e) {}
   renderApp();
@@ -13117,15 +13129,19 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
   const allActiveUserIds = (state.data.users||[]).filter(u => u.is_active !== false).map(u => u.id);
 
   // 建 subtasks:多 pipeline 才加 [純銀]/[合金]/[周邊] 前綴
+  // step_name 從最新模板取(避免舊資料落後);done 從 dev_task 狀態帶
   const subtasks = tasks
     .sort((a,b) => (a.order_num||0) - (b.order_num||0))
     .map(t => {
       const plLabel = PIPELINE_TEMPLATES[t.pipeline]?.label?.replace(/^[🥈🥇🎁]\s*/,'') || t.pipeline;
       const prefix = hasMultiPipeline ? `[${plLabel}] ` : '';
+      // 從模板取最新的 step_name(避免 DB 存的是舊版名稱)
+      const stepDef = _findStepDef(t.pipeline, t.step_key);
+      const stepName = stepDef?.name || t.step_name;
       return {
         id: `dev_${t.id}`,
-        text: `${t.is_milestone?'🎯 ':''}${prefix}${t.step_name}`,
-        done: false,
+        text: `${t.is_milestone?'🎯 ':''}${prefix}${stepName}`,
+        done: t.status === '完成',
         due_date: t.due_date,
         dev_task_id: t.id,
         dev_project_id: project.id,
@@ -13146,12 +13162,19 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
     designer ? `主要設計師:${designer}` : null,
     ...keyMilestones,
     launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
-  ].filter(Boolean).join('\n');
+  ].filter(Boolean).join('<br>');
+
+  // 選 event_type:優先用 DB 裡標籤是「新品」的自訂分類,沒有就 fallback 到 'dev'
+  const typeMap = getCalEventTypes();
+  let evType = 'dev';
+  for (const [k, v] of Object.entries(typeMap)) {
+    if (v.label === '新品' || v.label === '新品上市') { evType = k; break; }
+  }
 
   // 建 1 個 event · 標題就是系列名稱 · 落在上市日單日
   const payload = {
     title: projectName,
-    event_type: 'dev',
+    event_type: evType,
     event_date: launchDate,
     start_date: launchDate,
     end_date: launchDate,
