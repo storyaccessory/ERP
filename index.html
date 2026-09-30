@@ -11756,7 +11756,54 @@ function _renderDevModalBody() {
         ${d.launch_date && earliestOverall && d.launch_date < earliestOverall ? `<span style="color:#c62828;margin-left:8px">⚠ 你的上市日 ${d.launch_date} 早於最快可上市</span>` : ''}
         ${d.launch_date && earliestOverall && d.launch_date >= earliestOverall ? `<span style="color:#2e7d32;margin-left:8px">✓ 上市日 ${d.launch_date} 有 buffer</span>` : ''}
       </div>
-    </div>` : ''}
+    </div>
+
+    <!-- 明細預覽:每條 pipeline 每個主線任務 -->
+    <div style="background:#fff;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden">
+      <div style="padding:8px 14px;background:#f5f5f5;font-size:12px;font-weight:700;color:var(--accent-dark);display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="(function(el){const c=el.nextElementSibling;c.style.display=c.style.display==='none'?'block':'none';el.querySelector('.arrow').textContent=c.style.display==='none'?'▶':'▼'})(this)">
+        <span>📋 任務明細預覽(建立前可再檢查)</span>
+        <span class="arrow" style="font-size:11px">▼</span>
+      </div>
+      <div style="display:block;max-height:400px;overflow-y:auto">
+        ${d.pipelines.map(pl => {
+          const t = PIPELINE_TEMPLATES[pl];
+          const { dates } = _calcMainDates(pl, d.start_date);
+          return `
+            <div style="padding:6px 14px;background:${t.color}15;border-top:1px solid var(--border);font-size:12px;font-weight:700;color:${t.color}">
+              ${t.label} · 共 ${dates.length} 步主線
+            </div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <thead style="background:#fafafa;color:var(--muted);font-size:11px">
+                <tr>
+                  <th style="padding:4px 8px;text-align:left;width:30px">#</th>
+                  <th style="padding:4px 8px;text-align:left">步驟</th>
+                  <th style="padding:4px 8px;text-align:left;width:100px">負責人</th>
+                  <th style="padding:4px 8px;text-align:left;width:90px">預計完成</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${dates.map((step, i) => {
+                  let name = step.assignee_name;
+                  if (step.assignee_key === 'factory_owner') name = d.factory_owner_name || '(未選發包人)';
+                  return `<tr style="border-bottom:1px solid #f5f5f5">
+                    <td style="padding:4px 8px;color:var(--muted);text-align:center">${i+1}</td>
+                    <td style="padding:4px 8px">
+                      ${step.milestone?'<span style="color:#c62828;font-weight:700;margin-right:4px">🎯</span>':''}
+                      ${step.name}
+                      ${step.issue_design_number?'<span style="color:#1565c0;font-size:10px;margin-left:4px">📌 發圖號</span>':''}
+                      ${step.parallel?'<span style="background:#e3f2fd;color:#1565c0;font-size:10px;padding:1px 5px;border-radius:8px;margin-left:4px">並行</span>':''}
+                    </td>
+                    <td style="padding:4px 8px;color:${name==='(未選發包人)'?'#c62828':'var(--text)'}">${name||'—'}</td>
+                    <td style="padding:4px 8px;font-family:monospace;color:${step.milestone?'#c62828':'var(--accent-dark)'};font-weight:${step.milestone?700:400}">${step.expected_date}</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          `;
+        }).join('')}
+      </div>
+    </div>
+    ` : ''}
 
     <div class="form-group">
       <label>備註(選填)</label>
