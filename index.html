@@ -12162,6 +12162,7 @@ async function _devUpdateEventDateToNextTask(projectId) {
   const daysToLaunch = launchDate ? _daysDiff(today, launchDate) : null;
 
   const designer = tasksAll.find(t => t.step_key === 'design_draft' || t.step_key === 'item_design')?.assignee_name;
+  const variantCount = (p.dev_variants||[]).filter(v => !v.cancelled_at).length;
   const keyMilestones = tasksAll
     .filter(t => t.is_milestone || ['design_lock','design_confirm','mail_review','system_submit'].includes(t.step_key))
     .sort((a,b) => (a.due_date||'').localeCompare(b.due_date||''))
@@ -12173,6 +12174,7 @@ async function _devUpdateEventDateToNextTask(projectId) {
   const description = [
     daysToLaunch !== null && daysToLaunch >= 0 ? `⏰ 距上市 ${daysToLaunch} 天 · 未完成 ${undone.length} 項${overdue.length?` · ⚠ 逾期 ${overdue.length} 項`:''}` : null,
     designer ? `主要設計師:${designer}` : null,
+    `系列開發數量:${variantCount} 個品相`,
     ...keyMilestones,
     launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
   ].filter(Boolean).join('<br>');
@@ -13149,8 +13151,9 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
       };
     });
 
-  // 產生 description:主要設計師 + 關鍵里程碑日期
+  // 產生 description:主要設計師 + 品相數 + 關鍵里程碑日期
   const designer = tasks.find(t => t.step_key === 'design_draft' || t.step_key === 'item_design')?.assignee_name;
+  const variantCount = (project.dev_variants||[]).filter(v => !v.cancelled_at).length;
   const keyMilestones = tasks
     .filter(t => t.is_milestone || t.step_key === 'design_lock' || t.step_key === 'design_confirm' || t.step_key === 'mail_review' || t.step_key === 'system_submit')
     .sort((a,b) => (a.due_date||'').localeCompare(b.due_date||''))
@@ -13160,6 +13163,7 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
     });
   const description = [
     designer ? `主要設計師:${designer}` : null,
+    `系列開發數量:${variantCount} 個品相`,
     ...keyMilestones,
     launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
   ].filter(Boolean).join('<br>');
