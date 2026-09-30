@@ -11229,22 +11229,22 @@ const PIPELINE_TEMPLATES = {
     color: '#78909c',
     main: [
       { key:'design_draft',      name:'設計圖',              days:10, assignee_name:'劉怡汝' },
-      { key:'design_lock',       name:'設計定稿&mail送審',   days:2,  assignee_name:'郭子媽', issue_design_number:true },
-      { key:'mail_review',       name:'郵件送審追蹤',        days:5,  assignee_name:'郭子媽' },
-      { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子媽' },
+      { key:'design_lock',       name:'設計定稿&mail送審',   days:2,  assignee_name:'郭子嫣', issue_design_number:true },
+      { key:'mail_review',       name:'郵件送審追蹤',        days:5,  assignee_name:'郭子嫣' },
+      { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子嫣' },
       { key:'design_approved',   name:'設計圖審過',          days:5,  assignee_name:'蔡采玲', milestone:true },
-      { key:'modeling',          name:'建模',                days:3,  assignee_name:'郭子媽' },
+      { key:'modeling',          name:'建模',                days:3,  assignee_name:'郭子嫣' },
       { key:'model_approved',    name:'蠟模確認 / 3D 審過',  days:5,  assignee_name:'蔡采玲', milestone:true },
-      { key:'wax_print',         name:'3D 鑄造蠟列印',       days:1,  assignee_name:'郭子媽' },
+      { key:'wax_print',         name:'3D 鑄造蠟列印',       days:1,  assignee_name:'郭子嫣' },
       { key:'sampling',          name:'打樣',                days:12, assignee_name:'王韋翔' },
-      { key:'sample_submit',     name:'樣品送審寄出',        days:1,  assignee_name:'郭子媽' },
+      { key:'sample_submit',     name:'樣品送審寄出',        days:1,  assignee_name:'郭子嫣' },
       { key:'sample_approved',   name:'樣品送審追蹤 / 審過', days:5,  assignee_name:'蔡采玲', milestone:true, trigger_side:true },
       { key:'visual',            name:'視覺 / 上架素材',     days:14, assignee_name:'林毓馨', parallel:true, after:'sample_approved' },
       { key:'production',        name:'量產',                days:14, assignee_name:'王韋翔', parallel:true, after:'sample_approved', milestone:true, is_launch:true },
     ],
     side: [
       { key:'plating_photo',   name:'電鍍拍照',    assignee_name:'王韋翔', trigger:'sample_approved', offset:5 },
-      { key:'spec_sheet',      name:'產品規格單',  assignee_name:'郭子媽', trigger:'sample_approved', offset:2 },
+      { key:'spec_sheet',      name:'產品規格單',  assignee_name:'郭子嫣', trigger:'sample_approved', offset:2 },
       { key:'restock_order',   name:'補貨單',      assignee_name:'陳秋惠', trigger:'sample_approved', offset:3 },
       { key:'cost_calc',       name:'成本計算',    assignee_name:'王韋翔', trigger:'sample_approved', offset:10 },
       { key:'retail_price',    name:'商品售價',    assignee_name:'劉怡汝', trigger:'cost_done',       offset:2 },
@@ -11259,14 +11259,14 @@ const PIPELINE_TEMPLATES = {
     main: [
       // 前 7 步共用銀件的設計→3D審過(拷貝一份,獨立追蹤)
       { key:'design_draft',      name:'設計圖',              days:10, assignee_name:'劉怡汝' },
-      { key:'design_lock',       name:'設計定稿',            days:3,  assignee_name:'郭子媽', issue_design_number:true },
-      { key:'mail_review',       name:'郵件送審',            days:7,  assignee_name:'郭子媽' },
-      { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子媽' },
+      { key:'design_lock',       name:'設計定稿',            days:3,  assignee_name:'郭子嫣', issue_design_number:true },
+      { key:'mail_review',       name:'郵件送審',            days:7,  assignee_name:'郭子嫣' },
+      { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子嫣' },
       { key:'design_approved',   name:'設計圖審過',          days:7,  assignee_name:'蔡采玲', milestone:true },
-      { key:'modeling',          name:'建模',                days:3,  assignee_name:'郭子媽' },
+      { key:'modeling',          name:'建模',                days:3,  assignee_name:'郭子嫣' },
       { key:'model_approved',    name:'建模確認 / 3D 審過',  days:7,  assignee_name:'蔡采玲', milestone:true },
       // 合金專屬
-      { key:'factory_file',      name:'工廠發包檔製作',      days:3,  assignee_name:'郭子媽' },
+      { key:'factory_file',      name:'工廠發包檔製作',      days:3,  assignee_name:'郭子嫣' },
       { key:'factory_search',    name:'找工廠 / 打樣發包',   days:7,  assignee_key:'factory_owner' },  // 取專案的 factory_owner
       { key:'alloy_sampling',    name:'打樣',                days:30, assignee_key:'factory_owner' },
       { key:'sample_approved',   name:'樣品送審',            days:7,  assignee_name:'蔡采玲', milestone:true },
@@ -11704,9 +11704,9 @@ window._devDeleteProject = async function(id) {
 // 新增開發專案 · 3 步 modal
 // ═══════════════════════════════════════════════
 window.modalNewDevProject = async function() {
-  // 確保資料齊
+  // 每次都強制重載 users(避免舊快取欄位不齊)
   await Promise.all([
-    (state.data.users||[]).length ? Promise.resolve() : db.from('profiles').select('id,name,role,is_active').order('name').then(({data})=>{state.data.users=data||[]}),
+    db.from('profiles').select('id,name,role,is_active,email').order('name').then(({data})=>{state.data.users=data||[]}),
     (state.data.series||[]).length ? Promise.resolve() : loadIPTree(),
   ]);
 
@@ -11748,6 +11748,15 @@ function _renderDevModalBody() {
   const activeUsers = (state.data.users||[]).filter(u => u.is_active !== false);
   const seriesList = (state.data.series||[]).sort((a,b) => (a.name||'').localeCompare(b.name||'','zh-TW'));
 
+  // 檢查模板裡的姓名是否都能在 profiles 對到
+  const templateNames = new Set();
+  Object.values(PIPELINE_TEMPLATES).forEach(pl => {
+    pl.main.forEach(s => { if (s.assignee_name) templateNames.add(s.assignee_name); });
+    (pl.side||[]).forEach(s => { if (s.assignee_name) templateNames.add(s.assignee_name); });
+  });
+  const activeNameSet = new Set(activeUsers.map(u => u.name));
+  const unmatchedNames = [...templateNames].filter(n => !activeNameSet.has(n));
+
   const usePipeline = pl => d.pipelines.includes(pl);
   const needFactoryOwner = usePipeline('alloy');
 
@@ -11763,6 +11772,12 @@ function _renderDevModalBody() {
   const earliestOverall = Object.values(earliestPerPipeline).sort().pop();
 
   return `
+    ${unmatchedNames.length ? `
+    <div style="background:#ffebee;border-left:4px solid #c62828;padding:10px 14px;border-radius:6px;margin-bottom:12px;font-size:12px;color:#c62828;line-height:1.7">
+      ⚠ <b>以下模板姓名在人員管理裡找不到,對應步驟會顯示未指定:</b><br>
+      ${unmatchedNames.map(n=>`<code style="background:#fff;padding:1px 6px;border-radius:3px;margin:0 3px">${n}</code>`).join('')}
+      <div style="margin-top:4px;color:#666">請檢查:1) 姓名是否有多餘空格 2) 是否被停用(is_active=false)3) 姓名字元是否一致(繁/簡、全形/半形)</div>
+    </div>` : ''}
     <!-- Step 1:基本資料 -->
     <div style="background:#e8f5f4;padding:12px 14px;border-radius:8px;margin-bottom:12px">
       <div style="font-size:13px;font-weight:700;color:var(--accent-dark);margin-bottom:10px">① 基本資料</div>
@@ -11883,8 +11898,8 @@ function _renderDevModalBody() {
                   return `<tr style="border-bottom:1px solid #f5f5f5">
                     <td style="padding:4px 8px;color:var(--muted);text-align:center">${i+1}</td>
                     <td style="padding:4px 8px">
-                      ${step.milestone?'<span style="color:#c62828;font-weight:700;margin-right:4px">🎯</span>':''}
                       ${step.name}
+                      ${step.milestone?'<span style="color:#c62828;font-weight:700;margin-left:6px">🎯</span>':''}
                       ${step.issue_design_number?'<span style="color:#1565c0;font-size:10px;margin-left:4px">📌 發圖號</span>':''}
                       ${step.parallel?'<span style="background:#e3f2fd;color:#1565c0;font-size:10px;padding:1px 5px;border-radius:8px;margin-left:4px">並行</span>':''}
                     </td>
