@@ -1288,9 +1288,17 @@ async function loadRepair() {
 }
 
 async function loadDev() {
-  const { data } = await db.from('dev_projects').select('*, series(name), dev_tasks(*), dev_variants(*)').order('created_at', { ascending: false });
-  state.data.dev = data || [];
-  // 順便載入設計圖號(輕量表,同頁使用)
+  const { data, error } = await db.from('dev_projects').select('*, dev_tasks(*), dev_variants(*)').order('created_at', { ascending: false });
+  if (error) { console.error('loadDev failed', error); state.data.dev = []; }
+  else {
+    // 補 series name(JS 端 lookup,避免 FK 未建時 join 失敗)
+    const seriesMap = {};
+    (state.data.series||[]).forEach(s => { seriesMap[s.id] = s; });
+    state.data.dev = (data||[]).map(p => ({
+      ...p,
+      series: p.series_id ? seriesMap[p.series_id] : null,
+    }));
+  }
   try { await loadDesignNumbers(); } catch(e) { console.warn('loadDesignNumbers failed', e); }
 }
 
