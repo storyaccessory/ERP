@@ -9376,11 +9376,21 @@ async function modalAddVendor() {
         </div>
       </div>
       <div class="form-group"><label>地址</label><input class="form-control" id="v-addr" placeholder="地址"></div>
+
+      <div style="font-size:12px;font-weight:600;color:var(--accent-dark);margin-top:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">業務聯絡</div>
       <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group"><label>聯絡人 *</label><input class="form-control" id="v-contact" placeholder="姓名"></div>
         <div class="form-group"><label>電話</label><input class="form-control" id="v-phone" placeholder="電話" oninput="window._cleanPhone(this)"></div>
       </div>
-      <div class="form-group"><label>電子發票 Mail</label><input class="form-control" id="v-email" placeholder="電子發票寄送信箱"></div>
+      <div class="form-group"><label>Mail</label><input class="form-control" id="v-contact-email" type="email" placeholder="聯絡人 email"></div>
+
+      <div style="font-size:12px;font-weight:600;color:var(--accent-dark);margin-top:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">會計聯絡</div>
+      <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+        <div class="form-group"><label>會計聯絡人</label><input class="form-control" id="v-acc-contact" placeholder="姓名"></div>
+        <div class="form-group"><label>會計電話</label><input class="form-control" id="v-acc-phone" placeholder="電話" oninput="window._cleanPhone(this)"></div>
+      </div>
+
+      <div class="form-group"><label>電子發票 Mail <span style="font-size:11px;color:var(--muted);font-weight:400">(=會計 Mail)</span></label><input class="form-control" id="v-email" placeholder="電子發票 / 會計 email"></div>
       <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group" style="position:relative">
           <label>往來銀行</label>
@@ -9421,6 +9431,9 @@ async function modalAddVendor() {
         address: document.getElementById('v-addr').value.trim() || null,
         contact_name: contact,
         contact_phone: document.getElementById('v-phone').value.trim() || null,
+        contact_email: document.getElementById('v-contact-email').value.trim() || null,
+        accounting_contact: document.getElementById('v-acc-contact').value.trim() || null,
+        accounting_phone: document.getElementById('v-acc-phone').value.trim() || null,
         email: document.getElementById('v-email').value.trim() || null,
         bank_name: document.getElementById('v-bank').value.trim() || null,
         bank_code: document.getElementById('v-bank-code').value.trim() || null,
