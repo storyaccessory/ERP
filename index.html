@@ -11241,15 +11241,15 @@ const PIPELINE_TEMPLATES = {
     main: [
       { key:'design_draft',      name:'設計圖',              days:10, assignee_name:'劉怡汝' },
       { key:'design_lock',       name:'設計定稿&mail送審',   days:2,  assignee_name:'郭子嫣', issue_design_number:true },
-      { key:'mail_review',       name:'郵件送審追蹤',        days:5,  assignee_name:'郭子嫣' },
+      { key:'mail_review',       name:'郵件送審追蹤 / 預計審過日', days:5,  assignee_name:'郭子嫣' },
       { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子嫣' },
-      { key:'design_approved',   name:'設計圖審過',          days:5,  assignee_name:'蔡采玲', milestone:true },
-      { key:'modeling',          name:'建模',                days:3,  assignee_name:'郭子嫣' },
-      { key:'model_approved',    name:'蠟模確認 / 3D 審過',  days:5,  assignee_name:'蔡采玲', milestone:true },
+      { key:'design_approved',   name:'設計圖審過',          days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true },
+      { key:'modeling',          name:'3D 建模 & 列印寄出送審', days:3,  assignee_name:'郭子嫣' },
+      { key:'model_approved',    name:'蠟模送審 & 追蹤 / 3D 審過', days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true },
       { key:'wax_print',         name:'3D 鑄造蠟列印',       days:1,  assignee_name:'郭子嫣' },
       { key:'sampling',          name:'打樣',                days:12, assignee_name:'王韋翔' },
       { key:'sample_submit',     name:'樣品送審寄出',        days:1,  assignee_name:'郭子嫣' },
-      { key:'sample_approved',   name:'樣品送審追蹤 / 審過', days:5,  assignee_name:'蔡采玲', milestone:true, trigger_side:true },
+      { key:'sample_approved',   name:'樣品送審追蹤 / 審過', days:5,  assignee_name:'蔡采玲', milestone:true, trigger_side:true, is_review:true },
       { key:'visual',            name:'視覺 / 上架素材',     days:14, assignee_name:'林毓馨', parallel:true, after:'sample_approved' },
       { key:'production',        name:'量產',                days:14, assignee_name:'王韋翔', parallel:true, after:'sample_approved', milestone:true, is_launch:true },
     ],
@@ -11275,12 +11275,12 @@ const PIPELINE_TEMPLATES = {
       { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子嫣' },
       { key:'design_approved',   name:'設計圖審過',          days:7,  assignee_name:'蔡采玲', milestone:true },
       { key:'modeling',          name:'建模',                days:3,  assignee_name:'郭子嫣' },
-      { key:'model_approved',    name:'建模確認 / 3D 審過',  days:7,  assignee_name:'蔡采玲', milestone:true },
+      { key:'model_approved',    name:'建模確認 / 3D 審過',  days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true },
       // 合金專屬
       { key:'factory_file',      name:'工廠發包檔製作',      days:3,  assignee_name:'郭子嫣' },
       { key:'factory_search',    name:'找工廠 / 打樣發包',   days:7,  assignee_key:'factory_owner' },  // 取專案的 factory_owner
       { key:'alloy_sampling',    name:'打樣',                days:30, assignee_key:'factory_owner' },
-      { key:'sample_approved',   name:'樣品送審',            days:7,  assignee_name:'蔡采玲', milestone:true },
+      { key:'sample_approved',   name:'樣品送審',            days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true },
       { key:'production_deploy', name:'量產發包',            days:5,  assignee_key:'factory_owner', trigger_side:true },
       { key:'production_track',  name:'量產追蹤',            days:30, assignee_key:'factory_owner' },
       { key:'arrival_check',    name:'到貨驗收',            days:7,  assignee_name:'陳秋惠', milestone:true, is_launch:true },
@@ -11298,9 +11298,9 @@ const PIPELINE_TEMPLATES = {
     main: [
       { key:'material_confirm', name:'先確認追素材',       days:5,  assignee_name:'蔡采玲' },
       { key:'item_brainstorm',  name:'開發品項發想討論',   days:5,  assignee_name:'林毓馨' },
-      { key:'item_confirm',     name:'開發品項確認',       days:7,  assignee_name:'林毓馨' },
+      { key:'item_confirm',     name:'開發品項確認',       days:7,  assignee_name:'林毓馨', is_review:true },
       { key:'item_design',      name:'開發品項設計',       days:10, assignee_name:'林毓馨' },
-      { key:'design_confirm',   name:'開發品項設計確認',   days:7,  assignee_name:'林毓馨', issue_design_number:true },
+      { key:'design_confirm',   name:'開發品項設計確認',   days:7,  assignee_name:'林毓馨', issue_design_number:true, is_review:true },
       { key:'factory_file',     name:'商品工廠檔完稿',     days:3,  assignee_name:'林毓馨' },
       { key:'production_deploy',name:'商品發包量產',       days:5,  assignee_name:'蔡采玲', trigger_side:true },
       { key:'production_track', name:'商品量產追蹤',       days:10, assignee_name:'蔡采玲' },
@@ -11596,10 +11596,12 @@ function renderDev() {
   if (tab === '設計圖號') return _renderDesignNumbers();
   if (state.data.devDetailId) return _renderDevDetail(state.data.devDetailId);
   const activeProjects = projects.filter(p => p.status !== '完成' && p.status !== '取消');
+  if (tab === 'matrix') return _renderDevMatrix(activeProjects);
 
   return `
     <div class="tabs">
       <div class="tab ${tab==='projects'?'active':''}" data-dev-tab="projects">🛠 進行中專案 (${activeProjects.length})</div>
+      <div class="tab ${tab==='matrix'?'active':''}" data-dev-tab="matrix">📊 進度總覽</div>
       <div class="tab ${tab==='all'?'active':''}" data-dev-tab="all">全部專案 (${projects.length})</div>
       <div class="tab ${tab==='設計圖號'?'active':''}" data-dev-tab="設計圖號">🔢 設計圖號</div>
     </div>
@@ -11608,6 +11610,84 @@ function renderDev() {
     </div>
     ${(tab==='all'?projects:activeProjects).length === 0 ? `<div class="card"><div class="empty"><div class="empty-icon">🛠️</div><p>${tab==='all'?'尚無專案':'目前沒有進行中的專案'}</p></div></div>` :
       (tab==='all'?projects:activeProjects).map(p => _renderDevProjectCard(p)).join('')}`;
+}
+
+// ═══════════════════════════════════════════════
+// 📊 進度總覽矩陣表
+// ═══════════════════════════════════════════════
+function _renderDevMatrix(projects) {
+  if (!projects.length) return `<div class="card"><div class="empty"><div class="empty-icon">📊</div><p>沒有進行中的專案</p></div></div>`;
+
+  // 找每條 pipeline 各自的專案
+  const groupByPipeline = {};
+  projects.forEach(p => {
+    (p.pipelines||[]).forEach(pl => {
+      if (!groupByPipeline[pl]) groupByPipeline[pl] = [];
+      groupByPipeline[pl].push(p);
+    });
+  });
+
+  const today = _localToday();
+  const cellIcon = (task) => {
+    if (!task) return '<span style="color:#ddd">—</span>';
+    if (task.status === '完成') return '<span style="color:#2e7d32;font-weight:700" title="完成 '+task.completed_at?.slice(0,10)+'">✓</span>';
+    if (task.status === '取消') return '<span style="color:#999">✕</span>';
+    if (task.due_date && task.due_date < today) return '<span style="color:#c62828;font-weight:700" title="逾期 '+task.due_date+'">⚠</span>';
+    // 是不是目前進行中的?(前面都完成才算)
+    return '<span style="color:#f57c00;font-weight:700" title="'+(task.assignee_name||'')+' · '+task.due_date+'">🔄</span>';
+  };
+
+  return `
+    <div class="tabs">
+      <div class="tab" data-dev-tab="projects">🛠 進行中專案</div>
+      <div class="tab active" data-dev-tab="matrix">📊 進度總覽</div>
+      <div class="tab" data-dev-tab="all">全部專案</div>
+      <div class="tab" data-dev-tab="設計圖號">🔢 設計圖號</div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
+      ✓ 完成 · 🔄 進行中 · ⚠ 逾期 · ✕ 取消 · — 未開始 · 滑鼠移到格子看詳情
+    </div>
+    ${Object.entries(groupByPipeline).map(([pl, plProjects]) => {
+      const tpl = PIPELINE_TEMPLATES[pl];
+      const steps = tpl.main;
+      return `
+        <div class="card" style="margin-bottom:14px;padding:0;overflow:hidden">
+          <div style="padding:8px 14px;background:${tpl.color}15;font-weight:700;color:${tpl.color};font-size:13px;border-bottom:1px solid var(--border)">
+            ${tpl.label} · ${plProjects.length} 個專案
+          </div>
+          <div style="overflow-x:auto">
+            <table style="width:100%;border-collapse:collapse;font-size:11px">
+              <thead style="background:#f5f5f5">
+                <tr>
+                  <th style="padding:6px 8px;text-align:left;position:sticky;left:0;background:#f5f5f5;z-index:1;min-width:140px;border-right:1px solid var(--border)">專案</th>
+                  ${steps.map((s, i) => `<th style="padding:4px 3px;text-align:center;min-width:32px;max-width:40px;font-size:10px;color:var(--muted);border-right:1px solid #eee" title="${s.name}">
+                    ${s.milestone?'<span style="color:#c62828">🎯</span>':i+1}
+                  </th>`).join('')}
+                  <th style="padding:6px 8px;text-align:center;min-width:60px">進度</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${plProjects.map(p => {
+                  const plTasks = (p.dev_tasks||[]).filter(t => t.pipeline === pl && t.step_group === 'main');
+                  const done = plTasks.filter(t => t.status === '完成').length;
+                  const total = plTasks.length;
+                  const pct = total ? Math.round(done/total*100) : 0;
+                  return `<tr style="cursor:pointer" onclick="openDevProject('${p.id}')">
+                    <td style="padding:6px 8px;font-weight:600;color:var(--accent-dark);position:sticky;left:0;background:#fff;border-right:1px solid var(--border)">${p.name}</td>
+                    ${steps.map(s => {
+                      const task = plTasks.find(t => t.step_key === s.key);
+                      return `<td style="padding:4px 3px;text-align:center;border-right:1px solid #f5f5f5;font-size:13px">${cellIcon(task)}</td>`;
+                    }).join('')}
+                    <td style="padding:6px 8px;text-align:center;font-weight:600;color:${pct===100?'#2e7d32':'var(--accent-dark)'}">${pct}%</td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      `;
+    }).join('')}
+  `;
 }
 
 function _renderDevProjectCard(p) {
@@ -11629,23 +11709,13 @@ function _renderDevProjectCard(p) {
   const dueToday = tasks.filter(t => t.due_date === today && t.status !== '完成' && t.status !== '取消').length;
 
   return `<div class="card" style="margin-bottom:12px;cursor:pointer" onclick="openDevProject('${p.id}')">
-    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px">
       <div style="flex:1;min-width:220px">
         <div style="font-size:16px;font-weight:700;color:var(--accent-dark)">${p.name}</div>
         <div style="font-size:12px;color:var(--muted);margin-top:3px">
           PM: ${p.pm_name||'—'} · 起始 ${p.start_date||'—'} ·
           ${p.launch_date?`上市 <b style="color:var(--accent-dark)">${p.launch_date}</b>`:'上市日未設'}
           ${p.earliest_launch?` · 最快 ${p.earliest_launch}`:''}
-        </div>
-        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
-          ${pipelines.map(pl => {
-            const t = PIPELINE_TEMPLATES[pl];
-            const s = stats[pl] || {done:0,total:0,pct:0};
-            const vCount = activeVariants.filter(v => v.pipeline === pl).length;
-            return `<span style="background:${t?.color||'#999'}22;color:${t?.color||'#666'};padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">
-              ${t?.label||pl} · ${vCount}品相 · ${s.done}/${s.total}
-            </span>`;
-          }).join('')}
         </div>
       </div>
       <div style="text-align:right;min-width:80px">
@@ -11654,6 +11724,38 @@ function _renderDevProjectCard(p) {
         <div style="font-size:11px;color:var(--muted);margin-top:4px">${p.status||'進行中'}</div>
       </div>
     </div>
+
+    ${pipelines.map(pl => {
+      const tpl = PIPELINE_TEMPLATES[pl];
+      const plTasks = tasks.filter(t => t.pipeline === pl && t.step_group === 'main').sort((a,b) => (a.order_num||0) - (b.order_num||0));
+      const pDone = plTasks.filter(t => t.status === '完成').length;
+      const pTotal = plTasks.length;
+      const pPct = pTotal ? Math.round(pDone/pTotal*100) : 0;
+      const vCount = activeVariants.filter(v => v.pipeline === pl).length;
+      const current = plTasks.find(t => t.status !== '完成' && t.status !== '取消');
+      const isCurOverdue = current && current.due_date && current.due_date < today;
+      const daysLeft = current?.due_date ? _daysDiff(today, current.due_date) : null;
+      const nextMile = plTasks.find(t => t.is_milestone && t.status !== '完成' && t.status !== '取消');
+      const mileDaysLeft = nextMile?.due_date ? _daysDiff(today, nextMile.due_date) : null;
+      return `<div style="border-left:3px solid ${tpl.color};padding:8px 12px;background:${tpl.color}0d;border-radius:0 6px 6px 0;margin-bottom:6px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
+          <span style="font-weight:700;color:${tpl.color};font-size:13px">${tpl.label} · ${vCount}品相 · ${pDone}/${pTotal}</span>
+          <span style="font-size:11px;font-weight:700;color:${pPct===100?'#2e7d32':tpl.color}">${pPct}%</span>
+        </div>
+        <div style="height:6px;background:#eee;border-radius:3px;overflow:hidden;margin-bottom:6px">
+          <div style="height:100%;background:${tpl.color};width:${pPct}%"></div>
+        </div>
+        <div style="display:flex;gap:14px;font-size:11px;flex-wrap:wrap">
+          ${current ? `<div style="color:${isCurOverdue?'#c62828':'#e65100'}">
+            🔄 <b>${current.step_name}</b> · ${current.assignee_name||'未指定'}
+            ${daysLeft!==null ? (daysLeft<0?` · <b>⚠ 逾期 ${-daysLeft} 天</b>`:daysLeft===0?' · <b>今天到期</b>':` · 剩 ${daysLeft} 天`) : ''}
+          </div>` : '<div style="color:#2e7d32">✅ 主線全部完成</div>'}
+          ${nextMile && mileDaysLeft !== null && current?.id !== nextMile.id ? `<div style="color:#c62828">
+            🎯 <b>${nextMile.step_name}</b> · ${mileDaysLeft<0?`遲 ${-mileDaysLeft} 天`:mileDaysLeft===0?'今日':`${mileDaysLeft} 天後`}
+          </div>` : ''}
+        </div>
+      </div>`;
+    }).join('')}
   </div>`;
 }
 
@@ -11840,6 +11942,155 @@ function _renderDevVariantRow(v, variantSideTasks, project) {
   </div>`;
 }
 
+// 找步驟定義(從模板)
+function _findStepDef(pipeline, stepKey) {
+  const tpl = PIPELINE_TEMPLATES[pipeline];
+  if (!tpl) return null;
+  return tpl.main.find(s => s.key === stepKey) || tpl.side?.find(s => s.key === stepKey) || null;
+}
+
+// 送審審查 modal — 勾選哪些品相通過/需校正
+function _devOpenReviewModal(project, task) {
+  const activeVariants = (project.dev_variants||[]).filter(v => v.pipeline === task.pipeline && !v.cancelled_at);
+  if (!activeVariants.length) {
+    // 沒品相就直接完成(不彈)
+    _devFinalizeTaskComplete(project.id, task.id, []);
+    return;
+  }
+  showModal(`📋 ${task.step_name} · 品相審查`, `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
+      逐個勾選品相審查結果 · 未通過的會 revision +1,系統記錄校正歷程<br>
+      🎯 這個步驟本身仍會標記完成,但未通過的品相會標紅提示重做
+    </div>
+    <div id="dev-review-list" style="display:grid;gap:10px">
+      ${activeVariants.map(v => `<div data-vid="${v.id}" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-weight:600">${v.name}${v.category?` (${v.category})`:''}<span style="font-size:10px;color:var(--muted);margin-left:6px">v${v.revision||1}</span></span>
+          <div style="display:flex;gap:6px">
+            <label style="cursor:pointer;padding:3px 10px;border-radius:14px;font-size:11px;font-weight:600;background:#e8f5e9;color:#2e7d32">
+              <input type="radio" name="rv-${v.id}" value="pass" checked onchange="_devToggleReviewReason('${v.id}',false)" style="margin-right:3px"> ✓ 通過
+            </label>
+            <label style="cursor:pointer;padding:3px 10px;border-radius:14px;font-size:11px;font-weight:600;background:#ffebee;color:#c62828">
+              <input type="radio" name="rv-${v.id}" value="reject" onchange="_devToggleReviewReason('${v.id}',true)" style="margin-right:3px"> ✕ 需校正
+            </label>
+          </div>
+        </div>
+        <div id="rr-${v.id}" style="display:none">
+          <input class="form-control" id="rrn-${v.id}" placeholder="校正原因(必填)" style="margin-bottom:6px">
+          <div style="display:flex;align-items:center;gap:6px;font-size:11px;color:var(--muted)">
+            <span>預計延後</span>
+            <input type="number" id="rrd-${v.id}" value="5" min="1" style="width:60px;padding:2px 6px;font-size:11px;border:1px solid var(--border);border-radius:3px">
+            <span>個工作天</span>
+          </div>
+        </div>
+      </div>`).join('')}
+    </div>
+  `, [
+    { label:'✅ 確認並完成本步驟', primary:true, onclick: async () => {
+      const results = activeVariants.map(v => {
+        const decision = document.querySelector(`input[name="rv-${v.id}"]:checked`)?.value;
+        const reason = document.getElementById(`rrn-${v.id}`)?.value.trim() || '';
+        const days = parseInt(document.getElementById(`rrd-${v.id}`)?.value) || 5;
+        return { variant_id: v.id, decision, reason, delay_days: days };
+      });
+      const rejected = results.filter(r => r.decision === 'reject');
+      const missing = rejected.filter(r => !r.reason);
+      if (missing.length) { showToast('未通過的品相必須填校正原因','error'); return; }
+      await _devFinalizeTaskComplete(project.id, task.id, results);
+      closeModal();
+    }},
+    { label:'取消', onclick: closeModal },
+  ], { wide: true });
+}
+
+window._devToggleReviewReason = function(vid, show) {
+  const el = document.getElementById(`rr-${vid}`);
+  if (el) el.style.display = show ? 'block' : 'none';
+};
+
+// 完成任務(送審後或普通任務)+ 寫入品相審查結果 + 校正歷程
+async function _devFinalizeTaskComplete(projectId, taskId, reviewResults) {
+  const p = state.data.dev.find(x => x.id === projectId);
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (!p || !task) return;
+  const today = _localToday();
+  const now = new Date().toISOString();
+
+  // 標記任務完成
+  const upd = { status:'完成', completed_at: now, completed_by: state.user?.id||null };
+  await db.from('dev_tasks').update(upd).eq('id', taskId);
+  Object.assign(task, upd);
+  await _devSyncCalendarSubtask(task, true);
+
+  // 處理審查結果
+  let rejectedCount = 0;
+  for (const r of reviewResults) {
+    const v = p.dev_variants.find(x => x.id === r.variant_id);
+    if (!v) continue;
+    const historyEntry = {
+      step_key: task.step_key,
+      step_name: task.step_name,
+      date: today,
+      decision: r.decision,
+      reason: r.reason || null,
+      delay_days: r.decision === 'reject' ? r.delay_days : 0,
+      reviewer_id: state.user?.id || null,
+      reviewer_name: state.profile?.name || '',
+    };
+    const newHistory = [...(v.review_history || []), historyEntry];
+    const vUpd = { review_history: newHistory };
+    if (r.decision === 'reject') {
+      vUpd.revision = (v.revision || 1) + 1;
+      vUpd.needs_revision = true;
+      vUpd.revision_note = r.reason;
+      rejectedCount++;
+    } else {
+      vUpd.needs_revision = false;
+    }
+    await db.from('dev_variants').update(vUpd).eq('id', r.variant_id);
+  }
+
+  // 后續里程碑觸發
+  if (task.step_key === 'design_lock' || task.step_key === 'design_confirm') {
+    await _devAutoIssueDesignNumbers(p, task.pipeline);
+  }
+  if (task.step_key === 'sample_approved') {
+    // 只對通過的品相生副線;若全都退回可跳過
+    const passedVariantIds = new Set(reviewResults.filter(r => r.decision === 'pass').map(r => r.variant_id));
+    // 暫時全部生 · 退回的可以之後手動處理(或後續改進)
+    await _devAutoGenerateSideTasks(p, task.pipeline);
+  }
+  if (task.step_key === 'production' || task.step_key === 'arrival_check') {
+    setTimeout(() => window._devCreateProductsPrompt(p.id, task.pipeline), 300);
+  }
+
+  // 更新專案行事曆事件的 event_date = 下一個未完成任務日
+  await _devUpdateEventDateToNextTask(projectId);
+
+  const msg = rejectedCount > 0
+    ? `✓ 已完成 · ⚠ ${rejectedCount} 個品相需校正`
+    : `✓ 已完成 · 所有品相通過`;
+  showToast(msg, rejectedCount ? 'warn' : 'success');
+  await loadDev();
+  try { await loadCalendarEvents?.(); } catch(e) {}
+  renderApp();
+}
+
+// 動態更新行事曆事件的 event_date 到「下一個未完成任務」的日期
+async function _devUpdateEventDateToNextTask(projectId) {
+  const p = state.data.dev.find(x => x.id === projectId);
+  if (!p) return;
+  const tasks = (p.dev_tasks||[]).filter(t => t.status !== '完成' && t.status !== '取消').sort((a,b) => (a.due_date||'').localeCompare(b.due_date||''));
+  const nextDate = tasks[0]?.due_date;
+  if (!nextDate) return;
+
+  // 找專案主事件
+  const eventIds = [...new Set((p.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
+  for (const evId of eventIds) {
+    await db.from('calendar_events').update({ event_date: nextDate }).eq('id', evId);
+  }
+}
+
 // 打勾/取消打勾任務
 window._devToggleTaskDone = async function(taskId, checked) {
   const p = state.data.dev.find(x => x.dev_tasks?.some(t => t.id === taskId));
@@ -11848,6 +12099,13 @@ window._devToggleTaskDone = async function(taskId, checked) {
   const today = _localToday();
 
   if (checked) {
+    // 送審步驟 → 先開品相審查 modal(A 選項)
+    const stepDef = _findStepDef(task.pipeline, task.step_key);
+    if (stepDef?.is_review) {
+      _devOpenReviewModal(p, task);
+      return; // modal 決定後再標為完成
+    }
+
     // 標為完成
     const upd = { status: '完成', completed_at: new Date().toISOString(), completed_by: state.user?.id||null };
     const { error } = await db.from('dev_tasks').update(upd).eq('id', taskId);
@@ -11884,6 +12142,9 @@ window._devToggleTaskDone = async function(taskId, checked) {
         setTimeout(() => window._devHandleTimingChange(p.id, taskId, delta), 300);
       }
     }
+
+    // 動態更新行事曆事件日期 → 跳到下一步
+    await _devUpdateEventDateToNextTask(p.id);
   } else {
     // 取消完成
     const upd = { status: '未開始', completed_at: null, completed_by: null };
