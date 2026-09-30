@@ -11885,6 +11885,7 @@ function _renderDevTaskRow(task, project) {
       ${task.step_name}
       ${isMilestone?'<span style="color:#c62828;margin-left:4px">🎯</span>':''}
       ${task.completed_at?`<span style="font-size:10px;color:#2e7d32;margin-left:6px">✓ ${task.completed_at.slice(0,10)}</span>`:''}
+      ${task.notes && task.notes.includes('等 PM') ? `<div style="font-size:10px;color:#e65100;background:#fff3e0;padding:2px 6px;border-radius:4px;margin-top:3px;display:inline-block">🔔 ${task.notes} <button style="border:none;background:#e65100;color:#fff;font-size:9px;padding:1px 6px;border-radius:3px;margin-left:4px;cursor:pointer" onclick="event.stopPropagation();window._devPmDecideTiming('${task.id}')">PM 處理</button></div>` : ''}
     </td>
     <td style="padding:5px">
       <select onchange="window._devSetTaskAssignee('${task.id}',this)" style="width:100%;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:3px" ${isDone||isCancelled?'disabled':''}>
@@ -11902,12 +11903,41 @@ function _renderDevTaskRow(task, project) {
   </tr>`;
 }
 
-// 品相列(含副線任務)
+// 品相列(含副線任務 + 當前狀態)
 function _renderDevVariantRow(v, variantSideTasks, project) {
   const t = PIPELINE_TEMPLATES[v.pipeline];
   const isCancelled = !!v.cancelled_at;
   const done = variantSideTasks.filter(x => x.status === '完成').length;
   const total = variantSideTasks.filter(x => x.status !== '取消').length;
+  const today = _localToday();
+
+  // 計算「這個品相現在卡在哪」
+  let currentStatus = { text:'', bg:'#e0f2f1', color:'#00695c' };
+  if (isCancelled) {
+    currentStatus = { text:'已取消', bg:'#f5f5f5', color:'#999' };
+  } else if (v.needs_revision) {
+    const lastReview = (v.review_history||[]).filter(h => h.decision === 'reject').slice(-1)[0];
+    currentStatus = { text:`⚠ 卡在「${lastReview?.step_name||'審查'}」需校正:${v.revision_note||lastReview?.reason||'—'}`, bg:'#ffebee', color:'#c62828' };
+  } else if (variantSideTasks.length > 0) {
+    // 已有副線 → 找副線的當前
+    const cur = variantSideTasks.find(x => x.status !== '完成' && x.status !== '取消');
+    if (cur) {
+      const isOverdue = cur.due_date && cur.due_date < today;
+      currentStatus = { text:`🔄 ${cur.step_name} · ${cur.assignee_name||'未指定'}${cur.due_date?` · ${cur.due_date}`:''}${isOverdue?' ⚠ 逾期':''}`, bg: isOverdue?'#ffebee':'#fff3e0', color: isOverdue?'#c62828':'#e65100' };
+    } else {
+      currentStatus = { text:`✅ 副線全部完成`, bg:'#e8f5e9', color:'#2e7d32' };
+    }
+  } else {
+    // 沒副線 → 看主線(系列級)
+    const mainTasks = (project.dev_tasks||[]).filter(t => t.pipeline === v.pipeline && t.step_group === 'main').sort((a,b) => (a.order_num||0) - (b.order_num||0));
+    const curMain = mainTasks.find(x => x.status !== '完成' && x.status !== '取消');
+    if (curMain) {
+      const isOverdue = curMain.due_date && curMain.due_date < today;
+      currentStatus = { text:`🔄 主線 · ${curMain.step_name} · ${curMain.assignee_name||'未指定'}${curMain.due_date?` · ${curMain.due_date}`:''}${isOverdue?' ⚠ 逾期':''}`, bg: isOverdue?'#ffebee':'#fff3e0', color: isOverdue?'#c62828':'#e65100' };
+    } else {
+      currentStatus = { text:`✅ 主線完成 · 等副線生成`, bg:'#e8f5e9', color:'#2e7d32' };
+    }
+  }
 
   return `<div style="margin-bottom:10px;padding:10px 12px;border-radius:6px;border-left:3px solid ${t.color};background:${isCancelled?'#fafafa':'#fff'};border:1px solid var(--border);${isCancelled?'opacity:.5':''}">
     <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
@@ -11915,17 +11945,21 @@ function _renderDevVariantRow(v, variantSideTasks, project) {
         <span style="background:${t.color}22;color:${t.color};padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600;margin-right:6px">${t.label}</span>
         <span style="font-weight:600;${isCancelled?'text-decoration:line-through':''}">${v.name}</span>
         ${(v.revision||1) > 1?`<span style="background:#fff3e0;color:#e65100;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;margin-left:6px" title="校正輪次">v${v.revision}</span>`:''}
-        ${v.needs_revision?`<span style="background:#ffebee;color:#c62828;padding:1px 8px;border-radius:8px;font-size:10px;font-weight:700;margin-left:6px" title="${v.revision_note||''}">⚠ 需校正</span>`:''}
         ${v.category?`<span style="font-size:11px;color:var(--muted);margin-left:6px">${v.category}</span>`:''}
         ${v.design_number?`<span style="background:#e3f2fd;color:#1565c0;padding:1px 6px;border-radius:8px;font-size:10px;font-family:monospace;margin-left:6px">🔢 ${v.design_number}</span>`:''}
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         <span style="font-size:11px;color:var(--muted)">${done}/${total}</span>
+        ${(v.review_history||[]).length ? `<button class="btn btn-sm btn-outline" onclick="window._devShowReviewHistory('${v.id}')" style="font-size:10px">📜 校正歷程</button>` : ''}
         ${isCancelled ?
           `<button class="btn btn-sm btn-outline" onclick="window._devRestoreVariant('${v.id}')" style="font-size:10px">↩ 還原</button>` :
           `<button class="btn btn-sm" onclick="window._devCancelVariant('${v.id}')" style="background:#ffebee;color:#c62828;font-size:10px">✕ 取消</button>`
         }
       </div>
+    </div>
+    <!-- 當前卡點 -->
+    <div style="padding:6px 10px;background:${currentStatus.bg};color:${currentStatus.color};border-radius:5px;font-size:12px;font-weight:600;margin-bottom:6px">
+      ${currentStatus.text}
     </div>
     ${variantSideTasks.length === 0 ? `<div style="font-size:11px;color:var(--muted);padding:4px 0">副線任務會在「樣品審過」完成時自動生成</div>` : `
       <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px">
@@ -11943,6 +11977,43 @@ function _renderDevVariantRow(v, variantSideTasks, project) {
     `}
   </div>`;
 }
+
+// 校正歷程查看
+window._devShowReviewHistory = function(variantId) {
+  const p = state.data.dev.find(x => x.dev_variants?.some(v => v.id === variantId));
+  const v = p?.dev_variants?.find(x => x.id === variantId);
+  if (!v) return;
+  const history = v.review_history || [];
+  showModal(`📜 ${v.name} · 校正歷程 · v${v.revision||1}`, `
+    ${history.length === 0 ? '<div style="text-align:center;padding:20px;color:var(--muted)">尚無審查紀錄</div>' :
+      `<div style="display:grid;gap:8px">
+        ${history.map((h, i) => `<div style="padding:10px 12px;border-radius:6px;background:${h.decision==='pass'?'#e8f5e9':'#ffebee'};border-left:4px solid ${h.decision==='pass'?'#2e7d32':'#c62828'}">
+          <div style="display:flex;justify-content:space-between;font-size:12px;font-weight:600">
+            <span>${h.step_name}</span>
+            <span style="color:${h.decision==='pass'?'#2e7d32':'#c62828'}">${h.decision==='pass'?'✓ 通過':'✕ 需校正'}</span>
+          </div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">${h.date} · ${h.reviewer_name||'—'}</div>
+          ${h.reason?`<div style="font-size:12px;margin-top:4px;color:#c62828">原因:${h.reason}${h.delay_days?` · 延後 ${h.delay_days} 天`:''}</div>`:''}
+        </div>`).join('')}
+      </div>`
+    }
+    ${v.needs_revision ? `<div style="margin-top:12px;padding:10px 12px;background:#fff3e0;border-radius:6px;font-size:12px;color:#e65100">
+      💡 這個品相目前狀態為「需校正」· 完成校正後可到品相清單「重新標為通過」
+    </div>
+    <button class="btn btn-sm btn-primary" style="margin-top:10px;width:100%" onclick="window._devMarkVariantOk('${v.id}')">✅ 校正完成 · 重新標為通過</button>` : ''}
+  `, [
+    { label:'關閉', onclick: closeModal },
+  ]);
+};
+
+window._devMarkVariantOk = async function(variantId) {
+  if (!confirm('確認校正完成 · 標記為通過?')) return;
+  await db.from('dev_variants').update({ needs_revision: false, revision_note: null }).eq('id', variantId);
+  showToast('✓ 已標為通過');
+  closeModal();
+  await loadDev();
+  renderApp();
+};
 
 // 找步驟定義(從模板)
 function _findStepDef(pipeline, stepKey) {
@@ -12134,14 +12205,26 @@ window._devToggleTaskDone = async function(taskId, checked) {
       }
     }
 
-    // 延遲/提早提示
+    // 延遲/提早提示 — 只有 PM 或老闆才會彈出決策視窗
     const dueDate = task.due_date;
     if (dueDate && dueDate !== today) {
       const delta = _daysDiff(dueDate, today);
       const isEarly = delta < 0;
       const isLate  = delta > 0;
       if (isEarly || isLate) {
-        setTimeout(() => window._devHandleTimingChange(p.id, taskId, delta), 300);
+        const myId = state.user?.id;
+        const _ep = effectiveProfile() || {};
+        const isPM = myId && (p.pm_id === myId || _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com');
+        if (isPM) {
+          setTimeout(() => window._devHandleTimingChange(p.id, taskId, delta), 300);
+        } else {
+          // 非 PM:記錄一個 pending decision(在 dev_tasks.notes 加註記),等 PM 看
+          const noteMark = isEarly
+            ? `提前 ${-delta} 天完成(等 PM 決定要不要順推後續)`
+            : `延遲 ${delta} 天完成(等 PM 決定要不要順延後續)`;
+          await db.from('dev_tasks').update({ notes: noteMark }).eq('id', taskId);
+          showToast(isEarly ? `✨ 提前 ${-delta} 天 · 已記錄,PM 會決定是否順推` : `⚠ 延遲 ${delta} 天 · 已記錄,PM 會決定是否順延`, 'info', 4000);
+        }
       }
     }
 
@@ -12311,6 +12394,24 @@ async function _devAppendSideTasksToCalendar(project, newTasks) {
   await db.from('dev_tasks').update({ calendar_event_id: eventId }).in('id', newTasks.map(t => t.id));
 }
 
+// PM 決策:非 PM 完成任務時記下 note,PM 可事後點「PM 處理」進來
+window._devPmDecideTiming = async function(taskId) {
+  const p = state.data.dev.find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (!p || !task) return;
+  const today = _localToday();
+  const completedDate = task.completed_at ? task.completed_at.slice(0,10) : today;
+  const delta = _daysDiff(task.due_date || completedDate, completedDate);
+  if (delta === 0) {
+    // 沒差沒得選,只清除 note
+    await db.from('dev_tasks').update({ notes: null }).eq('id', taskId);
+    await loadDev();
+    renderApp();
+    return;
+  }
+  window._devHandleTimingChange(p.id, taskId, delta);
+};
+
 // 延遲/提早通知 PM
 window._devHandleTimingChange = function(projectId, taskId, deltaDays) {
   const p = state.data.dev.find(x => x.id === projectId);
@@ -12339,13 +12440,21 @@ window._devHandleTimingChange = function(projectId, taskId, deltaDays) {
         await db.from('dev_tasks').update({ due_date: newDate }).eq('id', t.id);
         await _devSyncCalendarSubtaskDate(t, newDate);
       }
+      // 清除該任務的 pending note
+      await db.from('dev_tasks').update({ notes: null }).eq('id', taskId);
       showToast(`已${isLate?'順延':'提前'} ${laterTasks.length} 個任務`);
       closeModal();
       await loadDev();
       try { await loadCalendarEvents?.(); } catch(e) {}
       renderApp();
     }},
-    { label:'維持原計畫', onclick: closeModal },
+    { label:'維持原計畫', onclick: async () => {
+      // 清除 pending note
+      await db.from('dev_tasks').update({ notes: null }).eq('id', taskId);
+      closeModal();
+      await loadDev();
+      renderApp();
+    }},
   ]);
 };
 
