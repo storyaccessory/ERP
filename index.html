@@ -11338,12 +11338,19 @@ function _calcSideDates(pipelineKey, stepMap) {
 // 設計圖號發號機
 // ═══════════════════════════════════════════════
 async function loadDesignNumbers() {
-  const { data } = await db.from('design_numbers')
-    .select('*, designer:profiles!designer_id(name)')
+  const { data, error } = await db.from('design_numbers')
+    .select('*')
     .order('date', { ascending: false })
     .order('seq', { ascending: false })
     .limit(500);
-  state.data.designNumbers = data || [];
+  if (error) { console.warn('loadDesignNumbers failed', error); state.data.designNumbers = []; return; }
+  // 補 designer 名稱(從 profiles map)
+  const userMap = {};
+  (state.data.users||[]).forEach(u => { userMap[u.id] = u; });
+  state.data.designNumbers = (data||[]).map(r => ({
+    ...r,
+    designer: r.designer_id && userMap[r.designer_id] ? { name: userMap[r.designer_id].name } : null,
+  }));
 }
 
 function _renderDesignNumbers() {
