@@ -12150,18 +12150,36 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults) {
   renderApp();
 }
 
-// 動態更新行事曆事件的 event_date 到「下一個未完成任務」的日期
+// 上市日固定不動:每次任務變化只更新 description(顯示倒數 + 未完成統計)
 async function _devUpdateEventDateToNextTask(projectId) {
   const p = state.data.dev.find(x => x.id === projectId);
   if (!p) return;
-  const tasks = (p.dev_tasks||[]).filter(t => t.status !== '完成' && t.status !== '取消').sort((a,b) => (a.due_date||'').localeCompare(b.due_date||''));
-  const nextDate = tasks[0]?.due_date;
-  if (!nextDate) return;
+  const today = _localToday();
+  const tasksAll = p.dev_tasks || [];
+  const undone = tasksAll.filter(t => t.status !== '完成' && t.status !== '取消');
+  const overdue = tasksAll.filter(t => t.due_date && t.due_date < today && t.status !== '完成' && t.status !== '取消');
+  const launchDate = p.launch_date;
+  const daysToLaunch = launchDate ? _daysDiff(today, launchDate) : null;
 
-  // 找專案主事件
-  const eventIds = [...new Set((p.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
+  const designer = tasksAll.find(t => t.step_key === 'design_draft' || t.step_key === 'item_design')?.assignee_name;
+  const keyMilestones = tasksAll
+    .filter(t => t.is_milestone || ['design_lock','design_confirm','mail_review','system_submit'].includes(t.step_key))
+    .sort((a,b) => (a.due_date||'').localeCompare(b.due_date||''))
+    .map(t => {
+      const d = t.due_date ? `${t.due_date.slice(5,7)}/${t.due_date.slice(8,10)}` : '—';
+      const status = t.status === '完成' ? '✓' : (t.due_date && t.due_date < today ? '⚠' : '');
+      return `${status?status+' ':''}${d} ${t.step_name}${t.assignee_name?` (${t.assignee_name})`:''}`;
+    });
+  const description = [
+    daysToLaunch !== null && daysToLaunch >= 0 ? `⏰ 距上市 ${daysToLaunch} 天 · 未完成 ${undone.length} 項${overdue.length?` · ⚠ 逾期 ${overdue.length} 項`:''}` : null,
+    designer ? `主要設計師:${designer}` : null,
+    ...keyMilestones,
+    launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
+  ].filter(Boolean).join('\n');
+
+  const eventIds = [...new Set(tasksAll.map(t => t.calendar_event_id).filter(Boolean))];
   for (const evId of eventIds) {
-    await db.from('calendar_events').update({ event_date: nextDate }).eq('id', evId);
+    await db.from('calendar_events').update({ description }).eq('id', evId);
   }
 }
 
@@ -13083,19 +13101,19 @@ async function _saveDevProject() {
   renderApp();
 }
 
-// ★ 新版:整個專案 = 1 個行事曆事件,所有任務都是子任務
-// 事件日期 = 當前下一個未完成任務日期(動態);子任務各自有 due_date + assignee
+// ★ 新版:整個專案 = 1 個行事曆事件,擺在上市日單日呈現
 async function _buildDevCalendarEvents(project, tasks, projectName) {
   if (!tasks.length) return;
-
-  // 找下一個未完成任務日期(當前進行中)· 剛建立時 = 第一個任務
-  const nextTask = [...tasks].sort((a,b) => (a.due_date||'').localeCompare(b.due_date||'')).find(t => t.status !== '完成' && t.status !== '取消');
-  const eventDate = nextTask?.due_date || tasks[0]?.due_date;
 
   const pipelines = project.pipelines || [];
   const hasMultiPipeline = pipelines.length > 1;
 
-  // 全辦公室 = 所有 active 用戶
+  // 找上市日(專案 launch_date 優先;沒有就用最後里程碑或最後 due_date)
+  const launchDate = project.launch_date
+    || tasks.find(t => t.is_milestone && (t.step_name?.includes('量產') || t.step_name?.includes('到貨驗收')))?.due_date
+    || tasks.map(t => t.due_date).filter(Boolean).sort().pop();
+
+  // 全辦公室
   const allActiveUserIds = (state.data.users||[]).filter(u => u.is_active !== false).map(u => u.id);
 
   // 建 subtasks:多 pipeline 才加 [純銀]/[合金]/[周邊] 前綴
@@ -13115,16 +13133,31 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
       };
     });
 
-  // 建 1 個 event · 標題就是系列名稱
+  // 產生 description:主要設計師 + 關鍵里程碑日期
+  const designer = tasks.find(t => t.step_key === 'design_draft' || t.step_key === 'item_design')?.assignee_name;
+  const keyMilestones = tasks
+    .filter(t => t.is_milestone || t.step_key === 'design_lock' || t.step_key === 'design_confirm' || t.step_key === 'mail_review' || t.step_key === 'system_submit')
+    .sort((a,b) => (a.due_date||'').localeCompare(b.due_date||''))
+    .map(t => {
+      const d = t.due_date ? `${t.due_date.slice(5,7)}/${t.due_date.slice(8,10)}` : '—';
+      return `${d} ${t.step_name}${t.assignee_name?` (${t.assignee_name})`:''}`;
+    });
+  const description = [
+    designer ? `主要設計師:${designer}` : null,
+    ...keyMilestones,
+    launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
+  ].filter(Boolean).join('\n');
+
+  // 建 1 個 event · 標題就是系列名稱 · 落在上市日單日
   const payload = {
     title: projectName,
     event_type: 'dev',
-    event_date: eventDate,
-    start_date: project.start_date,
-    end_date: nextTask?.due_date || eventDate,
+    event_date: launchDate,
+    start_date: launchDate,
+    end_date: launchDate,
     priority: '中',
-    description: `PM: ${project.pm_name||'—'} · ${pipelines.map(pl => PIPELINE_TEMPLATES[pl]?.label||pl).join(' · ')}\n共 ${tasks.length} 個任務`,
-    assigned_to: null, // 全辦公室,不指派單一人
+    description,
+    assigned_to: null,
     assignee_ids: allActiveUserIds,
     subtasks,
     created_by: state.user?.id || null,
