@@ -12134,9 +12134,7 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults) {
     // 暫時全部生 · 退回的可以之後手動處理(或後續改進)
     await _devAutoGenerateSideTasks(p, task.pipeline);
   }
-  if (task.step_key === 'production' || task.step_key === 'arrival_check') {
-    setTimeout(() => window._devCreateProductsPrompt(p.id, task.pipeline), 300);
-  }
+  // 量產完成不再自動彈建商品(手工由陳秋惠處理)
 
   // 更新專案行事曆事件的 event_date = 下一個未完成任務日
   await _devUpdateEventDateToNextTask(projectId);
@@ -12218,13 +12216,7 @@ window._devToggleTaskDone = async function(taskId, checked) {
       // 樣品審過 → 為每個品相自動生副線任務
       await _devAutoGenerateSideTasks(p, task.pipeline);
     }
-    if (task.step_key === 'production' || task.step_key === 'arrival_check') {
-      // 量產完成 → 提示是否為未量產品相建商品
-      const activeVariants = (p.dev_variants||[]).filter(v => v.pipeline === task.pipeline && !v.cancelled_at && !v.product_id);
-      if (activeVariants.length) {
-        setTimeout(() => window._devCreateProductsPrompt(p.id, task.pipeline), 300);
-      }
-    }
+    // 量產完成不再自動彈建商品 popup(改為陳秋惠在「商品表」副線任務手工建)
 
     // 延遲/提早提示 — 只有 PM 或老闆才會彈出決策視窗
     const dueDate = task.due_date;
