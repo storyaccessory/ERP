@@ -1288,7 +1288,7 @@ async function loadRepair() {
 }
 
 async function loadDev() {
-  const { data } = await db.from('dev_projects').select('*, series(name), dev_tasks(*)').order('created_at', { ascending: false });
+  const { data } = await db.from('dev_projects').select('*, series(name), dev_tasks(*), dev_variants(*)').order('created_at', { ascending: false });
   state.data.dev = data || [];
   // 順便載入設計圖號(輕量表,同頁使用)
   try { await loadDesignNumbers(); } catch(e) { console.warn('loadDesignNumbers failed', e); }
@@ -11190,6 +11190,142 @@ window._rpRequote = async function(orderId) {
 
 // ── Dev Projects ──
 // ═══════════════════════════════════════════════
+// 開發專案 · 3 條 Pipeline 模板
+// ═══════════════════════════════════════════════
+// 步驟結構:
+//   { key, name, days, assignee_name, milestone, group, trigger }
+//   days: 從觸發點起算的工作天數(累積型)
+//   trigger: null=前一步接續 / 'sample_approved' 樣品審過 / 'production_deploy' 量產發包 / 'cost_done' 成本完 / 'price_done' 售價完
+//   milestone: true 是里程碑(🎯)
+
+const PIPELINE_TEMPLATES = {
+  silver: {
+    label: '🥈 銀件',
+    color: '#78909c',
+    main: [
+      { key:'design_draft',      name:'設計圖',              days:10, assignee_name:'劉怡汝' },
+      { key:'design_lock',       name:'設計定稿',            days:3,  assignee_name:'郭子媽', issue_design_number:true },
+      { key:'mail_review',       name:'郵件送審',            days:7,  assignee_name:'郭子媽' },
+      { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子媽' },
+      { key:'design_approved',   name:'設計圖審過',          days:7,  assignee_name:'蔡采玲', milestone:true },
+      { key:'modeling',          name:'建模',                days:3,  assignee_name:'郭子媽' },
+      { key:'model_approved',    name:'建模確認 / 3D 審過',  days:7,  assignee_name:'蔡采玲', milestone:true },
+      { key:'sampling',          name:'打樣',                days:14, assignee_name:'王韋翔' },
+      { key:'sample_submit',     name:'樣品送審寄出',        days:1,  assignee_name:'郭子媽' },
+      { key:'sample_approved',   name:'樣品送審追蹤 / 審過', days:7,  assignee_name:'蔡采玲', milestone:true, trigger_side:true },
+      { key:'visual',            name:'視覺 / 上架素材',     days:14, assignee_name:'林毓馨', parallel:true, after:'sample_approved' },
+      { key:'production',        name:'量產',                days:14, assignee_name:'王韋翔', parallel:true, after:'sample_approved', milestone:true, is_launch:true },
+    ],
+    side: [
+      { key:'plating_photo',   name:'電鍍拍照',    assignee_name:'王韋翔', trigger:'sample_approved', offset:5 },
+      { key:'spec_sheet',      name:'產品規格單',  assignee_name:'郭子媽', trigger:'sample_approved', offset:2 },
+      { key:'restock_order',   name:'補貨單',      assignee_name:'陳秋惠', trigger:'sample_approved', offset:3 },
+      { key:'cost_calc',       name:'成本計算',    assignee_name:'王韋翔', trigger:'sample_approved', offset:10 },
+      { key:'retail_price',    name:'商品售價',    assignee_name:'劉怡汝', trigger:'cost_done',       offset:2 },
+      { key:'product_sheet',   name:'商品表',      assignee_name:'陳秋惠', trigger:'price_done',      offset:1 },
+      { key:'gold_mark',       name:'金標申請',    assignee_name:'蔡采玲', trigger:'price_done',      offset:2 },
+    ]
+  },
+
+  alloy: {
+    label: '🥇 合金',
+    color: '#c9a961',
+    main: [
+      // 前 7 步共用銀件的設計→3D審過(拷貝一份,獨立追蹤)
+      { key:'design_draft',      name:'設計圖',              days:10, assignee_name:'劉怡汝' },
+      { key:'design_lock',       name:'設計定稿',            days:3,  assignee_name:'郭子媽', issue_design_number:true },
+      { key:'mail_review',       name:'郵件送審',            days:7,  assignee_name:'郭子媽' },
+      { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子媽' },
+      { key:'design_approved',   name:'設計圖審過',          days:7,  assignee_name:'蔡采玲', milestone:true },
+      { key:'modeling',          name:'建模',                days:3,  assignee_name:'郭子媽' },
+      { key:'model_approved',    name:'建模確認 / 3D 審過',  days:7,  assignee_name:'蔡采玲', milestone:true },
+      // 合金專屬
+      { key:'factory_file',      name:'工廠發包檔製作',      days:3,  assignee_name:'郭子媽' },
+      { key:'factory_search',    name:'找工廠 / 打樣發包',   days:7,  assignee_key:'factory_owner' },  // 取專案的 factory_owner
+      { key:'alloy_sampling',    name:'打樣',                days:30, assignee_key:'factory_owner' },
+      { key:'sample_approved',   name:'樣品送審',            days:7,  assignee_name:'蔡采玲', milestone:true },
+      { key:'production_deploy', name:'量產發包',            days:5,  assignee_key:'factory_owner', trigger_side:true },
+      { key:'production_track',  name:'量產追蹤',            days:30, assignee_key:'factory_owner' },
+      { key:'arrival_check',    name:'到貨驗收',            days:7,  assignee_name:'陳秋惠', milestone:true, is_launch:true },
+    ],
+    side: [
+      { key:'cost_and_price',  name:'成本+售價',   assignee_name:'劉怡汝', trigger:'production_deploy', offset:5 },
+      { key:'product_sheet',   name:'商品表',      assignee_name:'陳秋惠', trigger:'price_done',        offset:3 },
+      { key:'gold_mark',       name:'金標申請',    assignee_name:'蔡采玲', trigger:'price_done',        offset:3 },
+    ]
+  },
+
+  peripheral: {
+    label: '🎁 周邊',
+    color: '#ec407a',
+    main: [
+      { key:'material_confirm', name:'先確認追素材',       days:5,  assignee_name:'蔡采玲' },
+      { key:'item_brainstorm',  name:'開發品項發想討論',   days:5,  assignee_name:'林毓馨' },
+      { key:'item_confirm',     name:'開發品項確認',       days:7,  assignee_name:'林毓馨' },
+      { key:'item_design',      name:'開發品項設計',       days:10, assignee_name:'林毓馨' },
+      { key:'design_confirm',   name:'開發品項設計確認',   days:7,  assignee_name:'林毓馨', issue_design_number:true },
+      { key:'factory_file',     name:'商品工廠檔完稿',     days:3,  assignee_name:'林毓馨' },
+      { key:'production_deploy',name:'商品發包量產',       days:5,  assignee_name:'蔡采玲', trigger_side:true },
+      { key:'production_track', name:'商品量產追蹤',       days:10, assignee_name:'蔡采玲' },
+      { key:'arrival_check',   name:'商品到貨驗收',       days:3,  assignee_name:'陳秋惠', milestone:true, is_launch:true },
+    ],
+    side: [
+      { key:'sheet_draft',     name:'商品表 初版',    assignee_name:'陳秋惠', trigger:'production_deploy', offset:5 },
+      { key:'cost_and_price',  name:'成本+售價',      assignee_name:'蔡采玲', trigger:'production_deploy', offset:5 },
+      { key:'sheet_final',     name:'商品表 最終版',  assignee_name:'陳秋惠', trigger:'price_done',        offset:5 },
+    ]
+  }
+};
+
+// 計算主線每步的預定日期(工作天累加)
+function _calcMainDates(pipelineKey, startDate) {
+  const tpl = PIPELINE_TEMPLATES[pipelineKey];
+  if (!tpl) return [];
+  const start = new Date(startDate + 'T00:00:00');
+  const dates = [];
+  let cursor = new Date(start);
+  const stepMap = {}; // key -> date
+
+  for (const step of tpl.main) {
+    let stepStart;
+    if (step.after) {
+      // 並行分支:從 after 的日期開始加
+      stepStart = new Date(stepMap[step.after] + 'T00:00:00');
+    } else {
+      stepStart = new Date(cursor);
+    }
+    const dueD = addWorkdays(stepStart, step.days);
+    const dueStr = `${dueD.getFullYear()}-${String(dueD.getMonth()+1).padStart(2,'0')}-${String(dueD.getDate()).padStart(2,'0')}`;
+    stepMap[step.key] = dueStr;
+    dates.push({ ...step, expected_date: dueStr });
+    if (!step.parallel && !step.after) cursor = dueD;
+  }
+  return { dates, stepMap };
+}
+
+// 計算副線每步的預定日期(依 trigger 觸發)
+function _calcSideDates(pipelineKey, stepMap) {
+  const tpl = PIPELINE_TEMPLATES[pipelineKey];
+  if (!tpl) return [];
+  const sideDates = {};
+  // 先處理 trigger 是主線里程碑的
+  const results = [];
+  for (const step of tpl.side) {
+    let baseDate;
+    if (step.trigger === 'cost_done')       baseDate = sideDates['cost_calc'] || sideDates['cost_and_price'];
+    else if (step.trigger === 'price_done') baseDate = sideDates['retail_price'] || sideDates['cost_and_price'];
+    else if (step.trigger)                   baseDate = stepMap[step.trigger];
+    if (!baseDate) continue;
+    const startD = new Date(baseDate + 'T00:00:00');
+    const dueD = addWorkdays(startD, step.offset || 0);
+    const dueStr = `${dueD.getFullYear()}-${String(dueD.getMonth()+1).padStart(2,'0')}-${String(dueD.getDate()).padStart(2,'0')}`;
+    sideDates[step.key] = dueStr;
+    results.push({ ...step, expected_date: dueStr });
+  }
+  return results;
+}
+
+// ═══════════════════════════════════════════════
 // 設計圖號發號機
 // ═══════════════════════════════════════════════
 async function loadDesignNumbers() {
@@ -11412,54 +11548,484 @@ window._dnVoid = async function(id, num) {
 
 function renderDev() {
   const projects = state.data.dev || [];
-  const tab = state.data.devTab || '飾品';
+  const tab = state.data.devTab || 'projects';
   if (tab === '設計圖號') return _renderDesignNumbers();
-  const filtered = projects.filter(p => p.dev_type === tab);
+  const activeProjects = projects.filter(p => p.status !== '完成' && p.status !== '取消');
 
   return `
     <div class="tabs">
-      <div class="tab ${tab==='飾品'?'active':''}" data-dev-tab="飾品">飾品 (${projects.filter(p=>p.dev_type==='飾品').length})</div>
-      <div class="tab ${tab==='周邊'?'active':''}" data-dev-tab="周邊">周邊 (${projects.filter(p=>p.dev_type==='周邊').length})</div>
+      <div class="tab ${tab==='projects'?'active':''}" data-dev-tab="projects">🛠 進行中專案 (${activeProjects.length})</div>
+      <div class="tab ${tab==='all'?'active':''}" data-dev-tab="all">全部專案 (${projects.length})</div>
       <div class="tab ${tab==='設計圖號'?'active':''}" data-dev-tab="設計圖號">🔢 設計圖號</div>
     </div>
     <div class="search-bar">
-      <button class="btn btn-primary" id="add-dev-btn">+ 新增開發專案</button>
+      <button class="btn btn-primary" onclick="modalNewDevProject()">+ 新增開發專案</button>
     </div>
-    ${filtered.length === 0 ? `<div class="card"><div class="empty"><div class="empty-icon">🛠️</div><p>尚無開發專案</p></div></div>` :
-      filtered.map(p => {
-        const tasks = p.dev_tasks || [];
-        const done = tasks.filter(t=>t.status==='完成').length;
-        const total = tasks.length;
-        const pct = total ? Math.round(done/total*100) : 0;
-        const currentTask = tasks.find(t=>t.status!=='完成'&&t.status!=='跳過');
-        return `<div class="card" style="margin-bottom:12px">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <div>
-              <div style="font-size:15px;font-weight:600">${p.name}</div>
-              <div style="font-size:12px;color:var(--muted);margin-top:2px">${p.series?.name||'—'} · ${p.dev_type}</div>
-            </div>
-            <div style="text-align:right">
-              <div style="font-size:13px;font-weight:600;color:var(--accent-dark)">${pct}%</div>
-              <div style="font-size:11px;color:var(--muted)">${done}/${total} 階段</div>
-            </div>
+    ${(tab==='all'?projects:activeProjects).length === 0 ? `<div class="card"><div class="empty"><div class="empty-icon">🛠️</div><p>${tab==='all'?'尚無專案':'目前沒有進行中的專案'}</p></div></div>` :
+      (tab==='all'?projects:activeProjects).map(p => _renderDevProjectCard(p)).join('')}`;
+}
+
+function _renderDevProjectCard(p) {
+  const tasks = p.dev_tasks || [];
+  const variants = p.dev_variants || [];
+  const pipelines = Array.isArray(p.pipelines) ? p.pipelines : [];
+  const activeVariants = variants.filter(v => !v.cancelled_at);
+
+  // 按 pipeline 計算進度
+  const stats = {};
+  pipelines.forEach(pl => {
+    const pTasks = tasks.filter(t => t.pipeline === pl && t.status !== '取消');
+    const done = pTasks.filter(t => t.status === '完成').length;
+    stats[pl] = { total: pTasks.length, done, pct: pTasks.length ? Math.round(done/pTasks.length*100) : 0 };
+  });
+
+  const today = _localToday();
+  const overdue = tasks.filter(t => t.due_date && t.due_date < today && t.status !== '完成' && t.status !== '取消').length;
+  const dueToday = tasks.filter(t => t.due_date === today && t.status !== '完成' && t.status !== '取消').length;
+
+  return `<div class="card" style="margin-bottom:12px;cursor:pointer" onclick="openDevProject('${p.id}')">
+    <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap">
+      <div style="flex:1;min-width:220px">
+        <div style="font-size:16px;font-weight:700;color:var(--accent-dark)">${p.name}</div>
+        <div style="font-size:12px;color:var(--muted);margin-top:3px">
+          PM: ${p.pm_name||'—'} · 起始 ${p.start_date||'—'} ·
+          ${p.launch_date?`上市 <b style="color:var(--accent-dark)">${p.launch_date}</b>`:'上市日未設'}
+          ${p.earliest_launch?` · 最快 ${p.earliest_launch}`:''}
+        </div>
+        <div style="margin-top:8px;display:flex;gap:6px;flex-wrap:wrap">
+          ${pipelines.map(pl => {
+            const t = PIPELINE_TEMPLATES[pl];
+            const s = stats[pl] || {done:0,total:0,pct:0};
+            const vCount = activeVariants.filter(v => v.pipeline === pl).length;
+            return `<span style="background:${t?.color||'#999'}22;color:${t?.color||'#666'};padding:3px 10px;border-radius:12px;font-size:11px;font-weight:600">
+              ${t?.label||pl} · ${vCount}品相 · ${s.done}/${s.total}
+            </span>`;
+          }).join('')}
+        </div>
+      </div>
+      <div style="text-align:right;min-width:80px">
+        ${overdue>0?`<div style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;margin-bottom:2px">⚠ 逾期 ${overdue}</div>`:''}
+        ${dueToday>0?`<div style="background:#fff3e0;color:#e65100;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600">📅 今日 ${dueToday}</div>`:''}
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">${p.status||'進行中'}</div>
+      </div>
+    </div>
+  </div>`;
+}
+
+// 佔位:進入專案詳情頁(Phase 2 再做)
+window.openDevProject = function(id) {
+  showToast('專案詳情頁 Phase 2 開發中,先看行事曆確認任務已建好', 'info', 4000);
+};
+
+// ═══════════════════════════════════════════════
+// 新增開發專案 · 3 步 modal
+// ═══════════════════════════════════════════════
+window.modalNewDevProject = async function() {
+  // 確保資料齊
+  await Promise.all([
+    (state.data.users||[]).length ? Promise.resolve() : db.from('profiles').select('id,name,role,is_active').order('name').then(({data})=>{state.data.users=data||[]}),
+    (state.data.series||[]).length ? Promise.resolve() : loadIPTree(),
+  ]);
+
+  // 初始化 draft
+  state.data._devDraft = {
+    name: '',
+    series_id: null,
+    pm_id: null,
+    pm_name: '蔡采玲',
+    start_date: _localToday(),
+    launch_date: '',
+    pipelines: [],
+    factory_owner_id: null,
+    factory_owner_name: '',
+    variants: [],
+    notes: '',
+  };
+
+  // 蔡采玲預設當 PM
+  const activeUsers = (state.data.users||[]).filter(u => u.is_active !== false);
+  const bossUser = activeUsers.find(u => u.name === '蔡采玲');
+  if (bossUser) state.data._devDraft.pm_id = bossUser.id;
+
+  const rerender = () => {
+    const body = document.getElementById('dev-modal-body');
+    if (body) body.innerHTML = _renderDevModalBody();
+  };
+  window._devRerender = rerender;
+
+  showModal('🛠 新增開發專案', `<div id="dev-modal-body">${_renderDevModalBody()}</div>`, [
+    { label: '✅ 建立專案(自動排入行事曆)', primary:true, onclick: _saveDevProject },
+    { label: '取消', onclick: closeModal },
+  ], { wide: true });
+};
+
+function _renderDevModalBody() {
+  const d = state.data._devDraft;
+  const activeUsers = (state.data.users||[]).filter(u => u.is_active !== false);
+  const seriesList = (state.data.series||[]).sort((a,b) => (a.name||'').localeCompare(b.name||'','zh-TW'));
+
+  const usePipeline = pl => d.pipelines.includes(pl);
+  const needFactoryOwner = usePipeline('alloy');
+
+  // 計算最快可上市日
+  let earliestPerPipeline = {};
+  if (d.start_date) {
+    d.pipelines.forEach(pl => {
+      const { dates } = _calcMainDates(pl, d.start_date);
+      const last = dates[dates.length - 1];
+      if (last) earliestPerPipeline[pl] = last.expected_date;
+    });
+  }
+  const earliestOverall = Object.values(earliestPerPipeline).sort().pop();
+
+  return `
+    <!-- Step 1:基本資料 -->
+    <div style="background:#e8f5f4;padding:12px 14px;border-radius:8px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;color:var(--accent-dark);margin-bottom:10px">① 基本資料</div>
+      <div class="form-row form-row-2">
+        <div class="form-group">
+          <label>系列名 * <span style="font-size:10px;color:var(--muted)">(可直接輸入新的)</span></label>
+          <input class="form-control" id="dev-name" value="${d.name||''}" list="dev-series-list"
+            oninput="state.data._devDraft.name=this.value;(function(){const s=(state.data.series||[]).find(x=>x.name===state.data._devDraft.name);state.data._devDraft.series_id=s?.id||null})()">
+          <datalist id="dev-series-list">${seriesList.map(s=>`<option value="${s.name}">`).join('')}</datalist>
+        </div>
+        <div class="form-group">
+          <label>PM</label>
+          <select class="form-control" id="dev-pm" onchange="(function(el){state.data._devDraft.pm_id=el.value;state.data._devDraft.pm_name=el.selectedOptions[0]?.dataset?.name||''})(this)">
+            ${activeUsers.map(u=>`<option value="${u.id}" data-name="${u.name}" ${d.pm_id===u.id?'selected':''}>${u.name}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+      <div class="form-row form-row-2">
+        <div class="form-group">
+          <label>設計圖起始日 (D0) *</label>
+          <input class="form-control" type="date" id="dev-start" value="${d.start_date||''}"
+            oninput="state.data._devDraft.start_date=this.value;window._devRerender()">
+        </div>
+        <div class="form-group">
+          <label>預計上市日 <span style="font-size:10px;color:var(--muted)">(可空,系統會算最快日)</span></label>
+          <input class="form-control" type="date" id="dev-launch" value="${d.launch_date||''}"
+            oninput="state.data._devDraft.launch_date=this.value">
+        </div>
+      </div>
+    </div>
+
+    <!-- Step 2:選 Pipeline -->
+    <div style="background:#fff3e0;padding:12px 14px;border-radius:8px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;color:#e65100;margin-bottom:8px">② 選擇要開的 Pipeline(可複選)</div>
+      <div style="display:flex;gap:10px;flex-wrap:wrap">
+        ${Object.entries(PIPELINE_TEMPLATES).map(([key, t]) => {
+          const on = usePipeline(key);
+          return `<label style="display:flex;align-items:center;gap:6px;padding:8px 14px;border-radius:20px;border:2px solid ${on?t.color:'var(--border)'};background:${on?t.color+'22':'#fff'};cursor:pointer;font-weight:600">
+            <input type="checkbox" ${on?'checked':''} onchange="window._devTogglePipeline('${key}')" style="margin:0">
+            <span style="color:${on?t.color:'var(--text)'}">${t.label}</span>
+            <span style="font-size:11px;color:var(--muted)">${t.main.length}主線 · ${t.side.length}副線</span>
+          </label>`;
+        }).join('')}
+      </div>
+
+      ${needFactoryOwner ? `
+      <div style="margin-top:10px;padding:8px 12px;background:#fff;border-radius:6px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:4px">🥇 合金需要選發包人</div>
+        <select class="form-control" style="max-width:250px" onchange="(function(el){state.data._devDraft.factory_owner_id=el.value;state.data._devDraft.factory_owner_name=el.selectedOptions[0]?.dataset?.name||''})(this)">
+          <option value="">— 選發包人 —</option>
+          ${activeUsers.map(u=>`<option value="${u.id}" data-name="${u.name}" ${d.factory_owner_id===u.id?'selected':''}>${u.name}</option>`).join('')}
+        </select>
+      </div>` : ''}
+    </div>
+
+    <!-- Step 3:品相清單 -->
+    ${d.pipelines.length ? `
+    <div style="background:#f3e5f5;padding:12px 14px;border-radius:8px;margin-bottom:12px">
+      <div style="font-size:13px;font-weight:700;color:#6a1b9a;margin-bottom:8px">③ 品相清單(每條 pipeline 至少 1 個)</div>
+      ${d.pipelines.map(pl => {
+        const t = PIPELINE_TEMPLATES[pl];
+        const vList = d.variants.filter(v => v.pipeline === pl);
+        return `<div style="margin-bottom:10px;padding:8px 12px;background:#fff;border-radius:6px;border-left:4px solid ${t.color}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+            <div style="font-weight:600;color:${t.color}">${t.label} 品相</div>
+            <button class="btn btn-sm btn-outline" onclick="window._devAddVariant('${pl}')" style="font-size:11px;padding:2px 10px">+ 加品相</button>
           </div>
-          <div class="progress-bar" style="height:10px;margin-bottom:10px"><div class="progress-fill" style="width:${pct}%"></div></div>
-          <div style="display:flex;gap:8px;flex-wrap:wrap">
-            ${tasks.slice(0, 9).map(t => `
-              <div style="text-align:center;min-width:70px">
-                <div style="font-size:10px;color:${t.status==='完成'?'var(--accent-dark)':t===currentTask?'var(--warning)':'var(--muted)'};font-weight:${t===currentTask?'600':'400'}">${t.stage_name}</div>
-                <div style="font-size:16px">${t.status==='完成'?'✅':t===currentTask?'🔄':'⬜'}</div>
-              </div>
-            `).join('')}
-            ${tasks.length > 9 ? `<div style="font-size:11px;color:var(--muted);align-self:center">+${tasks.length-9} 更多</div>` : ''}
-          </div>
-          ${p.deadline?`<div style="font-size:12px;color:var(--muted);margin-top:8px">📅 截止：${p.deadline}</div>`:''}
-          <div style="margin-top:10px;display:flex;gap:6px">
-            <button class="btn btn-sm btn-outline" data-action="view-dev" data-id="${p.id}">查看詳情</button>
-            ${currentTask?`<button class="btn btn-sm btn-primary" data-action="complete-task" data-id="${currentTask.id}">✓ 完成「${currentTask.stage_name}」</button>`:''}
-          </div>
+          ${vList.length === 0 ? `<div style="font-size:11px;color:var(--muted);padding:6px 0">還沒加品相</div>` :
+            vList.map((v, idx) => {
+              const globalIdx = d.variants.indexOf(v);
+              return `<div style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
+                <input class="form-control" value="${(v.name||'').replace(/"/g,'&quot;')}" placeholder="品相名(例:繁花_項鍊)"
+                  oninput="state.data._devDraft.variants[${globalIdx}].name=this.value" style="flex:1">
+                ${pl!=='peripheral' ? `<select class="form-control" onchange="state.data._devDraft.variants[${globalIdx}].category=this.value" style="width:100px">
+                  <option value="">類別</option>
+                  ${['項鍊','手鍊','戒指','耳環'].map(c=>`<option ${v.category===c?'selected':''}>${c}</option>`).join('')}
+                </select>` : ''}
+                <button class="btn btn-sm" style="background:#ffebee;color:#c62828;font-size:11px;padding:2px 8px" onclick="window._devRemoveVariant(${globalIdx})">✕</button>
+              </div>`;
+            }).join('')}
         </div>`;
-      }).join('')}`;
+      }).join('')}
+    </div>
+    ` : ''}
+
+    <!-- 排程總覽 -->
+    ${d.pipelines.length && d.start_date ? `
+    <div style="background:#e8f5e9;padding:10px 14px;border-radius:8px;margin-bottom:12px">
+      <div style="font-size:12px;font-weight:700;color:#1b5e20;margin-bottom:6px">📅 排程總覽</div>
+      ${d.pipelines.map(pl => {
+        const t = PIPELINE_TEMPLATES[pl];
+        return `<div style="font-size:12px;margin:3px 0">
+          <span style="color:${t.color};font-weight:600">${t.label}</span> 最快可上市:<b>${earliestPerPipeline[pl]||'—'}</b>
+        </div>`;
+      }).join('')}
+      <div style="margin-top:6px;padding-top:6px;border-top:1px dashed #a5d6a7;font-size:13px;font-weight:700;color:#1b5e20">
+        🎯 混合最快上市 = <b>${earliestOverall||'—'}</b>
+        ${d.launch_date && earliestOverall && d.launch_date < earliestOverall ? `<span style="color:#c62828;margin-left:8px">⚠ 你的上市日 ${d.launch_date} 早於最快可上市</span>` : ''}
+        ${d.launch_date && earliestOverall && d.launch_date >= earliestOverall ? `<span style="color:#2e7d32;margin-left:8px">✓ 上市日 ${d.launch_date} 有 buffer</span>` : ''}
+      </div>
+    </div>` : ''}
+
+    <div class="form-group">
+      <label>備註(選填)</label>
+      <textarea class="form-control" rows="2" placeholder="例:聯名合作備註、優先度、廠商特別要求…"
+        oninput="state.data._devDraft.notes=this.value">${d.notes||''}</textarea>
+    </div>
+
+    <div style="font-size:11px;color:var(--muted);padding:8px 12px;background:#f5f5f5;border-radius:6px;line-height:1.6">
+      按建立後系統會:1) 建立專案 · 2) 每條 pipeline 生成主線+副線任務 · 3) 依日期聚合建立行事曆事件 · 4) 指派給各負責人
+    </div>
+  `;
+}
+
+window._devTogglePipeline = function(key) {
+  const d = state.data._devDraft;
+  const idx = d.pipelines.indexOf(key);
+  if (idx >= 0) {
+    d.pipelines.splice(idx, 1);
+    // 移除該 pipeline 的品相
+    d.variants = d.variants.filter(v => v.pipeline !== key);
+  } else {
+    d.pipelines.push(key);
+    // 自動加一個空品相
+    d.variants.push({ pipeline: key, name: '', category: '' });
+  }
+  window._devRerender();
+};
+
+window._devAddVariant = function(pipeline) {
+  state.data._devDraft.variants.push({ pipeline, name: '', category: '' });
+  window._devRerender();
+};
+
+window._devRemoveVariant = function(idx) {
+  state.data._devDraft.variants.splice(idx, 1);
+  window._devRerender();
+};
+
+// ═══════════════════════════════════════════════
+// 儲存專案 · 一次寫入 project + variants + tasks + calendar
+// ═══════════════════════════════════════════════
+async function _saveDevProject() {
+  const d = state.data._devDraft;
+  if (!d.name?.trim()) { showToast('請填系列名','error'); return; }
+  if (!d.start_date) { showToast('請填設計圖起始日','error'); return; }
+  if (!d.pipelines.length) { showToast('請至少選一條 pipeline','error'); return; }
+  if (d.pipelines.includes('alloy') && !d.factory_owner_id) { showToast('合金需要選發包人','error'); return; }
+  const validVariants = d.variants.filter(v => v.name?.trim());
+  for (const pl of d.pipelines) {
+    if (!validVariants.some(v => v.pipeline === pl)) {
+      showToast(`${PIPELINE_TEMPLATES[pl].label} 至少要一個品相`,'error');
+      return;
+    }
+  }
+
+  // 檢查上市日
+  let earliestOverall = null;
+  const pipelineDates = {};
+  d.pipelines.forEach(pl => {
+    const r = _calcMainDates(pl, d.start_date);
+    pipelineDates[pl] = r;
+    const last = r.dates[r.dates.length - 1];
+    if (last && (!earliestOverall || last.expected_date > earliestOverall)) earliestOverall = last.expected_date;
+  });
+  if (d.launch_date && d.launch_date < earliestOverall) {
+    if (!confirm(`上市日 ${d.launch_date} 早於最快可上市 ${earliestOverall},確定要建立?`)) return;
+  }
+
+  // ─── 1. 建 project ───
+  const { data: proj, error: pErr } = await db.from('dev_projects').insert({
+    name: d.name.trim(),
+    series_id: d.series_id,
+    dev_type: d.pipelines.includes('peripheral') && d.pipelines.length===1 ? '周邊' : '飾品',
+    pm_id: d.pm_id,
+    pm_name: d.pm_name,
+    start_date: d.start_date,
+    launch_date: d.launch_date || null,
+    earliest_launch: earliestOverall,
+    pipelines: d.pipelines,
+    factory_owner_id: d.factory_owner_id,
+    factory_owner_name: d.factory_owner_name,
+    notes: d.notes?.trim() || null,
+    status: '進行中',
+    created_by: state.user?.id,
+  }).select('id').single();
+  if (pErr) { showToast('建專案失敗:'+pErr.message,'error'); return; }
+  const projectId = proj.id;
+
+  // ─── 2. 建 variants ───
+  const variantInserts = validVariants.map(v => ({
+    project_id: projectId,
+    pipeline: v.pipeline,
+    name: v.name.trim(),
+    category: v.category || null,
+  }));
+  const { data: variantsData, error: vErr } = await db.from('dev_variants').insert(variantInserts).select();
+  if (vErr) { showToast('建品相失敗:'+vErr.message,'error'); return; }
+
+  // ─── 3. 建 tasks ───
+  const users = state.data.users || [];
+  const findUser = name => users.find(u => u.name === name);
+  const taskInserts = [];
+  let orderCounter = 0;
+
+  d.pipelines.forEach(pl => {
+    const { dates, stepMap } = pipelineDates[pl];
+    // 主線 · 系列級
+    dates.forEach(step => {
+      // 解析 assignee(可能是名字或 factory_owner)
+      let assignee_name = step.assignee_name;
+      let assignee_id = null;
+      if (step.assignee_key === 'factory_owner') {
+        assignee_name = d.factory_owner_name;
+        assignee_id = d.factory_owner_id;
+      } else {
+        const u = findUser(step.assignee_name);
+        if (u) assignee_id = u.id;
+      }
+      taskInserts.push({
+        project_id: projectId,
+        variant_id: null,
+        pipeline: pl,
+        step_key: step.key,
+        step_name: step.name,
+        step_group: 'main',
+        is_milestone: !!step.milestone,
+        order_num: ++orderCounter,
+        assignee_id,
+        assignee_name,
+        expected_date: step.expected_date,
+        due_date: step.expected_date,
+        status: '未開始',
+      });
+    });
+
+    // 副線 · 每品相各一
+    const sideSteps = _calcSideDates(pl, stepMap);
+    const plVariants = variantsData.filter(v => v.pipeline === pl);
+    plVariants.forEach(v => {
+      sideSteps.forEach(step => {
+        const u = findUser(step.assignee_name);
+        taskInserts.push({
+          project_id: projectId,
+          variant_id: v.id,
+          pipeline: pl,
+          step_key: step.key,
+          step_name: step.name,
+          step_group: 'side',
+          is_milestone: false,
+          order_num: ++orderCounter,
+          assignee_id: u?.id || null,
+          assignee_name: step.assignee_name,
+          expected_date: step.expected_date,
+          due_date: step.expected_date,
+          status: '未開始',
+        });
+      });
+    });
+  });
+
+  const { data: tasksData, error: tErr } = await db.from('dev_tasks').insert(taskInserts).select();
+  if (tErr) { showToast('建任務失敗:'+tErr.message,'error'); return; }
+
+  // ─── 4. 建行事曆事件(方案 B:依「日期+負責人」聚合) ───
+  await _buildDevCalendarEvents(proj, tasksData, d.name.trim());
+
+  showToast(`✅ 專案「${d.name}」已建立 · ${tasksData.length} 個任務排入行事曆`, 'success', 4000);
+  closeModal();
+  await loadDev();
+  renderApp();
+}
+
+// 依「日期+負責人」聚合任務成行事曆事件
+async function _buildDevCalendarEvents(project, tasks, projectName) {
+  // 分組:key = `${date}__${assignee_id||'none'}`
+  const groups = {};
+  tasks.forEach(t => {
+    if (!t.due_date) return;
+    if (t.is_milestone) return; // 里程碑另外處理
+    const key = `${t.due_date}__${t.assignee_id||'none'}`;
+    if (!groups[key]) groups[key] = { date: t.due_date, assignee_id: t.assignee_id, assignee_name: t.assignee_name, tasks: [] };
+    groups[key].tasks.push(t);
+  });
+
+  const evInserts = [];
+  const taskEventLinks = []; // {taskId, eventKey}
+
+  Object.entries(groups).forEach(([key, grp]) => {
+    const subtasks = grp.tasks.map(t => ({
+      id: `dev_${t.id}`,
+      text: `[${t.step_name}]${t.variant_id?' · 品相':''}`,
+      done: false,
+      due_date: grp.date,
+      dev_task_id: t.id,
+      assignee_id: grp.assignee_id,
+    }));
+    evInserts.push({
+      title: `📋 [${projectName}] 開發任務`,
+      event_type: 'dev',
+      event_date: grp.date,
+      start_date: grp.date,
+      end_date: grp.date,
+      priority: '中',
+      description: `${grp.tasks.length} 項開發任務`,
+      assigned_to: grp.assignee_id,
+      assignee_ids: grp.assignee_id ? [grp.assignee_id] : [],
+      subtasks,
+      created_by: state.user?.id || null,
+      _key: key,
+    });
+    grp.tasks.forEach(t => taskEventLinks.push({ taskId: t.id, eventKey: key }));
+  });
+
+  // 里程碑:每一個獨立事件
+  tasks.filter(t => t.is_milestone).forEach(t => {
+    const key = `milestone_${t.id}`;
+    evInserts.push({
+      title: `🎯 [${projectName}] ${t.step_name}`,
+      event_type: 'dev',
+      event_date: t.due_date,
+      start_date: t.due_date,
+      end_date: t.due_date,
+      priority: '高',
+      description: t.step_name === '量產' || t.step_name === '到貨驗收' || t.step_name === '商品到貨驗收' ? '🎯 = 最快可上市' : '里程碑審核',
+      assigned_to: t.assignee_id,
+      assignee_ids: t.assignee_id ? [t.assignee_id] : [],
+      subtasks: [],
+      created_by: state.user?.id || null,
+      _key: key,
+    });
+    taskEventLinks.push({ taskId: t.id, eventKey: key });
+  });
+
+  // 批次插入
+  const payloadsWithoutKey = evInserts.map(e => { const {_key, ...rest} = e; return rest; });
+  const { data: evData, error: eErr } = await db.from('calendar_events').insert(payloadsWithoutKey).select();
+  if (eErr) { console.error('建行事曆失敗', eErr); showToast('部分行事曆事件建立失敗:'+eErr.message, 'error'); return; }
+
+  // 把 event_id 寫回 dev_tasks
+  const keyToEvId = {};
+  evInserts.forEach((e, i) => { keyToEvId[e._key] = evData[i]?.id; });
+  for (const link of taskEventLinks) {
+    const evId = keyToEvId[link.eventKey];
+    if (!evId) continue;
+    await db.from('dev_tasks').update({ calendar_event_id: evId }).eq('id', link.taskId);
+  }
 }
 
 // ── Accounting ──
