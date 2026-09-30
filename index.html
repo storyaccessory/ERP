@@ -9455,21 +9455,20 @@ async function modalEditVendor(v) {
         </div>
       </div>
       <div class="form-group"><label>地址</label><input class="form-control" id="v-addr" value="${v.address||''}"></div>
-      <div style="font-size:12px;font-weight:600;color:var(--accent-dark);margin-top:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">👤 業務聯絡</div>
+      <div style="font-size:12px;font-weight:600;color:var(--accent-dark);margin-top:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">業務聯絡</div>
       <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group"><label>聯絡人</label><input class="form-control" id="v-contact" value="${v.contact_name||''}"></div>
         <div class="form-group"><label>電話</label><input class="form-control" id="v-phone" value="${v.contact_phone||''}" oninput="window._cleanPhone(this)"></div>
       </div>
       <div class="form-group"><label>Mail</label><input class="form-control" id="v-contact-email" type="email" value="${v.contact_email||''}" placeholder="聯絡人 email"></div>
 
-      <div style="font-size:12px;font-weight:600;color:var(--accent-dark);margin-top:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">💰 會計聯絡</div>
+      <div style="font-size:12px;font-weight:600;color:var(--accent-dark);margin-top:6px;padding-bottom:4px;border-bottom:1px solid var(--border)">會計聯絡</div>
       <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group"><label>會計聯絡人</label><input class="form-control" id="v-acc-contact" value="${v.accounting_contact||''}"></div>
         <div class="form-group"><label>會計電話</label><input class="form-control" id="v-acc-phone" value="${v.accounting_phone||''}" oninput="window._cleanPhone(this)"></div>
       </div>
-      <div class="form-group"><label>會計 Mail</label><input class="form-control" id="v-acc-email" type="email" value="${v.accounting_email||''}" placeholder="會計 email"></div>
 
-      <div class="form-group"><label>電子發票 Mail</label><input class="form-control" id="v-email" value="${v.email||''}" placeholder="電子發票收件 email"></div>
+      <div class="form-group"><label>電子發票 Mail <span style="font-size:11px;color:var(--muted);font-weight:400">(=會計 Mail)</span></label><input class="form-control" id="v-email" value="${v.email||''}" placeholder="電子發票 / 會計 email"></div>
       <div class="form-grid-2" style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
         <div class="form-group" style="position:relative">
           <label>往來銀行</label>
@@ -9497,7 +9496,6 @@ async function modalEditVendor(v) {
         contact_email: document.getElementById('v-contact-email').value.trim() || null,
         accounting_contact: document.getElementById('v-acc-contact').value.trim() || null,
         accounting_phone: document.getElementById('v-acc-phone').value.trim() || null,
-        accounting_email: document.getElementById('v-acc-email').value.trim() || null,
         email: document.getElementById('v-email').value.trim() || null,
         bank_name: document.getElementById('v-bank').value.trim() || null,
         bank_code: document.getElementById('v-bank-code').value.trim() || null,
@@ -11583,6 +11581,7 @@ function renderDev() {
   const projects = state.data.dev || [];
   const tab = state.data.devTab || 'projects';
   if (tab === '設計圖號') return _renderDesignNumbers();
+  if (state.data.devDetailId) return _renderDevDetail(state.data.devDetailId);
   const activeProjects = projects.filter(p => p.status !== '完成' && p.status !== '取消');
 
   return `
@@ -11645,29 +11644,585 @@ function _renderDevProjectCard(p) {
   </div>`;
 }
 
-// 佔位:進入專案詳情頁 → 目前只提供「刪除專案(含行事曆)」
+// 進入專案詳情頁
 window.openDevProject = function(id) {
-  const p = (state.data.dev||[]).find(x => x.id === id);
-  if (!p) return;
-  const tasks = p.dev_tasks || [];
-  const done = tasks.filter(t => t.status === '完成').length;
-  const eventCount = new Set(tasks.map(t => t.calendar_event_id).filter(Boolean)).size;
+  state.data.devDetailId = id;
+  renderApp();
+};
+window.closeDevProject = function() {
+  state.data.devDetailId = null;
+  renderApp();
+};
 
-  showModal(`🛠 ${p.name}`, `
-    <div style="font-size:13px;line-height:1.8;color:var(--text);padding:8px 0">
-      <div><b>PM:</b> ${p.pm_name||'—'}</div>
-      <div><b>起始日:</b> ${p.start_date||'—'}</div>
-      <div><b>上市日:</b> ${p.launch_date||'—'} · 最快 ${p.earliest_launch||'—'}</div>
-      <div><b>Pipeline:</b> ${(p.pipelines||[]).map(pl => PIPELINE_TEMPLATES[pl]?.label||pl).join(' · ')}</div>
-      <div><b>進度:</b> ${done}/${tasks.length}</div>
-      <div><b>行事曆事件數:</b> ${eventCount}</div>
+// ═══════════════════════════════════════════════
+// 專案詳情頁
+// ═══════════════════════════════════════════════
+function _renderDevDetail(id) {
+  const p = (state.data.dev||[]).find(x => x.id === id);
+  if (!p) return `<div class="card"><div class="empty">找不到專案 <button class="btn btn-outline" onclick="closeDevProject()">返回列表</button></div></div>`;
+
+  const tasks = (p.dev_tasks||[]).sort((a,b) => (a.order_num||0) - (b.order_num||0));
+  const variants = p.dev_variants || [];
+  const pipelines = Array.isArray(p.pipelines) ? p.pipelines : [];
+  const today = _localToday();
+
+  const mainTasks = tasks.filter(t => t.step_group === 'main');
+  const sideTasks = tasks.filter(t => t.step_group === 'side');
+
+  const activeVariants = variants.filter(v => !v.cancelled_at);
+  const cancelledVariants = variants.filter(v => v.cancelled_at);
+
+  const done = tasks.filter(t => t.status === '完成').length;
+  const total = tasks.filter(t => t.status !== '取消').length;
+  const pct = total ? Math.round(done/total*100) : 0;
+  const overdue = tasks.filter(t => t.due_date && t.due_date < today && t.status !== '完成' && t.status !== '取消').length;
+
+  return `
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+      <button class="btn btn-outline btn-sm" onclick="closeDevProject()">← 返回列表</button>
+      <div style="font-size:18px;font-weight:700;color:var(--accent-dark)">🛠 ${p.name}</div>
+      <span class="tag tag-blue">${p.status||'進行中'}</span>
     </div>
-    <div style="padding:10px 12px;background:#fff8e1;border-left:3px solid #f57c00;border-radius:6px;font-size:12px;color:#666;margin-top:12px">
-      💡 完整詳情頁 Phase 2 開發中。目前你可以在行事曆看任務,或整個刪掉重建。
+
+    <div class="cards cards-4" style="margin-bottom:14px">
+      <div class="card"><div class="card-title">📊 進度</div><div class="card-value accent">${pct}%</div><div style="font-size:11px;color:var(--muted)">${done}/${total} 任務</div></div>
+      <div class="card"><div class="card-title">🎯 上市日</div><div class="card-value" style="font-size:18px">${p.launch_date||'—'}</div><div style="font-size:11px;color:var(--muted)">最快 ${p.earliest_launch||'—'}</div></div>
+      <div class="card"><div class="card-title">🏷 品相</div><div class="card-value">${activeVariants.length}</div><div style="font-size:11px;color:var(--muted)">${cancelledVariants.length?`+${cancelledVariants.length} 取消`:''}</div></div>
+      <div class="card" style="${overdue?'border-left:4px solid #c62828':''}"><div class="card-title">⚠ 逾期</div><div class="card-value" style="color:${overdue?'#c62828':'var(--muted)'}">${overdue}</div></div>
+    </div>
+
+    <!-- 專案基本資訊 -->
+    <div class="card" style="margin-bottom:14px;font-size:13px">
+      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(160px,1fr));gap:10px">
+        <div><b>PM:</b> ${p.pm_name||'—'}</div>
+        <div><b>起始日 (D0):</b> ${p.start_date||'—'}</div>
+        <div><b>Pipeline:</b> ${pipelines.map(pl => PIPELINE_TEMPLATES[pl]?.label||pl).join(' · ')}</div>
+        ${p.factory_owner_name?`<div><b>合金發包人:</b> ${p.factory_owner_name}</div>`:''}
+        ${p.notes?`<div style="grid-column:1/-1"><b>備註:</b> ${p.notes}</div>`:''}
+      </div>
+      <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
+        <button class="btn btn-sm btn-outline" onclick="window._devEditProject('${p.id}')">✏️ 編輯專案</button>
+        <button class="btn btn-sm" style="background:#ffebee;color:#c62828" onclick="window._devDeleteProject('${p.id}')">🗑 刪除專案</button>
+      </div>
+    </div>
+
+    <!-- 每條 pipeline 的主線 -->
+    ${pipelines.map(pl => {
+      const t = PIPELINE_TEMPLATES[pl];
+      const plTasks = mainTasks.filter(x => x.pipeline === pl);
+      const plDone = plTasks.filter(x => x.status === '完成').length;
+      const plPct = plTasks.length ? Math.round(plDone/plTasks.length*100) : 0;
+      return `
+        <div class="card" style="margin-bottom:14px;border-left:4px solid ${t.color}">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+            <div style="font-size:15px;font-weight:700;color:${t.color}">${t.label} 主線 <span style="font-size:12px;color:var(--muted);font-weight:400">· ${plDone}/${plTasks.length} · ${plPct}%</span></div>
+          </div>
+          <div class="progress-bar" style="height:8px;margin-bottom:10px"><div class="progress-fill" style="width:${plPct}%;background:${t.color}"></div></div>
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+            <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
+              <tr>
+                <th style="padding:5px;text-align:center;width:34px">☐</th>
+                <th style="padding:5px;text-align:left">步驟</th>
+                <th style="padding:5px;text-align:left;width:140px">負責人</th>
+                <th style="padding:5px;text-align:center;width:120px">預定完成</th>
+                <th style="padding:5px;text-align:center;width:80px">狀態</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${plTasks.map(task => _renderDevTaskRow(task, p)).join('')}
+            </tbody>
+          </table>
+        </div>
+      `;
+    }).join('')}
+
+    <!-- 品相清單 -->
+    <div class="card" style="margin-bottom:14px">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+        <div style="font-size:15px;font-weight:700;color:#6a1b9a">🏷 品相清單</div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap">
+          ${pipelines.map(pl => `<button class="btn btn-sm btn-outline" onclick="window._devAddVariantPrompt('${p.id}','${pl}')" style="background:${PIPELINE_TEMPLATES[pl]?.color}15;color:${PIPELINE_TEMPLATES[pl]?.color};font-size:11px">+ ${PIPELINE_TEMPLATES[pl]?.label} 品相</button>`).join('')}
+        </div>
+      </div>
+      ${variants.length === 0 ? `<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">還沒加品相 · 通常等「設計圖初稿」完成後加</div>` :
+        variants.map(v => _renderDevVariantRow(v, sideTasks.filter(t => t.variant_id === v.id), p)).join('')}
+    </div>
+  `;
+}
+
+// 單個任務列(可打勾、改日期、改負責人)
+function _renderDevTaskRow(task, project) {
+  const today = _localToday();
+  const isDone = task.status === '完成';
+  const isCancelled = task.status === '取消';
+  const isOverdue = !isDone && !isCancelled && task.due_date && task.due_date < today;
+  const isMilestone = task.is_milestone;
+  const activeUsers = (state.data.users||[]).filter(u => u.is_active !== false);
+
+  const dateColor = isDone ? '#2e7d32' : (isOverdue ? '#c62828' : (isMilestone ? '#c62828' : 'var(--text)'));
+  const rowBg = isDone ? '#f1f8e9' : (isOverdue ? '#ffebee' : (isCancelled ? '#f5f5f5' : '#fff'));
+
+  return `<tr style="background:${rowBg};${isCancelled?'opacity:.5;text-decoration:line-through':''}">
+    <td style="padding:5px;text-align:center">
+      <input type="checkbox" ${isDone?'checked':''} onchange="window._devToggleTaskDone('${task.id}',this.checked)" style="cursor:pointer;width:16px;height:16px" ${isCancelled?'disabled':''}>
+    </td>
+    <td style="padding:5px">
+      ${task.step_name}
+      ${isMilestone?'<span style="color:#c62828;margin-left:4px">🎯</span>':''}
+      ${task.completed_at?`<span style="font-size:10px;color:#2e7d32;margin-left:6px">✓ ${task.completed_at.slice(0,10)}</span>`:''}
+    </td>
+    <td style="padding:5px">
+      <select onchange="window._devSetTaskAssignee('${task.id}',this)" style="width:100%;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:3px" ${isDone||isCancelled?'disabled':''}>
+        <option value="">(未指定)</option>
+        ${activeUsers.map(u => `<option value="${u.id}" data-name="${u.name}" ${task.assignee_id===u.id?'selected':''}>${u.name}</option>`).join('')}
+      </select>
+    </td>
+    <td style="padding:5px;text-align:center">
+      <input type="date" value="${task.due_date||''}" onchange="window._devSetTaskDate('${task.id}',this.value)"
+        style="width:100%;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1px solid var(--border);border-radius:3px" ${isCancelled?'disabled':''}>
+    </td>
+    <td style="padding:5px;text-align:center;font-size:11px">
+      ${isDone?'<span style="color:#2e7d32;font-weight:600">✅ 完成</span>':isCancelled?'<span style="color:#999">取消</span>':isOverdue?'<span style="color:#c62828;font-weight:600">⚠ 逾期</span>':'<span style="color:var(--muted)">待辦</span>'}
+    </td>
+  </tr>`;
+}
+
+// 品相列(含副線任務)
+function _renderDevVariantRow(v, variantSideTasks, project) {
+  const t = PIPELINE_TEMPLATES[v.pipeline];
+  const isCancelled = !!v.cancelled_at;
+  const done = variantSideTasks.filter(x => x.status === '完成').length;
+  const total = variantSideTasks.filter(x => x.status !== '取消').length;
+
+  return `<div style="margin-bottom:10px;padding:10px 12px;border-radius:6px;border-left:3px solid ${t.color};background:${isCancelled?'#fafafa':'#fff'};border:1px solid var(--border);${isCancelled?'opacity:.5':''}">
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+      <div>
+        <span style="background:${t.color}22;color:${t.color};padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600;margin-right:6px">${t.label}</span>
+        <span style="font-weight:600;${isCancelled?'text-decoration:line-through':''}">${v.name}</span>
+        ${v.category?`<span style="font-size:11px;color:var(--muted);margin-left:6px">${v.category}</span>`:''}
+        ${v.design_number?`<span style="background:#e3f2fd;color:#1565c0;padding:1px 6px;border-radius:8px;font-size:10px;font-family:monospace;margin-left:6px">🔢 ${v.design_number}</span>`:''}
+      </div>
+      <div style="display:flex;gap:6px;align-items:center">
+        <span style="font-size:11px;color:var(--muted)">${done}/${total}</span>
+        ${isCancelled ?
+          `<button class="btn btn-sm btn-outline" onclick="window._devRestoreVariant('${v.id}')" style="font-size:10px">↩ 還原</button>` :
+          `<button class="btn btn-sm" onclick="window._devCancelVariant('${v.id}')" style="background:#ffebee;color:#c62828;font-size:10px">✕ 取消</button>`
+        }
+      </div>
+    </div>
+    ${variantSideTasks.length === 0 ? `<div style="font-size:11px;color:var(--muted);padding:4px 0">副線任務會在「樣品審過」完成時自動生成</div>` : `
+      <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px">
+        <tbody>
+          ${variantSideTasks.map(task => `<tr style="border-top:1px solid #f5f5f5;${task.status==='完成'?'background:#f1f8e9':task.due_date && task.due_date < _localToday() && task.status!=='完成'?'background:#ffebee':''}">
+            <td style="padding:3px 6px;width:28px;text-align:center">
+              <input type="checkbox" ${task.status==='完成'?'checked':''} onchange="window._devToggleTaskDone('${task.id}',this.checked)" ${isCancelled?'disabled':''}>
+            </td>
+            <td style="padding:3px 6px">${task.step_name}</td>
+            <td style="padding:3px 6px;width:110px;color:var(--muted)">${task.assignee_name||'—'}</td>
+            <td style="padding:3px 6px;width:100px;text-align:center;font-family:monospace">${task.due_date||''}</td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    `}
+  </div>`;
+}
+
+// 打勾/取消打勾任務
+window._devToggleTaskDone = async function(taskId, checked) {
+  const p = state.data.dev.find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (!task) return;
+  const today = _localToday();
+
+  if (checked) {
+    // 標為完成
+    const upd = { status: '完成', completed_at: new Date().toISOString(), completed_by: state.user?.id||null };
+    const { error } = await db.from('dev_tasks').update(upd).eq('id', taskId);
+    if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+    Object.assign(task, upd);
+
+    // 同步行事曆子任務打勾
+    await _devSyncCalendarSubtask(task, true);
+
+    // 里程碑觸發
+    if (task.step_key === 'design_lock' || task.step_key === 'design_confirm') {
+      // 設計定稿完成 → 為每個品相發設計圖號
+      await _devAutoIssueDesignNumbers(p, task.pipeline);
+    }
+    if (task.step_key === 'sample_approved') {
+      // 樣品審過 → 為每個品相自動生副線任務
+      await _devAutoGenerateSideTasks(p, task.pipeline);
+    }
+    if (task.step_key === 'production' || task.step_key === 'arrival_check') {
+      // 量產完成 → 提示是否為未量產品相建商品
+      const activeVariants = (p.dev_variants||[]).filter(v => v.pipeline === task.pipeline && !v.cancelled_at && !v.product_id);
+      if (activeVariants.length) {
+        setTimeout(() => window._devCreateProductsPrompt(p.id, task.pipeline), 300);
+      }
+    }
+
+    // 延遲/提早提示
+    const dueDate = task.due_date;
+    if (dueDate && dueDate !== today) {
+      const delta = _daysDiff(dueDate, today);
+      const isEarly = delta < 0;
+      const isLate  = delta > 0;
+      if (isEarly || isLate) {
+        setTimeout(() => window._devHandleTimingChange(p.id, taskId, delta), 300);
+      }
+    }
+  } else {
+    // 取消完成
+    const upd = { status: '未開始', completed_at: null, completed_by: null };
+    await db.from('dev_tasks').update(upd).eq('id', taskId);
+    Object.assign(task, upd);
+    await _devSyncCalendarSubtask(task, false);
+  }
+
+  showToast(checked ? '✓ 已完成' : '↩ 已取消完成');
+  await loadDev();
+  try { await loadCalendarEvents?.(); } catch(e) {}
+  renderApp();
+};
+
+// 改任務日期
+window._devSetTaskDate = async function(taskId, newDate) {
+  await db.from('dev_tasks').update({ due_date: newDate || null }).eq('id', taskId);
+  // 同步行事曆子任務
+  const p = state.data.dev.find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (task) {
+    task.due_date = newDate;
+    await _devSyncCalendarSubtaskDate(task, newDate);
+  }
+  showToast('日期已更新');
+  await loadDev();
+  try { await loadCalendarEvents?.(); } catch(e) {}
+  renderApp();
+};
+
+// 改任務負責人
+window._devSetTaskAssignee = async function(taskId, el) {
+  const uid = el.value || null;
+  const uname = el.selectedOptions[0]?.dataset?.name || null;
+  await db.from('dev_tasks').update({ assignee_id: uid, assignee_name: uname }).eq('id', taskId);
+  const p = state.data.dev.find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (task) { task.assignee_id = uid; task.assignee_name = uname; }
+  showToast('負責人已更新');
+  await loadDev();
+  renderApp();
+};
+
+// 同步行事曆子任務打勾
+async function _devSyncCalendarSubtask(task, done) {
+  if (!task.calendar_event_id) return;
+  const { data: ev } = await db.from('calendar_events').select('subtasks').eq('id', task.calendar_event_id).maybeSingle();
+  if (!ev?.subtasks) return;
+  const subs = ev.subtasks.map(s => s.dev_task_id === task.id ? { ...s, done } : s);
+  const allDone = subs.length > 0 && subs.every(s => s.done);
+  const upd = { subtasks: subs };
+  if (allDone) upd.completed_at = new Date().toISOString();
+  else upd.completed_at = null;
+  await db.from('calendar_events').update(upd).eq('id', task.calendar_event_id);
+}
+
+// 同步子任務的 due_date
+async function _devSyncCalendarSubtaskDate(task, newDate) {
+  if (!task.calendar_event_id) return;
+  const { data: ev } = await db.from('calendar_events').select('subtasks').eq('id', task.calendar_event_id).maybeSingle();
+  if (!ev?.subtasks) return;
+  const subs = ev.subtasks.map(s => s.dev_task_id === task.id ? { ...s, due_date: newDate } : s);
+  await db.from('calendar_events').update({ subtasks: subs }).eq('id', task.calendar_event_id);
+}
+
+// 設計定稿完成 → 自動為每個品相發圖號
+async function _devAutoIssueDesignNumbers(project, pipeline) {
+  const variants = (project.dev_variants||[]).filter(v => v.pipeline === pipeline && !v.cancelled_at && !v.design_number);
+  if (!variants.length) return;
+  const today = _localToday();
+  await loadDesignNumbers();
+  const list = state.data.designNumbers || [];
+  let nextSeq = list.filter(r => r.date === today && !r.voided_at).length + 1;
+
+  for (const v of variants) {
+    const number = today.replace(/-/g,'') + String(nextSeq).padStart(2,'0');
+    const { data: dn, error } = await db.from('design_numbers').insert({
+      number, date: today, seq: nextSeq,
+      project_id: project.id,
+      variant_name: v.name,
+      series_name: project.name,
+      designer_id: state.user?.id||null,
+      designer_name: state.profile?.name||'',
+      note: `專案「${project.name}」設計定稿自動發號`,
+    }).select().single();
+    if (error) { console.warn('發號失敗', error); continue; }
+    await db.from('dev_variants').update({ design_number_id: dn.id, design_number: number }).eq('id', v.id);
+    nextSeq++;
+  }
+  showToast(`🔢 已為 ${variants.length} 個品相發設計圖號`);
+}
+
+// 樣品審過完成 → 自動生副線任務
+async function _devAutoGenerateSideTasks(project, pipeline) {
+  const activeVariants = (project.dev_variants||[]).filter(v => v.pipeline === pipeline && !v.cancelled_at);
+  if (!activeVariants.length) { showToast('沒有品相 · 無法生副線任務','info'); return; }
+
+  // 已存在的副線任務不重建
+  const existing = (project.dev_tasks||[]).filter(t => t.step_group === 'side' && t.pipeline === pipeline);
+  const existingSet = new Set(existing.map(t => `${t.variant_id}__${t.step_key}`));
+
+  // 計算副線日期
+  const { stepMap } = _calcMainDates(pipeline, project.start_date);
+  const sideSteps = _calcSideDates(pipeline, stepMap);
+  if (!sideSteps.length) { showToast('此 pipeline 沒有副線','info'); return; }
+
+  const users = state.data.users || [];
+  const findUser = name => users.find(u => u.name === name);
+  const inserts = [];
+  let order = Math.max(...(project.dev_tasks||[]).map(t => t.order_num||0), 0);
+
+  activeVariants.forEach(v => {
+    sideSteps.forEach(step => {
+      if (existingSet.has(`${v.id}__${step.key}`)) return;
+      const u = findUser(step.assignee_name);
+      inserts.push({
+        project_id: project.id,
+        variant_id: v.id,
+        pipeline,
+        step_key: step.key,
+        step_name: step.name,
+        step_group: 'side',
+        is_milestone: false,
+        order_num: ++order,
+        assignee_id: u?.id||null,
+        assignee_name: step.assignee_name,
+        expected_date: step.expected_date,
+        due_date: step.expected_date,
+        status: '未開始',
+      });
+    });
+  });
+
+  if (!inserts.length) return;
+  const { data, error } = await db.from('dev_tasks').insert(inserts).select();
+  if (error) { showToast('生副線失敗:'+error.message,'error'); return; }
+  // 加到行事曆同一個事件的 subtasks
+  await _devAppendSideTasksToCalendar(project, data);
+  showToast(`✓ 已生 ${data.length} 個副線任務(${activeVariants.length} 品相 × ${sideSteps.length} 步)`);
+}
+
+async function _devAppendSideTasksToCalendar(project, newTasks) {
+  // 找專案主事件(第一個主線任務的 event_id)
+  const mainTask = (project.dev_tasks||[]).find(t => t.step_group === 'main' && t.calendar_event_id);
+  const eventId = mainTask?.calendar_event_id;
+  if (!eventId) return;
+  const { data: ev } = await db.from('calendar_events').select('subtasks, assignee_ids').eq('id', eventId).maybeSingle();
+  if (!ev) return;
+  const newSubs = newTasks.map(t => ({
+    id: `dev_${t.id}`,
+    text: `[副線] [${PIPELINE_TEMPLATES[t.pipeline]?.label||t.pipeline}] ${t.step_name}`,
+    done: false,
+    due_date: t.due_date,
+    dev_task_id: t.id,
+    dev_project_id: project.id,
+    assignee_id: t.assignee_id,
+  }));
+  const combined = [...(ev.subtasks||[]), ...newSubs];
+  const newAssignees = [...new Set([...(ev.assignee_ids||[]), ...newTasks.map(t => t.assignee_id).filter(Boolean)])];
+  await db.from('calendar_events').update({ subtasks: combined, assignee_ids: newAssignees }).eq('id', eventId);
+  // 把 event_id 回填新的 tasks
+  await db.from('dev_tasks').update({ calendar_event_id: eventId }).in('id', newTasks.map(t => t.id));
+}
+
+// 延遲/提早通知 PM
+window._devHandleTimingChange = function(projectId, taskId, deltaDays) {
+  const p = state.data.dev.find(x => x.id === projectId);
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (!p || !task) return;
+
+  // 找所有後續未完成的任務
+  const laterTasks = (p.dev_tasks||[]).filter(t => (t.order_num||0) > (task.order_num||0) && t.status !== '完成' && t.status !== '取消');
+  const isLate = deltaDays > 0;
+  const emoji = isLate ? '⚠' : '✨';
+  const word = isLate ? '延遲' : '提早';
+
+  showModal(`${emoji} ${task.step_name} ${word} ${Math.abs(deltaDays)} 天`, `
+    <div style="font-size:13px;line-height:1.7">
+      <div><b>負責人:</b> ${task.assignee_name||'—'}</div>
+      <div><b>原定:</b> ${task.due_date} · <b>實際:</b> ${_localToday()}</div>
+      <div style="margin-top:10px;padding:10px;background:#f5f5f5;border-radius:6px">
+        後續 <b>${laterTasks.length}</b> 個未完成任務可能受影響
+      </div>
+      <div style="margin-top:14px;font-weight:600;color:var(--accent-dark)">怎麼處理?</div>
     </div>
   `, [
-    { label:'🗑 刪除整個專案(含所有行事曆)', onclick: () => window._devDeleteProject(id) },
-    { label:'關閉', onclick: closeModal },
+    { label:`${isLate?'⏩':'⏪'} 全部${isLate?'順延':'提前'} ${Math.abs(deltaDays)} 天`, primary:true, onclick: async () => {
+      for (const t of laterTasks) {
+        const newDate = _shiftDate(t.due_date, deltaDays);
+        await db.from('dev_tasks').update({ due_date: newDate }).eq('id', t.id);
+        await _devSyncCalendarSubtaskDate(t, newDate);
+      }
+      showToast(`已${isLate?'順延':'提前'} ${laterTasks.length} 個任務`);
+      closeModal();
+      await loadDev();
+      try { await loadCalendarEvents?.(); } catch(e) {}
+      renderApp();
+    }},
+    { label:'維持原計畫', onclick: closeModal },
+  ]);
+};
+
+// 加品相
+window._devAddVariantPrompt = async function(projectId, pipeline) {
+  const t = PIPELINE_TEMPLATES[pipeline];
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  const isJewelry = pipeline !== 'peripheral';
+  showModal(`+ 加 ${t.label} 品相`, `
+    <div class="form-group">
+      <label>品相名 *</label>
+      <input class="form-control" id="dv-name" placeholder="例:${isJewelry?'繁花_項鍊':'徽章_大'}">
+    </div>
+    ${isJewelry ? `
+    <div class="form-group">
+      <label>類別</label>
+      <select class="form-control" id="dv-cat">
+        <option value="">(選類別)</option>
+        ${['項鍊','手鍊','戒指','耳環'].map(c=>`<option>${c}</option>`).join('')}
+      </select>
+    </div>` : ''}
+  `, [
+    { label:'加入', primary:true, onclick: async () => {
+      const name = document.getElementById('dv-name').value.trim();
+      if (!name) { showToast('請填品相名','error'); return; }
+      const category = document.getElementById('dv-cat')?.value || null;
+      const { data: v, error } = await db.from('dev_variants').insert({
+        project_id: projectId,
+        pipeline,
+        name,
+        category,
+      }).select().single();
+      if (error) { showToast('新增失敗:'+error.message,'error'); return; }
+
+      // 如果樣品審過已完成,立刻生副線
+      const sampleApproved = (p?.dev_tasks||[]).find(t => t.pipeline===pipeline && t.step_key==='sample_approved');
+      if (sampleApproved?.status === '完成') {
+        // 需 refresh 拿到含新 variant 的 p
+        await loadDev();
+        const p2 = state.data.dev.find(x => x.id === projectId);
+        await _devAutoGenerateSideTasks(p2, pipeline);
+      }
+      // 如果設計定稿已完成,發設計圖號
+      const designLock = (p?.dev_tasks||[]).find(t => t.pipeline===pipeline && (t.step_key==='design_lock' || t.step_key==='design_confirm'));
+      if (designLock?.status === '完成' && !v.design_number) {
+        await loadDev();
+        const p2 = state.data.dev.find(x => x.id === projectId);
+        await _devAutoIssueDesignNumbers(p2, pipeline);
+      }
+
+      showToast(`✓ 已加品相 ${name}`);
+      closeModal();
+      await loadDev();
+      renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+// 取消品相
+window._devCancelVariant = async function(variantId) {
+  const reason = prompt('取消品相原因(選填):');
+  if (reason === null) return;
+  await db.from('dev_variants').update({
+    cancelled_at: new Date().toISOString(),
+    cancel_reason: reason||null,
+  }).eq('id', variantId);
+  // 相關副線任務標記取消
+  await db.from('dev_tasks').update({ status: '取消', cancelled_at: new Date().toISOString(), cancel_reason: '品相取消' }).eq('variant_id', variantId);
+  showToast('已取消品相');
+  await loadDev();
+  renderApp();
+};
+
+window._devRestoreVariant = async function(variantId) {
+  if (!confirm('還原此品相?')) return;
+  await db.from('dev_variants').update({ cancelled_at: null, cancel_reason: null }).eq('id', variantId);
+  await db.from('dev_tasks').update({ status: '未開始', cancelled_at: null, cancel_reason: null }).eq('variant_id', variantId).eq('status','取消');
+  showToast('已還原品相');
+  await loadDev();
+  renderApp();
+};
+
+// 量產完成 → 提示為品相建商品
+window._devCreateProductsPrompt = async function(projectId, pipeline) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const variants = (p.dev_variants||[]).filter(v => v.pipeline === pipeline && !v.cancelled_at && !v.product_id);
+  if (!variants.length) return;
+  showModal(`🎉 ${PIPELINE_TEMPLATES[pipeline]?.label} 量產完成 · 建商品`, `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
+      勾選要建立商品的品相 · 建好會綁定到品相
+    </div>
+    <div id="dev-cp-list">
+      ${variants.map((v, i) => `<label style="display:flex;gap:8px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:pointer">
+        <input type="checkbox" checked data-vid="${v.id}" data-vname="${(v.name||'').replace(/"/g,'&quot;')}" data-vcat="${v.category||''}">
+        <span>${v.name}${v.category?` (${v.category})`:''}${v.design_number?` · 🔢 ${v.design_number}`:''}</span>
+      </label>`).join('')}
+    </div>
+  `, [
+    { label:'✅ 為選中品相建商品', primary:true, onclick: async () => {
+      const checked = [...document.querySelectorAll('#dev-cp-list input[type=checkbox]:checked')];
+      if (!checked.length) { showToast('請選至少一個品相','error'); return; }
+      const categories = state.data.categories || [];
+      for (const cb of checked) {
+        const catObj = categories.find(c => c.name === cb.dataset.vcat);
+        const { data: newP, error } = await db.from('products').insert({
+          sku: `TBD-${Date.now()}-${Math.floor(Math.random()*1000)}`,   // 暫時貨號,之後編輯改
+          name: cb.dataset.vname,
+          category_id: catObj?.id || null,
+          series_id: p.series_id || null,
+          status: 'active',
+          created_by: state.user?.id,
+        }).select().single();
+        if (error) { console.warn('建商品失敗',error); continue; }
+        await db.from('dev_variants').update({ product_id: newP.id }).eq('id', cb.dataset.vid);
+      }
+      showToast(`✓ 已建 ${checked.length} 個商品(暫時貨號,請去商品資料庫改)`);
+      closeModal();
+      await loadDev();
+      try { await loadProducts?.(); } catch(e) {}
+      renderApp();
+    }},
+    { label:'稍後', onclick: closeModal },
+  ]);
+};
+
+// 編輯專案基本資料
+window._devEditProject = async function(projectId) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  showModal('✏️ 編輯專案', `
+    <div class="form-group"><label>系列名</label><input class="form-control" id="ep-name" value="${p.name||''}"></div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>起始日</label><input type="date" class="form-control" id="ep-start" value="${p.start_date||''}"></div>
+      <div class="form-group"><label>上市日</label><input type="date" class="form-control" id="ep-launch" value="${p.launch_date||''}"></div>
+    </div>
+    <div class="form-group"><label>備註</label><textarea class="form-control" rows="2" id="ep-notes">${p.notes||''}</textarea></div>
+  `, [
+    { label:'儲存', primary:true, onclick: async () => {
+      const upd = {
+        name: document.getElementById('ep-name').value.trim(),
+        start_date: document.getElementById('ep-start').value || null,
+        launch_date: document.getElementById('ep-launch').value || null,
+        notes: document.getElementById('ep-notes').value.trim() || null,
+      };
+      await db.from('dev_projects').update(upd).eq('id', projectId);
+      showToast('已更新');
+      closeModal();
+      await loadDev();
+      renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
   ]);
 };
 
@@ -19898,13 +20453,12 @@ function renderSettingsVendors() {
       + '<td style="padding:6px 8px;font-size:12px;">' + typeLabel + '</td>'
       + '<td style="padding:6px 8px;font-size:12px;">'
         + (v.contact_name ? '<div style="font-weight:600">'+v.contact_name+'</div>' : '')
-        + (v.contact_phone ? '<div style="color:var(--muted);font-size:11px">📞 '+v.contact_phone+'</div>' : '')
-        + (v.contact_email ? '<div style="color:var(--muted);font-size:11px">✉ '+v.contact_email+'</div>' : '')
+        + (v.contact_phone ? '<div style="color:var(--muted);font-size:11px">'+v.contact_phone+'</div>' : '')
+        + (v.contact_email ? '<div style="color:var(--muted);font-size:11px">'+v.contact_email+'</div>' : '')
       + '</td>'
       + '<td style="padding:6px 8px;font-size:12px;">'
         + (v.accounting_contact ? '<div style="font-weight:600">'+v.accounting_contact+'</div>' : '')
-        + (v.accounting_phone ? '<div style="color:var(--muted);font-size:11px">📞 '+v.accounting_phone+'</div>' : '')
-        + (v.accounting_email ? '<div style="color:var(--muted);font-size:11px">✉ '+v.accounting_email+'</div>' : '')
+        + (v.accounting_phone ? '<div style="color:var(--muted);font-size:11px">'+v.accounting_phone+'</div>' : '')
       + '</td>'
       + '<td style="padding:6px 8px;font-size:12px;">' + (v.bank_name||'') + (v.bank_code ? '<br><span style="color:var(--accent);font-size:11px;font-weight:600">'+v.bank_code+'</span>' : '') + '</td>'
       + '<td style="padding:6px 8px;font-size:12px;">' + (v.bank_account||'') + '</td>'
@@ -19931,8 +20485,8 @@ function renderSettingsVendors() {
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">公司簡稱</th>'
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">統編</th>'
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">類型</th>'
-    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">👤 業務聯絡</th>'
-    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">💰 會計聯絡</th>'
+    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">業務聯絡</th>'
+    + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">會計聯絡</th>'
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">往來銀行</th>'
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">帳號</th>'
     + '<th style="padding:6px 8px;text-align:left;font-size:12px;color:var(--muted);">電子發票</th>'
@@ -27065,6 +27619,18 @@ window._calToggleSubtask = async function(evId, subIdx, checked) {
     showToast('所有子任務完成 → 母任務自動結案 ✅');
   } else if (!error && !allDone && ev.completed_at === null && upd.completed_at === null) {
     ev.completed_at = null;
+  }
+  // ── 反向同步:若子任務綁到 dev_tasks(開發專案),連 dev_tasks 狀態一起更新 ──
+  if (!error) {
+    const sub = ev.subtasks[subIdx];
+    if (sub?.dev_task_id) {
+      const devUpd = checked
+        ? { status:'完成', completed_at: new Date().toISOString(), completed_by: state.user?.id||null }
+        : { status:'未開始', completed_at: null, completed_by: null };
+      await db.from('dev_tasks').update(devUpd).eq('id', sub.dev_task_id);
+      // 若在商品開發詳情頁,重新載入
+      if (state.data.devDetailId && typeof loadDev === 'function') { try { await loadDev(); } catch(e){} }
+    }
   }
   if (error) {
     // 回滾本地狀態與畫面
