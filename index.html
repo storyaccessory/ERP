@@ -11914,6 +11914,8 @@ function _renderDevVariantRow(v, variantSideTasks, project) {
       <div>
         <span style="background:${t.color}22;color:${t.color};padding:1px 8px;border-radius:8px;font-size:10px;font-weight:600;margin-right:6px">${t.label}</span>
         <span style="font-weight:600;${isCancelled?'text-decoration:line-through':''}">${v.name}</span>
+        ${(v.revision||1) > 1?`<span style="background:#fff3e0;color:#e65100;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;margin-left:6px" title="校正輪次">v${v.revision}</span>`:''}
+        ${v.needs_revision?`<span style="background:#ffebee;color:#c62828;padding:1px 8px;border-radius:8px;font-size:10px;font-weight:700;margin-left:6px" title="${v.revision_note||''}">⚠ 需校正</span>`:''}
         ${v.category?`<span style="font-size:11px;color:var(--muted);margin-left:6px">${v.category}</span>`:''}
         ${v.design_number?`<span style="background:#e3f2fd;color:#1565c0;padding:1px 6px;border-radius:8px;font-size:10px;font-family:monospace;margin-left:6px">🔢 ${v.design_number}</span>`:''}
       </div>
