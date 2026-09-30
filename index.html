@@ -11613,9 +11613,59 @@ function _renderDevProjectCard(p) {
   </div>`;
 }
 
-// 佔位:進入專案詳情頁(Phase 2 再做)
+// 佔位:進入專案詳情頁 → 目前只提供「刪除專案(含行事曆)」
 window.openDevProject = function(id) {
-  showToast('專案詳情頁 Phase 2 開發中,先看行事曆確認任務已建好', 'info', 4000);
+  const p = (state.data.dev||[]).find(x => x.id === id);
+  if (!p) return;
+  const tasks = p.dev_tasks || [];
+  const done = tasks.filter(t => t.status === '完成').length;
+  const eventCount = new Set(tasks.map(t => t.calendar_event_id).filter(Boolean)).size;
+
+  showModal(`🛠 ${p.name}`, `
+    <div style="font-size:13px;line-height:1.8;color:var(--text);padding:8px 0">
+      <div><b>PM:</b> ${p.pm_name||'—'}</div>
+      <div><b>起始日:</b> ${p.start_date||'—'}</div>
+      <div><b>上市日:</b> ${p.launch_date||'—'} · 最快 ${p.earliest_launch||'—'}</div>
+      <div><b>Pipeline:</b> ${(p.pipelines||[]).map(pl => PIPELINE_TEMPLATES[pl]?.label||pl).join(' · ')}</div>
+      <div><b>進度:</b> ${done}/${tasks.length}</div>
+      <div><b>行事曆事件數:</b> ${eventCount}</div>
+    </div>
+    <div style="padding:10px 12px;background:#fff8e1;border-left:3px solid #f57c00;border-radius:6px;font-size:12px;color:#666;margin-top:12px">
+      💡 完整詳情頁 Phase 2 開發中。目前你可以在行事曆看任務,或整個刪掉重建。
+    </div>
+  `, [
+    { label:'🗑 刪除整個專案(含所有行事曆)', onclick: () => window._devDeleteProject(id) },
+    { label:'關閉', onclick: closeModal },
+  ]);
+};
+
+// 刪除專案 + 所有相關 tasks + variants + 行事曆事件
+window._devDeleteProject = async function(id) {
+  const p = (state.data.dev||[]).find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`確定要刪除「${p.name}」?\n\n將一併刪除:\n· ${(p.dev_tasks||[]).length} 個任務\n· ${(p.dev_variants||[]).length} 個品相\n· 所有相關行事曆事件\n\n此動作無法復原!`)) return;
+
+  // 收集所有 calendar_event_id
+  const eventIds = [...new Set((p.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
+
+  // 1) 刪行事曆事件
+  if (eventIds.length) {
+    const { error: e1 } = await db.from('calendar_events').delete().in('id', eventIds);
+    if (e1) console.warn('刪行事曆失敗', e1);
+  }
+  // 2) 刪 tasks(CASCADE 也會刪,但顯式一次快點)
+  await db.from('dev_tasks').delete().eq('project_id', id);
+  // 3) 刪 variants
+  await db.from('dev_variants').delete().eq('project_id', id);
+  // 4) 刪 project
+  const { error: e4 } = await db.from('dev_projects').delete().eq('id', id);
+  if (e4) { showToast('刪除失敗:'+e4.message,'error'); return; }
+
+  showToast(`已刪除「${p.name}」及 ${eventIds.length} 個行事曆事件`, 'success');
+  closeModal();
+  await loadDev();
+  try { await loadCalendarEvents?.(); } catch(e) {}
+  renderApp();
 };
 
 // ═══════════════════════════════════════════════
@@ -11927,79 +11977,53 @@ async function _saveDevProject() {
   renderApp();
 }
 
-// 依「日期+負責人」聚合任務成行事曆事件
+// ★ 新版:整個專案 = 1 個行事曆事件,所有任務都是子任務
+// 事件日期 = 上市日(最終里程碑),但子任務各自有 due_date + assignee → 依個人日曆分別提醒
 async function _buildDevCalendarEvents(project, tasks, projectName) {
-  // 分組:key = `${date}__${assignee_id||'none'}`
-  const groups = {};
-  tasks.forEach(t => {
-    if (!t.due_date) return;
-    if (t.is_milestone) return; // 里程碑另外處理
-    const key = `${t.due_date}__${t.assignee_id||'none'}`;
-    if (!groups[key]) groups[key] = { date: t.due_date, assignee_id: t.assignee_id, assignee_name: t.assignee_name, tasks: [] };
-    groups[key].tasks.push(t);
-  });
+  if (!tasks.length) return;
 
-  const evInserts = [];
-  const taskEventLinks = []; // {taskId, eventKey}
+  // 找上市日(最後的里程碑或最後的 due_date)
+  const launchTask = tasks.find(t => t.is_milestone && (t.step_name === '量產' || t.step_name === '到貨驗收' || t.step_name === '商品到貨驗收'));
+  const eventDate = launchTask?.due_date || tasks.map(t => t.due_date).filter(Boolean).sort().pop();
 
-  Object.entries(groups).forEach(([key, grp]) => {
-    const subtasks = grp.tasks.map(t => ({
+  // 收集所有 assignee_ids(聯集,讓相關人的日曆都看得到)
+  const assigneeIds = [...new Set(tasks.map(t => t.assignee_id).filter(Boolean))];
+
+  // 建 subtasks:每筆任務一個子項
+  const subtasks = tasks
+    .sort((a,b) => (a.order_num||0) - (b.order_num||0))
+    .map(t => ({
       id: `dev_${t.id}`,
-      text: `[${t.step_name}]${t.variant_id?' · 品相':''}`,
+      text: `${t.is_milestone?'🎯 ':''}[${PIPELINE_TEMPLATES[t.pipeline]?.label||t.pipeline}] ${t.step_name}`,
       done: false,
-      due_date: grp.date,
+      due_date: t.due_date,
       dev_task_id: t.id,
-      assignee_id: grp.assignee_id,
+      dev_project_id: project.id,
+      assignee_id: t.assignee_id,
     }));
-    evInserts.push({
-      title: `📋 [${projectName}] 開發任務`,
-      event_type: 'dev',
-      event_date: grp.date,
-      start_date: grp.date,
-      end_date: grp.date,
-      priority: '中',
-      description: `${grp.tasks.length} 項開發任務`,
-      assigned_to: grp.assignee_id,
-      assignee_ids: grp.assignee_id ? [grp.assignee_id] : [],
-      subtasks,
-      created_by: state.user?.id || null,
-      _key: key,
-    });
-    grp.tasks.forEach(t => taskEventLinks.push({ taskId: t.id, eventKey: key }));
-  });
 
-  // 里程碑:每一個獨立事件
-  tasks.filter(t => t.is_milestone).forEach(t => {
-    const key = `milestone_${t.id}`;
-    evInserts.push({
-      title: `🎯 [${projectName}] ${t.step_name}`,
-      event_type: 'dev',
-      event_date: t.due_date,
-      start_date: t.due_date,
-      end_date: t.due_date,
-      priority: '高',
-      description: t.step_name === '量產' || t.step_name === '到貨驗收' || t.step_name === '商品到貨驗收' ? '🎯 = 最快可上市' : '里程碑審核',
-      assigned_to: t.assignee_id,
-      assignee_ids: t.assignee_id ? [t.assignee_id] : [],
-      subtasks: [],
-      created_by: state.user?.id || null,
-      _key: key,
-    });
-    taskEventLinks.push({ taskId: t.id, eventKey: key });
-  });
+  // 建 1 個 event
+  const payload = {
+    title: `🛠 ${projectName}(開發專案)`,
+    event_type: 'dev',
+    event_date: eventDate,
+    start_date: project.start_date,
+    end_date: eventDate,
+    priority: '中',
+    description: `PM: ${project.pm_name||'—'} · Pipeline: ${(project.pipelines||[]).map(pl => PIPELINE_TEMPLATES[pl]?.label||pl).join(', ')}\n共 ${tasks.length} 個任務`,
+    assigned_to: project.pm_id || null,
+    assignee_ids: assigneeIds,
+    subtasks,
+    created_by: state.user?.id || null,
+  };
 
-  // 批次插入
-  const payloadsWithoutKey = evInserts.map(e => { const {_key, ...rest} = e; return rest; });
-  const { data: evData, error: eErr } = await db.from('calendar_events').insert(payloadsWithoutKey).select();
-  if (eErr) { console.error('建行事曆失敗', eErr); showToast('部分行事曆事件建立失敗:'+eErr.message, 'error'); return; }
+  const { data: evData, error: eErr } = await db.from('calendar_events').insert(payload).select().single();
+  if (eErr) { console.error('建行事曆失敗', eErr); showToast('行事曆事件建立失敗:'+eErr.message, 'error'); return; }
 
-  // 把 event_id 寫回 dev_tasks
-  const keyToEvId = {};
-  evInserts.forEach((e, i) => { keyToEvId[e._key] = evData[i]?.id; });
-  for (const link of taskEventLinks) {
-    const evId = keyToEvId[link.eventKey];
-    if (!evId) continue;
-    await db.from('dev_tasks').update({ calendar_event_id: evId }).eq('id', link.taskId);
+  // 所有 task 綁到同一個 event
+  const evId = evData?.id;
+  if (evId) {
+    await db.from('dev_tasks').update({ calendar_event_id: evId }).eq('project_id', project.id);
   }
 }
 
