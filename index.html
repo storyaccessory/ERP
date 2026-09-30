@@ -11734,33 +11734,10 @@ function _renderDevModalBody() {
       </div>` : ''}
     </div>
 
-    <!-- Step 3:品相清單 -->
+    <!-- 品相說明(改在初稿完成後才加) -->
     ${d.pipelines.length ? `
-    <div style="background:#f3e5f5;padding:12px 14px;border-radius:8px;margin-bottom:12px">
-      <div style="font-size:13px;font-weight:700;color:#6a1b9a;margin-bottom:8px">③ 品相清單(每條 pipeline 至少 1 個)</div>
-      ${d.pipelines.map(pl => {
-        const t = PIPELINE_TEMPLATES[pl];
-        const vList = d.variants.filter(v => v.pipeline === pl);
-        return `<div style="margin-bottom:10px;padding:8px 12px;background:#fff;border-radius:6px;border-left:4px solid ${t.color}">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
-            <div style="font-weight:600;color:${t.color}">${t.label} 品相</div>
-            <button class="btn btn-sm btn-outline" onclick="window._devAddVariant('${pl}')" style="font-size:11px;padding:2px 10px">+ 加品相</button>
-          </div>
-          ${vList.length === 0 ? `<div style="font-size:11px;color:var(--muted);padding:6px 0">還沒加品相</div>` :
-            vList.map((v, idx) => {
-              const globalIdx = d.variants.indexOf(v);
-              return `<div style="display:flex;gap:6px;margin-bottom:4px;align-items:center">
-                <input class="form-control" value="${(v.name||'').replace(/"/g,'&quot;')}" placeholder="品相名(例:繁花_項鍊)"
-                  oninput="state.data._devDraft.variants[${globalIdx}].name=this.value" style="flex:1">
-                ${pl!=='peripheral' ? `<select class="form-control" onchange="state.data._devDraft.variants[${globalIdx}].category=this.value" style="width:100px">
-                  <option value="">類別</option>
-                  ${['項鍊','手鍊','戒指','耳環'].map(c=>`<option ${v.category===c?'selected':''}>${c}</option>`).join('')}
-                </select>` : ''}
-                <button class="btn btn-sm" style="background:#ffebee;color:#c62828;font-size:11px;padding:2px 8px" onclick="window._devRemoveVariant(${globalIdx})">✕</button>
-              </div>`;
-            }).join('')}
-        </div>`;
-      }).join('')}
+    <div style="background:#f3e5f5;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:12px;color:#6a1b9a;line-height:1.7">
+      💡 <b>品相清單稍後再加</b> — 建案後先跑主線,等「設計圖(初稿)」完成時再進專案詳情頁加品相,副線任務會依當時的品相清單建立
     </div>
     ` : ''}
 
@@ -11796,15 +11773,8 @@ function _renderDevModalBody() {
 window._devTogglePipeline = function(key) {
   const d = state.data._devDraft;
   const idx = d.pipelines.indexOf(key);
-  if (idx >= 0) {
-    d.pipelines.splice(idx, 1);
-    // 移除該 pipeline 的品相
-    d.variants = d.variants.filter(v => v.pipeline !== key);
-  } else {
-    d.pipelines.push(key);
-    // 自動加一個空品相
-    d.variants.push({ pipeline: key, name: '', category: '' });
-  }
+  if (idx >= 0) d.pipelines.splice(idx, 1);
+  else d.pipelines.push(key);
   window._devRerender();
 };
 
@@ -11827,13 +11797,6 @@ async function _saveDevProject() {
   if (!d.start_date) { showToast('請填設計圖起始日','error'); return; }
   if (!d.pipelines.length) { showToast('請至少選一條 pipeline','error'); return; }
   if (d.pipelines.includes('alloy') && !d.factory_owner_id) { showToast('合金需要選發包人','error'); return; }
-  const validVariants = d.variants.filter(v => v.name?.trim());
-  for (const pl of d.pipelines) {
-    if (!validVariants.some(v => v.pipeline === pl)) {
-      showToast(`${PIPELINE_TEMPLATES[pl].label} 至少要一個品相`,'error');
-      return;
-    }
-  }
 
   // 檢查上市日
   let earliestOverall = null;
@@ -11868,27 +11831,15 @@ async function _saveDevProject() {
   if (pErr) { showToast('建專案失敗:'+pErr.message,'error'); return; }
   const projectId = proj.id;
 
-  // ─── 2. 建 variants ───
-  const variantInserts = validVariants.map(v => ({
-    project_id: projectId,
-    pipeline: v.pipeline,
-    name: v.name.trim(),
-    category: v.category || null,
-  }));
-  const { data: variantsData, error: vErr } = await db.from('dev_variants').insert(variantInserts).select();
-  if (vErr) { showToast('建品相失敗:'+vErr.message,'error'); return; }
-
-  // ─── 3. 建 tasks ───
+  // ─── 2. 建 tasks(只建主線;副線等加品相時再建) ───
   const users = state.data.users || [];
   const findUser = name => users.find(u => u.name === name);
   const taskInserts = [];
   let orderCounter = 0;
 
   d.pipelines.forEach(pl => {
-    const { dates, stepMap } = pipelineDates[pl];
-    // 主線 · 系列級
+    const { dates } = pipelineDates[pl];
     dates.forEach(step => {
-      // 解析 assignee(可能是名字或 factory_owner)
       let assignee_name = step.assignee_name;
       let assignee_id = null;
       if (step.assignee_key === 'factory_owner') {
@@ -11912,30 +11863,6 @@ async function _saveDevProject() {
         expected_date: step.expected_date,
         due_date: step.expected_date,
         status: '未開始',
-      });
-    });
-
-    // 副線 · 每品相各一
-    const sideSteps = _calcSideDates(pl, stepMap);
-    const plVariants = variantsData.filter(v => v.pipeline === pl);
-    plVariants.forEach(v => {
-      sideSteps.forEach(step => {
-        const u = findUser(step.assignee_name);
-        taskInserts.push({
-          project_id: projectId,
-          variant_id: v.id,
-          pipeline: pl,
-          step_key: step.key,
-          step_name: step.name,
-          step_group: 'side',
-          is_milestone: false,
-          order_num: ++orderCounter,
-          assignee_id: u?.id || null,
-          assignee_name: step.assignee_name,
-          expected_date: step.expected_date,
-          due_date: step.expected_date,
-          status: '未開始',
-        });
       });
     });
   });
