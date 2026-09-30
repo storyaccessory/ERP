@@ -1290,6 +1290,8 @@ async function loadRepair() {
 async function loadDev() {
   const { data } = await db.from('dev_projects').select('*, series(name), dev_tasks(*)').order('created_at', { ascending: false });
   state.data.dev = data || [];
+  // 順便載入設計圖號(輕量表,同頁使用)
+  try { await loadDesignNumbers(); } catch(e) { console.warn('loadDesignNumbers failed', e); }
 }
 
 async function loadAccounting() {
@@ -11187,15 +11189,238 @@ window._rpRequote = async function(orderId) {
 };
 
 // ── Dev Projects ──
+// ═══════════════════════════════════════════════
+// 設計圖號發號機
+// ═══════════════════════════════════════════════
+async function loadDesignNumbers() {
+  const { data } = await db.from('design_numbers')
+    .select('*, designer:profiles!designer_id(name)')
+    .order('date', { ascending: false })
+    .order('seq', { ascending: false })
+    .limit(500);
+  state.data.designNumbers = data || [];
+}
+
+function _renderDesignNumbers() {
+  const list = state.data.designNumbers || [];
+  const searchQ = (state.data._dnSearch || '').toLowerCase().trim();
+  const filterDate = state.data._dnFilterDate || '';
+
+  let filtered = list;
+  if (filterDate) filtered = filtered.filter(r => r.date === filterDate);
+  if (searchQ) filtered = filtered.filter(r =>
+    (r.number||'').includes(searchQ) ||
+    (r.variant_name||'').toLowerCase().includes(searchQ) ||
+    (r.series_name||'').toLowerCase().includes(searchQ) ||
+    (r.designer_name||r.designer?.name||'').toLowerCase().includes(searchQ) ||
+    (r.note||'').toLowerCase().includes(searchQ)
+  );
+
+  // 統計:今日 / 本月 / 累計
+  const today = _localToday();
+  const thisMonth = today.slice(0,7);
+  const todayCount = list.filter(r => r.date === today && !r.voided_at).length;
+  const monthCount = list.filter(r => (r.date||'').startsWith(thisMonth) && !r.voided_at).length;
+  const totalCount = list.filter(r => !r.voided_at).length;
+  const voidedCount = list.filter(r => r.voided_at).length;
+
+  return `
+    <div class="tabs">
+      <div class="tab" data-dev-tab="飾品">飾品</div>
+      <div class="tab" data-dev-tab="周邊">周邊</div>
+      <div class="tab active">🔢 設計圖號</div>
+    </div>
+
+    <div class="cards cards-4" style="margin-bottom:16px">
+      <div class="card"><div class="card-title">📅 今日已發</div><div class="card-value accent">${todayCount}</div></div>
+      <div class="card"><div class="card-title">📆 本月已發</div><div class="card-value">${monthCount}</div></div>
+      <div class="card"><div class="card-title">📊 累計有效</div><div class="card-value">${totalCount}</div></div>
+      <div class="card"><div class="card-title">🚫 已作廢</div><div class="card-value" style="color:#c62828">${voidedCount}</div></div>
+    </div>
+
+    <div class="search-bar" style="gap:8px;flex-wrap:wrap">
+      <input class="search-input" placeholder="搜尋號碼、品相、系列、設計師…" value="${(state.data._dnSearch||'').replace(/"/g,'&quot;')}"
+        oninput="state.data._dnSearch=this.value;renderApp()"
+        oncompositionend="state.data._dnSearch=this.value;renderApp()"
+        style="max-width:280px">
+      <input type="date" value="${filterDate}" onchange="state.data._dnFilterDate=this.value;renderApp()"
+        style="padding:6px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px" title="依日期過濾">
+      ${filterDate?`<button class="btn btn-sm btn-outline" onclick="state.data._dnFilterDate='';renderApp()" style="font-size:11px">✕ 清除日期</button>`:''}
+      <button class="btn btn-primary" onclick="modalIssueDesignNumber()">+ 發設計圖號</button>
+    </div>
+
+    <div class="card" style="padding:0">
+      ${filtered.length === 0 ? `<div class="empty" style="padding:40px"><div class="empty-icon">🔢</div><p>${searchQ||filterDate?'沒有符合的資料':'尚未發出任何設計圖號'}</p></div>` : `
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px">
+          <thead>
+            <tr style="background:#f5f5f5;border-bottom:2px solid var(--border)">
+              <th style="padding:8px 12px;text-align:left;width:120px">設計圖號</th>
+              <th style="padding:8px 12px;text-align:left;width:100px">日期</th>
+              <th style="padding:8px 12px;text-align:left;width:60px">序號</th>
+              <th style="padding:8px 12px;text-align:left">品相</th>
+              <th style="padding:8px 12px;text-align:left">系列</th>
+              <th style="padding:8px 12px;text-align:left;width:100px">設計師</th>
+              <th style="padding:8px 12px;text-align:left">備註</th>
+              <th style="padding:8px 12px;text-align:left;width:120px">發出時間</th>
+              <th style="padding:8px 12px;text-align:center;width:120px">操作</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${filtered.map(r => {
+              const isVoid = !!r.voided_at;
+              return `<tr style="border-bottom:1px solid #f0f0f0;${isVoid?'background:#fafafa;opacity:.55':''}">
+                <td style="padding:6px 12px;font-family:monospace;font-weight:700;color:${isVoid?'#999':'var(--accent-dark)'};${isVoid?'text-decoration:line-through':''}">${r.number}</td>
+                <td style="padding:6px 12px;font-family:monospace">${r.date||'—'}</td>
+                <td style="padding:6px 12px;text-align:center;color:var(--muted)">${r.seq||'—'}</td>
+                <td style="padding:6px 12px;font-weight:500">${r.variant_name||'—'}</td>
+                <td style="padding:6px 12px;color:var(--muted)">${r.series_name||'—'}</td>
+                <td style="padding:6px 12px">${r.designer_name||r.designer?.name||'—'}</td>
+                <td style="padding:6px 12px;color:var(--muted);font-size:12px">${r.note||''}${isVoid?`<div style="color:#c62828;font-size:11px;margin-top:2px">⚠ 已作廢:${r.void_reason||'—'}</div>`:''}</td>
+                <td style="padding:6px 12px;color:var(--muted);font-size:11px">${r.issued_at?new Date(r.issued_at).toLocaleString('zh-TW',{month:'numeric',day:'numeric',hour:'2-digit',minute:'2-digit'}):'—'}</td>
+                <td style="padding:6px 12px;text-align:center">
+                  <button class="btn-table" onclick="window._dnCopy('${r.number}')" title="複製號碼">📋</button>
+                  ${!isVoid ? `<button class="btn-table danger" onclick="window._dnVoid('${r.id}','${(r.number||'').replace(/'/g,"\\'")}')" title="作廢(不可重用)">🚫</button>` : ''}
+                </td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>`}
+    </div>
+    <div style="margin-top:10px;padding:10px 14px;background:#fff8e1;border-left:3px solid #f57c00;border-radius:6px;font-size:12px;color:#666;line-height:1.7">
+      💡 <b>格式說明</b>:YYYYMMDDNN(日期+當日序號,序號從 01 開始,每天重新計算)<br>
+      💡 <b>發出後不可撤</b>:如需作廢請按 🚫,該號碼不會被重用(維持稽核軌跡)
+    </div>
+  `;
+}
+
+// 發設計圖號 modal
+window.modalIssueDesignNumber = async function() {
+  await loadDesignNumbers();  // 保證 seq 是最新
+  const today = _localToday();
+  const list = state.data.designNumbers || [];
+  const todayList = list.filter(r => r.date === today && !r.voided_at);
+  const nextSeq = todayList.length > 0 ? Math.max(...todayList.map(r => r.seq||0)) + 1 : 1;
+  const nextNumber = today.replace(/-/g,'') + String(nextSeq).padStart(2,'0');
+
+  const users = state.data.users || [];
+  const activeUsers = users.filter(u => u.is_active !== false);
+  const myProfile = effectiveProfile() || {};
+  const myId = state.user?.id;
+
+  // 系列選單
+  const seriesList = (state.data.series||[]).sort((a,b) => (a.name||'').localeCompare(b.name||'','zh-TW'));
+
+  showModal('🔢 發設計圖號', `
+    <div style="padding:14px;background:#e8f5f4;border-radius:8px;text-align:center;margin-bottom:16px">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">下一個號碼(自動)</div>
+      <div style="font-size:28px;font-weight:700;font-family:monospace;color:var(--accent-dark);letter-spacing:2px">${nextNumber}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">${today} · 當日第 ${nextSeq} 號</div>
+    </div>
+
+    <div class="form-group">
+      <label>品相(商品名稱)* <span style="font-size:11px;color:var(--muted);font-weight:400">— 這個設計圖用在哪個品項</span></label>
+      <input class="form-control" id="dn-variant" placeholder="例:Kuromi繁花項鍊 · 大耳狗喜拿戒指" list="dn-product-list">
+      <datalist id="dn-product-list">
+        ${(state.data.products||[]).slice(0,300).map(p => `<option value="${(p.name||'').replace(/"/g,'&quot;')}"></option>`).join('')}
+      </datalist>
+    </div>
+
+    <div class="form-group">
+      <label>系列</label>
+      <select class="form-control" id="dn-series">
+        <option value="">— 選擇系列(選填) —</option>
+        ${seriesList.map(s => `<option value="${(s.name||'').replace(/"/g,'&quot;')}">${s.name}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>設計師</label>
+      <select class="form-control" id="dn-designer">
+        <option value="">— 選擇設計師 —</option>
+        ${activeUsers.map(u => `<option value="${u.id}" data-name="${u.name}" ${u.id===myId?'selected':''}>${u.name}</option>`).join('')}
+      </select>
+    </div>
+
+    <div class="form-group">
+      <label>備註(選填)</label>
+      <input class="form-control" id="dn-note" placeholder="例:聯名廠商指定、加急、補件…">
+    </div>
+  `, [
+    { label:'✅ 確認發號', primary:true, onclick: async () => {
+      const variant = document.getElementById('dn-variant').value.trim();
+      if (!variant) { showToast('請填品相名稱','error'); return; }
+      const seriesName = document.getElementById('dn-series').value.trim() || null;
+      const designerSel = document.getElementById('dn-designer');
+      const designerId = designerSel.value || null;
+      const designerName = designerId ? designerSel.selectedOptions[0]?.dataset?.name : null;
+      const note = document.getElementById('dn-note').value.trim() || null;
+
+      // 再次確認 seq(避免多人同時發號撞號)
+      const { data: latest } = await db.from('design_numbers')
+        .select('seq').eq('date', today).is('voided_at', null)
+        .order('seq', { ascending: false }).limit(1);
+      const finalSeq = latest?.length ? latest[0].seq + 1 : 1;
+      const finalNumber = today.replace(/-/g,'') + String(finalSeq).padStart(2,'0');
+
+      const { error } = await db.from('design_numbers').insert({
+        number: finalNumber,
+        date: today,
+        seq: finalSeq,
+        variant_name: variant,
+        series_name: seriesName,
+        designer_id: designerId,
+        designer_name: designerName,
+        note,
+      });
+      if (error) {
+        // 如果撞號,重試一次(理論上會被 unique 擋)
+        if (error.code === '23505') {
+          showToast('號碼被搶了,請再按一次','error');
+        } else {
+          showToast('發號失敗:'+error.message,'error');
+        }
+        return;
+      }
+      showToast(`✅ 已發:${finalNumber}`);
+      // 複製到剪貼簿
+      try { await navigator.clipboard?.writeText(finalNumber); } catch(e) {}
+      closeModal();
+      await loadDesignNumbers(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+window._dnCopy = async function(num) {
+  try { await navigator.clipboard.writeText(num); showToast(`已複製:${num}`); }
+  catch(e) { showToast('複製失敗','error'); }
+};
+
+window._dnVoid = async function(id, num) {
+  const reason = prompt(`要作廢圖號「${num}」嗎?\n\n作廢後該號碼不會被重用,只是標記為無效。\n請填作廢原因:`);
+  if (reason === null) return;
+  const { error } = await db.from('design_numbers').update({
+    voided_at: new Date().toISOString(),
+    void_reason: reason || '無說明',
+  }).eq('id', id);
+  if (error) { showToast('作廢失敗:'+error.message,'error'); return; }
+  showToast(`已作廢:${num}`);
+  await loadDesignNumbers(); renderApp();
+};
+
 function renderDev() {
   const projects = state.data.dev || [];
   const tab = state.data.devTab || '飾品';
+  if (tab === '設計圖號') return _renderDesignNumbers();
   const filtered = projects.filter(p => p.dev_type === tab);
 
   return `
     <div class="tabs">
       <div class="tab ${tab==='飾品'?'active':''}" data-dev-tab="飾品">飾品 (${projects.filter(p=>p.dev_type==='飾品').length})</div>
       <div class="tab ${tab==='周邊'?'active':''}" data-dev-tab="周邊">周邊 (${projects.filter(p=>p.dev_type==='周邊').length})</div>
+      <div class="tab ${tab==='設計圖號'?'active':''}" data-dev-tab="設計圖號">🔢 設計圖號</div>
     </div>
     <div class="search-bar">
       <button class="btn btn-primary" id="add-dev-btn">+ 新增開發專案</button>
