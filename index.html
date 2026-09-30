@@ -11236,7 +11236,7 @@ window._rpRequote = async function(orderId) {
 
 const PIPELINE_TEMPLATES = {
   silver: {
-    label: '🥈 銀件',
+    label: '🥈 純銀',
     color: '#78909c',
     main: [
       { key:'design_draft',      name:'設計圖',              days:10, assignee_name:'劉怡汝' },
@@ -11817,6 +11817,7 @@ function _renderDevDetail(id) {
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="window._devEditProject('${p.id}')">✏️ 編輯專案</button>
+        <button class="btn btn-sm btn-outline" onclick="window._devRebuildCalendar('${p.id}')" style="background:#e3f2fd;color:#1565c0">🔄 重建行事曆</button>
         <button class="btn btn-sm" style="background:#ffebee;color:#c62828" onclick="window._devDeleteProject('${p.id}')">🗑 刪除專案</button>
       </div>
     </div>
@@ -12611,6 +12612,26 @@ window._devEditProject = async function(projectId) {
   ]);
 };
 
+// 重建行事曆事件(拿掉舊的,依現在的 tasks 重建)
+window._devRebuildCalendar = async function(id) {
+  const p = (state.data.dev||[]).find(x => x.id === id);
+  if (!p) return;
+  if (!confirm(`重建行事曆事件?\n將先刪除舊的,再依目前所有任務重新建立。`)) return;
+
+  // 刪除舊 events
+  const oldIds = [...new Set((p.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
+  if (oldIds.length) {
+    await db.from('calendar_events').delete().in('id', oldIds);
+  }
+
+  // 重建 · 用目前所有 tasks(含已完成)
+  await _buildDevCalendarEvents(p, p.dev_tasks||[], p.name);
+  showToast('✓ 行事曆事件已重建');
+  await loadDev();
+  try { await loadCalendarEvents?.(); } catch(e) {}
+  renderApp();
+};
+
 // 刪除專案 + 所有相關 tasks + variants + 行事曆事件
 window._devDeleteProject = async function(id) {
   const p = (state.data.dev||[]).find(x => x.id === id);
@@ -13063,41 +13084,48 @@ async function _saveDevProject() {
 }
 
 // ★ 新版:整個專案 = 1 個行事曆事件,所有任務都是子任務
-// 事件日期 = 上市日(最終里程碑),但子任務各自有 due_date + assignee → 依個人日曆分別提醒
+// 事件日期 = 當前下一個未完成任務日期(動態);子任務各自有 due_date + assignee
 async function _buildDevCalendarEvents(project, tasks, projectName) {
   if (!tasks.length) return;
 
-  // 找上市日(最後的里程碑或最後的 due_date)
-  const launchTask = tasks.find(t => t.is_milestone && (t.step_name === '量產' || t.step_name === '到貨驗收' || t.step_name === '商品到貨驗收'));
-  const eventDate = launchTask?.due_date || tasks.map(t => t.due_date).filter(Boolean).sort().pop();
+  // 找下一個未完成任務日期(當前進行中)· 剛建立時 = 第一個任務
+  const nextTask = [...tasks].sort((a,b) => (a.due_date||'').localeCompare(b.due_date||'')).find(t => t.status !== '完成' && t.status !== '取消');
+  const eventDate = nextTask?.due_date || tasks[0]?.due_date;
 
-  // 收集所有 assignee_ids(聯集,讓相關人的日曆都看得到)
-  const assigneeIds = [...new Set(tasks.map(t => t.assignee_id).filter(Boolean))];
+  const pipelines = project.pipelines || [];
+  const hasMultiPipeline = pipelines.length > 1;
 
-  // 建 subtasks:每筆任務一個子項
+  // 全辦公室 = 所有 active 用戶
+  const allActiveUserIds = (state.data.users||[]).filter(u => u.is_active !== false).map(u => u.id);
+
+  // 建 subtasks:多 pipeline 才加 [純銀]/[合金]/[周邊] 前綴
   const subtasks = tasks
     .sort((a,b) => (a.order_num||0) - (b.order_num||0))
-    .map(t => ({
-      id: `dev_${t.id}`,
-      text: `${t.is_milestone?'🎯 ':''}[${PIPELINE_TEMPLATES[t.pipeline]?.label||t.pipeline}] ${t.step_name}`,
-      done: false,
-      due_date: t.due_date,
-      dev_task_id: t.id,
-      dev_project_id: project.id,
-      assignee_id: t.assignee_id,
-    }));
+    .map(t => {
+      const plLabel = PIPELINE_TEMPLATES[t.pipeline]?.label?.replace(/^[🥈🥇🎁]\s*/,'') || t.pipeline;
+      const prefix = hasMultiPipeline ? `[${plLabel}] ` : '';
+      return {
+        id: `dev_${t.id}`,
+        text: `${t.is_milestone?'🎯 ':''}${prefix}${t.step_name}`,
+        done: false,
+        due_date: t.due_date,
+        dev_task_id: t.id,
+        dev_project_id: project.id,
+        assignee_id: t.assignee_id,
+      };
+    });
 
-  // 建 1 個 event
+  // 建 1 個 event · 標題就是系列名稱
   const payload = {
-    title: `🛠 ${projectName}(開發專案)`,
+    title: projectName,
     event_type: 'dev',
     event_date: eventDate,
     start_date: project.start_date,
-    end_date: eventDate,
+    end_date: nextTask?.due_date || eventDate,
     priority: '中',
-    description: `PM: ${project.pm_name||'—'} · Pipeline: ${(project.pipelines||[]).map(pl => PIPELINE_TEMPLATES[pl]?.label||pl).join(', ')}\n共 ${tasks.length} 個任務`,
-    assigned_to: project.pm_id || null,
-    assignee_ids: assigneeIds,
+    description: `PM: ${project.pm_name||'—'} · ${pipelines.map(pl => PIPELINE_TEMPLATES[pl]?.label||pl).join(' · ')}\n共 ${tasks.length} 個任務`,
+    assigned_to: null, // 全辦公室,不指派單一人
+    assignee_ids: allActiveUserIds,
     subtasks,
     created_by: state.user?.id || null,
   };
