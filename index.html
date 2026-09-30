@@ -11822,18 +11822,23 @@ function _renderDevDetail(id) {
       </div>
     </div>
 
-    <!-- 每條 pipeline 的主線 -->
+    <!-- 每條 pipeline 的主線 + 副線 -->
     ${pipelines.map(pl => {
       const t = PIPELINE_TEMPLATES[pl];
-      const plTasks = mainTasks.filter(x => x.pipeline === pl);
-      const plDone = plTasks.filter(x => x.status === '完成').length;
-      const plPct = plTasks.length ? Math.round(plDone/plTasks.length*100) : 0;
+      const plMain = mainTasks.filter(x => x.pipeline === pl);
+      const plSide = sideTasks.filter(x => x.pipeline === pl);
+      const mDone = plMain.filter(x => x.status === '完成').length;
+      const sDone = plSide.filter(x => x.status === '完成').length;
+      const totalPct = (plMain.length+plSide.length) ? Math.round((mDone+sDone)/(plMain.length+plSide.length)*100) : 0;
       return `
         <div class="card" style="margin-bottom:14px;border-left:4px solid ${t.color}">
           <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-            <div style="font-size:15px;font-weight:700;color:${t.color}">${t.label} 主線 <span style="font-size:12px;color:var(--muted);font-weight:400">· ${plDone}/${plTasks.length} · ${plPct}%</span></div>
+            <div style="font-size:15px;font-weight:700;color:${t.color}">${t.label} <span style="font-size:12px;color:var(--muted);font-weight:400">· 主線 ${mDone}/${plMain.length}${plSide.length?` · 副線 ${sDone}/${plSide.length}`:''} · ${totalPct}%</span></div>
           </div>
-          <div class="progress-bar" style="height:8px;margin-bottom:10px"><div class="progress-fill" style="width:${plPct}%;background:${t.color}"></div></div>
+          <div class="progress-bar" style="height:8px;margin-bottom:10px"><div class="progress-fill" style="width:${totalPct}%;background:${t.color}"></div></div>
+
+          <!-- 主線 -->
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin:6px 0 4px">主線</div>
           <table style="width:100%;font-size:12px;border-collapse:collapse">
             <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
               <tr>
@@ -11844,24 +11849,38 @@ function _renderDevDetail(id) {
                 <th style="padding:5px;text-align:center;width:80px">狀態</th>
               </tr>
             </thead>
-            <tbody>
-              ${plTasks.map(task => _renderDevTaskRow(task, p)).join('')}
-            </tbody>
+            <tbody>${plMain.map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
           </table>
+
+          <!-- 副線 -->
+          ${plSide.length ? `
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin:12px 0 4px">副線 <span style="font-weight:400">(系列共用,一次做完所有品相)</span></div>
+          <table style="width:100%;font-size:12px;border-collapse:collapse">
+            <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
+              <tr>
+                <th style="padding:5px;text-align:center;width:34px">☐</th>
+                <th style="padding:5px;text-align:left">步驟</th>
+                <th style="padding:5px;text-align:left;width:140px">負責人</th>
+                <th style="padding:5px;text-align:center;width:120px">預定完成</th>
+                <th style="padding:5px;text-align:center;width:80px">狀態</th>
+              </tr>
+            </thead>
+            <tbody>${plSide.map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
+          </table>` : ''}
         </div>
       `;
     }).join('')}
 
-    <!-- 品相清單 -->
+    <!-- 品相清單(只顯示品相基本資訊 + 設計圖號 + 校正歷程) -->
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-size:15px;font-weight:700;color:#6a1b9a">🏷 品相清單</div>
+        <div style="font-size:15px;font-weight:700;color:#6a1b9a">🏷 品相清單 <span style="font-size:11px;color:var(--muted);font-weight:400">(用於發設計圖號、送審審查、建商品)</span></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           ${pipelines.map(pl => `<button class="btn btn-sm btn-outline" onclick="window._devAddVariantPrompt('${p.id}','${pl}')" style="background:${PIPELINE_TEMPLATES[pl]?.color}15;color:${PIPELINE_TEMPLATES[pl]?.color};font-size:11px">+ ${PIPELINE_TEMPLATES[pl]?.label} 品相</button>`).join('')}
         </div>
       </div>
-      ${variants.length === 0 ? `<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">還沒加品相 · 通常等「設計圖初稿」完成後加</div>` :
-        variants.map(v => _renderDevVariantRow(v, sideTasks.filter(t => t.variant_id === v.id), p)).join('')}
+      ${variants.length === 0 ? `<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">還沒加品相 · 通常等「設計圖初稿」開始時加</div>` :
+        variants.map(v => _renderDevVariantRow(v, [], p)).join('')}
     </div>
   `;
 }
@@ -11904,39 +11923,27 @@ function _renderDevTaskRow(task, project) {
   </tr>`;
 }
 
-// 品相列(含副線任務 + 當前狀態)
-function _renderDevVariantRow(v, variantSideTasks, project) {
+// 品相列(系列共用副線;品相只顯示基本資訊 + 圖號 + 校正歷程)
+function _renderDevVariantRow(v, _unused, project) {
   const t = PIPELINE_TEMPLATES[v.pipeline];
   const isCancelled = !!v.cancelled_at;
-  const done = variantSideTasks.filter(x => x.status === '完成').length;
-  const total = variantSideTasks.filter(x => x.status !== '取消').length;
   const today = _localToday();
 
-  // 計算「這個品相現在卡在哪」
-  let currentStatus = { text:'', bg:'#e0f2f1', color:'#00695c' };
+  // 品相「當前卡點」= 跟隨系列主線
+  let currentStatus;
   if (isCancelled) {
     currentStatus = { text:'已取消', bg:'#f5f5f5', color:'#999' };
   } else if (v.needs_revision) {
     const lastReview = (v.review_history||[]).filter(h => h.decision === 'reject').slice(-1)[0];
     currentStatus = { text:`⚠ 卡在「${lastReview?.step_name||'審查'}」需校正:${v.revision_note||lastReview?.reason||'—'}`, bg:'#ffebee', color:'#c62828' };
-  } else if (variantSideTasks.length > 0) {
-    // 已有副線 → 找副線的當前
-    const cur = variantSideTasks.find(x => x.status !== '完成' && x.status !== '取消');
-    if (cur) {
-      const isOverdue = cur.due_date && cur.due_date < today;
-      currentStatus = { text:`🔄 ${cur.step_name} · ${cur.assignee_name||'未指定'}${cur.due_date?` · ${cur.due_date}`:''}${isOverdue?' ⚠ 逾期':''}`, bg: isOverdue?'#ffebee':'#fff3e0', color: isOverdue?'#c62828':'#e65100' };
-    } else {
-      currentStatus = { text:`✅ 副線全部完成`, bg:'#e8f5e9', color:'#2e7d32' };
-    }
   } else {
-    // 沒副線 → 看主線(系列級)
     const mainTasks = (project.dev_tasks||[]).filter(t => t.pipeline === v.pipeline && t.step_group === 'main').sort((a,b) => (a.order_num||0) - (b.order_num||0));
     const curMain = mainTasks.find(x => x.status !== '完成' && x.status !== '取消');
     if (curMain) {
       const isOverdue = curMain.due_date && curMain.due_date < today;
-      currentStatus = { text:`🔄 主線 · ${curMain.step_name} · ${curMain.assignee_name||'未指定'}${curMain.due_date?` · ${curMain.due_date}`:''}${isOverdue?' ⚠ 逾期':''}`, bg: isOverdue?'#ffebee':'#fff3e0', color: isOverdue?'#c62828':'#e65100' };
+      currentStatus = { text:`🔄 系列主線:${curMain.step_name}${curMain.due_date?` · ${curMain.due_date}`:''}${isOverdue?' ⚠ 逾期':''}`, bg: isOverdue?'#ffebee':'#fff3e0', color: isOverdue?'#c62828':'#e65100' };
     } else {
-      currentStatus = { text:`✅ 主線完成 · 等副線生成`, bg:'#e8f5e9', color:'#2e7d32' };
+      currentStatus = { text:`✅ 系列主線完成`, bg:'#e8f5e9', color:'#2e7d32' };
     }
   }
 
@@ -11950,7 +11957,6 @@ function _renderDevVariantRow(v, variantSideTasks, project) {
         ${v.design_number?`<span style="background:#e3f2fd;color:#1565c0;padding:1px 6px;border-radius:8px;font-size:10px;font-family:monospace;margin-left:6px">🔢 ${v.design_number}</span>`:''}
       </div>
       <div style="display:flex;gap:6px;align-items:center">
-        <span style="font-size:11px;color:var(--muted)">${done}/${total}</span>
         ${(v.review_history||[]).length ? `<button class="btn btn-sm btn-outline" onclick="window._devShowReviewHistory('${v.id}')" style="font-size:10px">📜 校正歷程</button>` : ''}
         ${isCancelled ?
           `<button class="btn btn-sm btn-outline" onclick="window._devRestoreVariant('${v.id}')" style="font-size:10px">↩ 還原</button>` :
@@ -11958,24 +11964,9 @@ function _renderDevVariantRow(v, variantSideTasks, project) {
         }
       </div>
     </div>
-    <!-- 當前卡點 -->
-    <div style="padding:6px 10px;background:${currentStatus.bg};color:${currentStatus.color};border-radius:5px;font-size:12px;font-weight:600;margin-bottom:6px">
+    <div style="padding:6px 10px;background:${currentStatus.bg};color:${currentStatus.color};border-radius:5px;font-size:12px;font-weight:600">
       ${currentStatus.text}
     </div>
-    ${variantSideTasks.length === 0 ? `<div style="font-size:11px;color:var(--muted);padding:4px 0">副線任務會在「樣品審過」完成時自動生成</div>` : `
-      <table style="width:100%;font-size:11px;border-collapse:collapse;margin-top:4px">
-        <tbody>
-          ${variantSideTasks.map(task => `<tr style="border-top:1px solid #f5f5f5;${task.status==='完成'?'background:#f1f8e9':task.due_date && task.due_date < _localToday() && task.status!=='完成'?'background:#ffebee':''}">
-            <td style="padding:3px 6px;width:28px;text-align:center">
-              <input type="checkbox" ${task.status==='完成'?'checked':''} onchange="window._devToggleTaskDone('${task.id}',this.checked)" ${isCancelled?'disabled':''}>
-            </td>
-            <td style="padding:3px 6px">${task.step_name}</td>
-            <td style="padding:3px 6px;width:110px;color:var(--muted)">${task.assignee_name||'—'}</td>
-            <td style="padding:3px 6px;width:100px;text-align:center;font-family:monospace">${task.due_date||''}</td>
-          </tr>`).join('')}
-        </tbody>
-      </table>
-    `}
   </div>`;
 }
 
@@ -12128,12 +12119,7 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults) {
   if (task.step_key === 'design_lock' || task.step_key === 'design_confirm') {
     await _devAutoIssueDesignNumbers(p, task.pipeline);
   }
-  if (task.step_key === 'sample_approved') {
-    // 只對通過的品相生副線;若全都退回可跳過
-    const passedVariantIds = new Set(reviewResults.filter(r => r.decision === 'pass').map(r => r.variant_id));
-    // 暫時全部生 · 退回的可以之後手動處理(或後續改進)
-    await _devAutoGenerateSideTasks(p, task.pipeline);
-  }
+  // 副線已在建案時生成(系列級),樣品審過只處理校正結果
   // 量產完成不再自動彈建商品(手工由陳秋惠處理)
 
   // 更新專案行事曆事件的 event_date = 下一個未完成任務日
@@ -12212,10 +12198,7 @@ window._devToggleTaskDone = async function(taskId, checked) {
       // 設計定稿完成 → 為每個品相發設計圖號
       await _devAutoIssueDesignNumbers(p, task.pipeline);
     }
-    if (task.step_key === 'sample_approved') {
-      // 樣品審過 → 為每個品相自動生副線任務
-      await _devAutoGenerateSideTasks(p, task.pipeline);
-    }
+    // 副線已在建案時就生(系列級),不再由樣品審過觸發
     // 量產完成不再自動彈建商品 popup(改為陳秋惠在「商品表」副線任務手工建)
 
     // 延遲/提早提示 — 只有 PM 或老闆才會彈出決策視窗
@@ -12502,14 +12485,7 @@ window._devAddVariantPrompt = async function(projectId, pipeline) {
       }).select().single();
       if (error) { showToast('新增失敗:'+error.message,'error'); return; }
 
-      // 如果樣品審過已完成,立刻生副線
-      const sampleApproved = (p?.dev_tasks||[]).find(t => t.pipeline===pipeline && t.step_key==='sample_approved');
-      if (sampleApproved?.status === '完成') {
-        // 需 refresh 拿到含新 variant 的 p
-        await loadDev();
-        const p2 = state.data.dev.find(x => x.id === projectId);
-        await _devAutoGenerateSideTasks(p2, pipeline);
-      }
+      // 副線已在建案時生(系列級),加品相不需再生
       // 如果設計定稿已完成,發設計圖號
       const designLock = (p?.dev_tasks||[]).find(t => t.pipeline===pipeline && (t.step_key==='design_lock' || t.step_key==='design_confirm'));
       if (designLock?.status === '完成' && !v.design_number) {
@@ -13059,11 +13035,11 @@ async function _saveDevProject() {
   let orderCounter = 0;
 
   d.pipelines.forEach(pl => {
-    const { dates } = pipelineDates[pl];
+    const { dates, stepMap } = pipelineDates[pl];
     const overrides = d.overrides?.[pl] || {};
+    // 主線
     dates.forEach(step => {
       const ov = overrides[step.key] || {};
-      // 決定 assignee(overrides > factory_owner > 預設)
       let assignee_name = step.assignee_name;
       let assignee_id = null;
       if (ov.assignee_id !== undefined && ov.assignee_id !== null) {
@@ -13090,6 +13066,26 @@ async function _saveDevProject() {
         assignee_name,
         expected_date: step.expected_date,
         due_date: dueDate,
+        status: '未開始',
+      });
+    });
+    // 副線(改為系列級 · 建案時一併生 · variant_id=null)
+    const sideSteps = _calcSideDates(pl, stepMap);
+    sideSteps.forEach(step => {
+      const u = findUser(step.assignee_name);
+      taskInserts.push({
+        project_id: projectId,
+        variant_id: null,   // 系列級
+        pipeline: pl,
+        step_key: step.key,
+        step_name: step.name,
+        step_group: 'side',
+        is_milestone: false,
+        order_num: ++orderCounter,
+        assignee_id: u?.id || null,
+        assignee_name: step.assignee_name,
+        expected_date: step.expected_date,
+        due_date: step.expected_date,
         status: '未開始',
       });
     });
