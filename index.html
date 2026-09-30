@@ -1288,17 +1288,34 @@ async function loadRepair() {
 }
 
 async function loadDev() {
-  const { data, error } = await db.from('dev_projects').select('*, dev_tasks(*), dev_variants(*)').order('created_at', { ascending: false });
-  if (error) { console.error('loadDev failed', error); state.data.dev = []; }
-  else {
-    // 補 series name(JS 端 lookup,避免 FK 未建時 join 失敗)
-    const seriesMap = {};
-    (state.data.series||[]).forEach(s => { seriesMap[s.id] = s; });
-    state.data.dev = (data||[]).map(p => ({
-      ...p,
-      series: p.series_id ? seriesMap[p.series_id] : null,
-    }));
-  }
+  // 分三次查詢,不靠 join(避免 FK 未建就爆掉)
+  const [pRes, tRes, vRes] = await Promise.all([
+    db.from('dev_projects').select('*').order('created_at', { ascending: false }),
+    db.from('dev_tasks').select('*'),
+    db.from('dev_variants').select('*'),
+  ]);
+  if (pRes.error) { console.error('loadDev projects failed', pRes.error); state.data.dev = []; return; }
+  const projects = pRes.data || [];
+  const tasks = tRes.data || [];
+  const variants = vRes.data || [];
+
+  // 補 series name(JS 端 lookup)
+  const seriesMap = {};
+  (state.data.series||[]).forEach(s => { seriesMap[s.id] = s; });
+
+  // 依 project_id 分組 tasks + variants
+  const tasksByProject = {};
+  tasks.forEach(t => { (tasksByProject[t.project_id] = tasksByProject[t.project_id] || []).push(t); });
+  const variantsByProject = {};
+  variants.forEach(v => { (variantsByProject[v.project_id] = variantsByProject[v.project_id] || []).push(v); });
+
+  state.data.dev = projects.map(p => ({
+    ...p,
+    series: p.series_id ? seriesMap[p.series_id] : null,
+    dev_tasks: tasksByProject[p.id] || [],
+    dev_variants: variantsByProject[p.id] || [],
+  }));
+
   try { await loadDesignNumbers(); } catch(e) { console.warn('loadDesignNumbers failed', e); }
 }
 
@@ -11705,6 +11722,7 @@ window.modalNewDevProject = async function() {
     factory_owner_id: null,
     factory_owner_name: '',
     variants: [],
+    overrides: {},   // { pipeline: { stepKey: {due_date?, assignee_id?, assignee_name?} } }
     notes: '',
   };
 
@@ -11824,33 +11842,44 @@ function _renderDevModalBody() {
       </div>
     </div>
 
-    <!-- 明細預覽:每條 pipeline 每個主線任務 -->
+    <!-- 明細預覽:每條 pipeline 每個主線任務(可調日期/負責人) -->
     <div style="background:#fff;border:1px solid var(--border);border-radius:8px;margin-bottom:12px;overflow:hidden">
-      <div style="padding:8px 14px;background:#f5f5f5;font-size:12px;font-weight:700;color:var(--accent-dark);display:flex;justify-content:space-between;align-items:center;cursor:pointer" onclick="(function(el){const c=el.nextElementSibling;c.style.display=c.style.display==='none'?'block':'none';el.querySelector('.arrow').textContent=c.style.display==='none'?'▶':'▼'})(this)">
-        <span>📋 任務明細預覽(建立前可再檢查)</span>
-        <span class="arrow" style="font-size:11px">▼</span>
+      <div style="padding:8px 14px;background:#f5f5f5;font-size:12px;font-weight:700;color:var(--accent-dark);display:flex;justify-content:space-between;align-items:center">
+        <span>📋 任務明細(可調日期和負責人 · 改一個日期,後面自動順移)</span>
+        <button class="btn btn-sm btn-outline" onclick="window._devResetDates()" style="font-size:10px;padding:2px 8px">🔄 重置回預設</button>
       </div>
-      <div style="display:block;max-height:400px;overflow-y:auto">
+      <div style="max-height:400px;overflow-y:auto">
         ${d.pipelines.map(pl => {
           const t = PIPELINE_TEMPLATES[pl];
           const { dates } = _calcMainDates(pl, d.start_date);
+          // 套用使用者覆寫
+          const overrides = d.overrides?.[pl] || {};
+          const finalDates = dates.map(step => {
+            const ov = overrides[step.key] || {};
+            return {
+              ...step,
+              expected_date: ov.due_date || step.expected_date,
+              assignee_id: ov.assignee_id ?? null,
+              assignee_name: ov.assignee_name || (step.assignee_key === 'factory_owner' ? d.factory_owner_name : step.assignee_name),
+            };
+          });
           return `
             <div style="padding:6px 14px;background:${t.color}15;border-top:1px solid var(--border);font-size:12px;font-weight:700;color:${t.color}">
-              ${t.label} · 共 ${dates.length} 步主線
+              ${t.label} · 共 ${finalDates.length} 步主線
             </div>
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               <thead style="background:#fafafa;color:var(--muted);font-size:11px">
                 <tr>
                   <th style="padding:4px 8px;text-align:left;width:30px">#</th>
                   <th style="padding:4px 8px;text-align:left">步驟</th>
-                  <th style="padding:4px 8px;text-align:left;width:100px">負責人</th>
-                  <th style="padding:4px 8px;text-align:left;width:90px">預計完成</th>
+                  <th style="padding:4px 8px;text-align:left;width:130px">負責人</th>
+                  <th style="padding:4px 8px;text-align:left;width:130px">預計完成日</th>
                 </tr>
               </thead>
               <tbody>
-                ${dates.map((step, i) => {
-                  let name = step.assignee_name;
-                  if (step.assignee_key === 'factory_owner') name = d.factory_owner_name || '(未選發包人)';
+                ${finalDates.map((step, i) => {
+                  const name = step.assignee_name || '(未指定)';
+                  const isBoss = name === '蔡采玲';
                   return `<tr style="border-bottom:1px solid #f5f5f5">
                     <td style="padding:4px 8px;color:var(--muted);text-align:center">${i+1}</td>
                     <td style="padding:4px 8px">
@@ -11859,8 +11888,17 @@ function _renderDevModalBody() {
                       ${step.issue_design_number?'<span style="color:#1565c0;font-size:10px;margin-left:4px">📌 發圖號</span>':''}
                       ${step.parallel?'<span style="background:#e3f2fd;color:#1565c0;font-size:10px;padding:1px 5px;border-radius:8px;margin-left:4px">並行</span>':''}
                     </td>
-                    <td style="padding:4px 8px;color:${name==='(未選發包人)'?'#c62828':'var(--text)'}">${name||'—'}</td>
-                    <td style="padding:4px 8px;font-family:monospace;color:${step.milestone?'#c62828':'var(--accent-dark)'};font-weight:${step.milestone?700:400}">${step.expected_date}</td>
+                    <td style="padding:4px 8px">
+                      <select onchange="window._devSetOverride('${pl}','${step.key}','assignee',this)" style="width:100%;padding:2px 4px;font-size:11px;border:1px solid ${name==='(未選發包人)'||name==='(未指定)'?'#ffab91':'var(--border)'};border-radius:3px">
+                        <option value="">(未指定)</option>
+                        ${activeUsers.map(u => `<option value="${u.id}" data-name="${u.name}" ${(name===u.name)?'selected':''}>${u.name}</option>`).join('')}
+                      </select>
+                    </td>
+                    <td style="padding:4px 8px">
+                      <input type="date" value="${step.expected_date}"
+                        onchange="window._devSetOverride('${pl}','${step.key}','due_date',this)"
+                        style="width:100%;padding:2px 4px;font-size:11px;font-family:monospace;border:1px solid ${overrides[step.key]?.due_date?'#66bb6a':'var(--border)'};border-radius:3px;background:${overrides[step.key]?.due_date?'#e8f5e9':'#fff'};color:${step.milestone?'#c62828':'var(--text)'};font-weight:${step.milestone?700:400}">
+                    </td>
                   </tr>`;
                 }).join('')}
               </tbody>
@@ -11888,6 +11926,76 @@ window._devTogglePipeline = function(key) {
   const idx = d.pipelines.indexOf(key);
   if (idx >= 0) d.pipelines.splice(idx, 1);
   else d.pipelines.push(key);
+  window._devRerender();
+};
+
+// 使用者調整任務日期或負責人
+window._devSetOverride = function(pipeline, stepKey, field, el) {
+  const d = state.data._devDraft;
+  if (!d.overrides) d.overrides = {};
+  if (!d.overrides[pipeline]) d.overrides[pipeline] = {};
+  if (!d.overrides[pipeline][stepKey]) d.overrides[pipeline][stepKey] = {};
+
+  if (field === 'due_date') {
+    const oldDate = _getStepDate(pipeline, stepKey);
+    const newDate = el.value;
+    d.overrides[pipeline][stepKey].due_date = newDate;
+
+    // 順移:算出 delta,把後面所有還沒被使用者手動改過的步驟都 +delta
+    if (oldDate && newDate) {
+      const delta = _daysDiff(oldDate, newDate);
+      if (delta !== 0) {
+        const tpl = PIPELINE_TEMPLATES[pipeline];
+        const idx = tpl.main.findIndex(s => s.key === stepKey);
+        if (idx >= 0) {
+          for (let i = idx+1; i < tpl.main.length; i++) {
+            const s = tpl.main[i];
+            // 如果這一步已經被使用者手動改過,不動它
+            if (d.overrides[pipeline][s.key]?.due_date) continue;
+            const origDate = _getStepDate(pipeline, s.key, /*ignoreOverrides*/ true);
+            if (origDate) {
+              const shifted = _shiftDate(origDate, delta);
+              d.overrides[pipeline][s.key] = d.overrides[pipeline][s.key] || {};
+              d.overrides[pipeline][s.key].due_date = shifted;
+            }
+          }
+        }
+      }
+    }
+  } else if (field === 'assignee') {
+    const uid = el.value || null;
+    const uname = el.selectedOptions[0]?.dataset?.name || null;
+    d.overrides[pipeline][stepKey].assignee_id = uid;
+    d.overrides[pipeline][stepKey].assignee_name = uname;
+  }
+  window._devRerender();
+};
+
+// 取得某步驟預設日期(不套 overrides)
+function _getStepDate(pipeline, stepKey, ignoreOverrides = false) {
+  const d = state.data._devDraft;
+  if (!ignoreOverrides && d.overrides?.[pipeline]?.[stepKey]?.due_date) {
+    return d.overrides[pipeline][stepKey].due_date;
+  }
+  const { dates } = _calcMainDates(pipeline, d.start_date);
+  return dates.find(s => s.key === stepKey)?.expected_date || null;
+}
+
+function _daysDiff(from, to) {
+  const a = new Date(from + 'T00:00:00');
+  const b = new Date(to + 'T00:00:00');
+  return Math.round((b - a) / (1000*60*60*24));
+}
+
+function _shiftDate(dateStr, deltaDays) {
+  const d = new Date(dateStr + 'T00:00:00');
+  d.setDate(d.getDate() + deltaDays);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+
+window._devResetDates = function() {
+  if (!confirm('重置所有日期和負責人為預設?')) return;
+  state.data._devDraft.overrides = {};
   window._devRerender();
 };
 
@@ -11952,16 +12060,23 @@ async function _saveDevProject() {
 
   d.pipelines.forEach(pl => {
     const { dates } = pipelineDates[pl];
+    const overrides = d.overrides?.[pl] || {};
     dates.forEach(step => {
+      const ov = overrides[step.key] || {};
+      // 決定 assignee(overrides > factory_owner > 預設)
       let assignee_name = step.assignee_name;
       let assignee_id = null;
-      if (step.assignee_key === 'factory_owner') {
+      if (ov.assignee_id !== undefined && ov.assignee_id !== null) {
+        assignee_id = ov.assignee_id;
+        assignee_name = ov.assignee_name || null;
+      } else if (step.assignee_key === 'factory_owner') {
         assignee_name = d.factory_owner_name;
         assignee_id = d.factory_owner_id;
       } else {
         const u = findUser(step.assignee_name);
         if (u) assignee_id = u.id;
       }
+      const dueDate = ov.due_date || step.expected_date;
       taskInserts.push({
         project_id: projectId,
         variant_id: null,
@@ -11974,7 +12089,7 @@ async function _saveDevProject() {
         assignee_id,
         assignee_name,
         expected_date: step.expected_date,
-        due_date: step.expected_date,
+        due_date: dueDate,
         status: '未開始',
       });
     });
@@ -25632,7 +25747,7 @@ const CAL_EVENT_TYPES = {
   store:     { label:'門市',   color:'#00897b', bg:'#e0f2f1' },
   order:     { label:'訂單',   color:'#1976d2', bg:'#e3f2fd' },
   restock:   { label:'補貨',   color:'#7b1fa2', bg:'#f3e5f5' },
-  dev:       { label:'開發',   color:'#f57c00', bg:'#fff3e0' },
+  dev:       { label:'新品',   color:'#f57c00', bg:'#fff3e0' },
   repair:    { label:'維修',   color:'#00796b', bg:'#e0f2f1' },
   urgent:    { label:'緊急',   color:'#c62828', bg:'#ffebee' },
   goldsmith: { label:'金工',   color:'#558b2f', bg:'#f1f8e9' },
