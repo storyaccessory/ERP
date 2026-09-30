@@ -13140,7 +13140,7 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
       const stepName = stepDef?.name || t.step_name;
       return {
         id: `dev_${t.id}`,
-        text: `${t.is_milestone?'🎯 ':''}${prefix}${stepName}`,
+        text: `${prefix}${stepName}${t.is_milestone?' 🎯':''}`,
         done: t.status === '完成',
         due_date: t.due_date,
         dev_task_id: t.id,
@@ -13164,11 +13164,14 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
     launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
   ].filter(Boolean).join('<br>');
 
-  // 選 event_type:優先用 DB 裡標籤是「新品」的自訂分類,沒有就 fallback 到 'dev'
+  // 選 event_type:優先用 id='new' (使用者的自訂分類),再找 label='新品',否則 fallback 到 'dev'
   const typeMap = getCalEventTypes();
   let evType = 'dev';
-  for (const [k, v] of Object.entries(typeMap)) {
-    if (v.label === '新品' || v.label === '新品上市') { evType = k; break; }
+  if (typeMap['new']) evType = 'new';
+  else {
+    for (const [k, v] of Object.entries(typeMap)) {
+      if (v.label === '新品' || v.label === '新品上市') { evType = k; break; }
+    }
   }
 
   // 建 1 個 event · 標題就是系列名稱 · 落在上市日單日
