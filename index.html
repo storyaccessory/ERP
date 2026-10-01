@@ -31821,10 +31821,11 @@ function renderPurchases() {
   const catText  = { '商品':'#ad1457','包材':'#0277bd','耗材':'#e65100','零件':'#2e7d32','辦公用品':'#6a1b9a','其他':'#616161' };
 
   return `
-    <div class="cards cards-4" style="margin-bottom:16px">
+    <div class="cards cards-5" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
       <div class="card" style="border-left:4px solid #e53935"><div class="card-title">🔔 待指派</div><div class="card-value" style="color:#c62828">${stats.待指派}</div></div>
       <div class="card"><div class="card-title">⏳ 待採購</div><div class="card-value warning">${stats.待採購}</div></div>
       <div class="card"><div class="card-title">📮 已採購</div><div class="card-value accent">${stats.已採購}</div></div>
+      <div class="card" style="border-left:4px solid #d84315"><div class="card-title">📦 待點收入庫</div><div class="card-value" style="color:#d84315">${list.filter(r => r.status === '已到貨' && !r.qc_qty).length}</div></div>
       <div class="card"><div class="card-title">✅ 結案</div><div class="card-value success">${stats.結案}</div></div>
     </div>
     <div class="tabs">
