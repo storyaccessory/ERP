@@ -12070,7 +12070,7 @@ window._devBatchIssueNumbers = async function(projectId) {
     <div id="bi-manual" class="bi-mode" style="display:none">
       <div class="form-group">
         <label>手動輸入每筆圖號(依品相順序 · 一行一個)</label>
-        <textarea class="form-control" id="bi-nums" rows="12" style="font-family:monospace;font-size:12px" placeholder="${pending.map((v,i)=>`${todayStr}${String(i+1).padStart(2,'0')}  ← ${v.name}`).join('\n')}"></textarea>
+        <textarea class="form-control" id="bi-nums" rows="12" style="font-family:monospace;font-size:12px" placeholder="${pending.map((v,i)=>`${todayStr}${String(i+1).padStart(2,'0')}  ← ${v.name}`).join('\n')}" oninput="this.value=this.value.split(/\\r?\\n/).map(_toHalfWidthDigit).join('\\n')"></textarea>
         <div style="font-size:11px;color:var(--muted);margin-top:4px">
           每行一個 10 碼數字 · 空行會對應跳過該品相不發
         </div>
@@ -12102,7 +12102,7 @@ window._devBatchIssueNumbers = async function(projectId) {
         }));
       } else {
         const raw = document.getElementById('bi-nums').value;
-        const lines = raw.split(/\r?\n/).map(s => s.trim());
+        const lines = raw.split(/\r?\n/).map(s => _toHalfWidthDigit(s.trim()));
         if (!lines.length) { showToast('請輸入圖號','error'); return; }
         // 格式檢查 + 分配
         for (let i = 0; i < pending.length; i++) {
@@ -12162,6 +12162,16 @@ window._devBatchIssueNumbers = async function(projectId) {
   ], { wide: true });
 };
 
+// 全形數字 → 半形數字(簡化圖號輸入)
+function _toHalfWidthDigit(s) {
+  if (!s) return s;
+  return String(s)
+    .replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[Ａ-Ｚａ-ｚ]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0))
+    .replace(/[　\s]/g, '')  // 空格全刪
+    .replace(/[^0-9]/g, ''); // 非數字全刪(避免中文字、符號)
+}
+
 // 點擊圖號 → 複製到剪貼簿
 window._devCopyDesignNumber = async function(number) {
   try {
@@ -12181,7 +12191,7 @@ window._devEditDesignNumber = async function(variantId) {
   showModal(`🔢 設計圖號 · ${v.name}`, `
     <div class="form-group">
       <label>圖號(格式 YYYYMMDDNN · 10 碼數字)</label>
-      <input class="form-control" id="dn-num" value="${current}" placeholder="例:2026101801" style="font-family:monospace;font-size:14px;letter-spacing:1px">
+      <input class="form-control" id="dn-num" value="${current}" placeholder="例:2026101801" style="font-family:monospace;font-size:14px;letter-spacing:1px" oninput="this.value=_toHalfWidthDigit(this.value)">
       <div style="font-size:11px;color:var(--muted);margin-top:4px">
         前 8 碼 = 日期 · 後 2 碼 = 當日序號 · 全系統不可重複
       </div>
@@ -12189,7 +12199,7 @@ window._devEditDesignNumber = async function(variantId) {
     ${v.design_number_id ? `<div style="padding:8px 10px;background:#fff3e0;border-radius:6px;font-size:12px;color:#e65100">⚠ 這個品相原本已有圖號 ${v.design_number} · 改了會覆蓋原記錄(作廢舊號)</div>` : ''}
   `, [
     { label:'儲存', primary:true, onclick: async () => {
-      const num = document.getElementById('dn-num').value.trim();
+      const num = _toHalfWidthDigit(document.getElementById('dn-num').value.trim());
       if (!/^\d{10}$/.test(num)) { showToast('圖號格式錯誤,需要 10 碼數字','error'); return; }
 
       // 檢查是否已被用
