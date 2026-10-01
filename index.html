@@ -12848,6 +12848,7 @@ function _renderDevModalBody() {
                 <tr>
                   <th style="padding:4px 8px;text-align:left;width:30px">#</th>
                   <th style="padding:4px 8px;text-align:left">步驟</th>
+                  <th style="padding:4px 8px;text-align:center;width:60px">工作天</th>
                   <th style="padding:4px 8px;text-align:left;width:130px">負責人</th>
                   <th style="padding:4px 8px;text-align:left;width:130px">預計完成日</th>
                 </tr>
@@ -12856,6 +12857,8 @@ function _renderDevModalBody() {
                 ${finalDates.map((step, i) => {
                   const name = step.assignee_name || '(未指定)';
                   const isBoss = name === '蔡采玲';
+                  const isManual = overrides[step.key]?.manual;
+                  const isCascaded = overrides[step.key]?.due_date && !isManual;
                   return `<tr style="border-bottom:1px solid #f5f5f5">
                     <td style="padding:4px 8px;color:var(--muted);text-align:center">${i+1}</td>
                     <td style="padding:4px 8px">
@@ -12864,6 +12867,7 @@ function _renderDevModalBody() {
                       ${step.issue_design_number?'<span style="color:#1565c0;font-size:10px;margin-left:4px">📌 發圖號</span>':''}
                       ${step.parallel?'<span style="background:#e3f2fd;color:#1565c0;font-size:10px;padding:1px 5px;border-radius:8px;margin-left:4px">並行</span>':''}
                     </td>
+                    <td style="padding:4px 8px;text-align:center;color:#555;font-weight:600">${step.days||0}</td>
                     <td style="padding:4px 8px">
                       <select onchange="window._devSetOverride('${pl}','${step.key}','assignee',this)" style="width:100%;padding:2px 4px;font-size:11px;border:1px solid ${name==='(未選發包人)'||name==='(未指定)'?'#ffab91':'var(--border)'};border-radius:3px">
                         <option value="">(未指定)</option>
@@ -12873,7 +12877,7 @@ function _renderDevModalBody() {
                     <td style="padding:4px 8px">
                       <input type="date" value="${step.expected_date}"
                         onchange="window._devSetOverride('${pl}','${step.key}','due_date',this)"
-                        style="width:100%;padding:2px 4px;font-size:11px;font-family:monospace;border:1px solid ${overrides[step.key]?.due_date?'#66bb6a':'var(--border)'};border-radius:3px;background:${overrides[step.key]?.due_date?'#e8f5e9':'#fff'};color:${step.milestone?'#c62828':'var(--text)'};font-weight:${step.milestone?700:400}">
+                        style="width:100%;padding:2px 4px;font-size:11px;font-family:monospace;border:1px solid ${isManual?'#2e7d32':isCascaded?'#90caf9':'var(--border)'};border-radius:3px;background:${isManual?'#e8f5e9':isCascaded?'#e3f2fd':'#fff'};color:${step.milestone?'#c62828':'var(--text)'};font-weight:${step.milestone?700:400}" title="${isManual?'🟢 使用者手動設 · 不會被連鎖覆蓋':isCascaded?'🔵 自動連鎖':''}">
                     </td>
                   </tr>`;
                 }).join('')}
@@ -12906,6 +12910,8 @@ window._devTogglePipeline = function(key) {
 };
 
 // 使用者調整任務日期或負責人
+// override.manual=true  → 使用者手動設,連鎖時不會被覆蓋
+// override.manual=false → 自動連鎖產生,後續別人改會再次連鎖覆蓋
 window._devSetOverride = function(pipeline, stepKey, field, el) {
   const d = state.data._devDraft;
   if (!d.overrides) d.overrides = {};
@@ -12916,8 +12922,9 @@ window._devSetOverride = function(pipeline, stepKey, field, el) {
     const oldDate = _getStepDate(pipeline, stepKey);
     const newDate = el.value;
     d.overrides[pipeline][stepKey].due_date = newDate;
+    d.overrides[pipeline][stepKey].manual = true;  // ⭐ 本次是使用者手動
 
-    // 順移:算出 delta,把後面所有還沒被使用者手動改過的步驟都 +delta
+    // 順移:後續**非使用者手動**的步驟都要連動
     if (oldDate && newDate) {
       const delta = _daysDiff(oldDate, newDate);
       if (delta !== 0) {
@@ -12926,13 +12933,15 @@ window._devSetOverride = function(pipeline, stepKey, field, el) {
         if (idx >= 0) {
           for (let i = idx+1; i < tpl.main.length; i++) {
             const s = tpl.main[i];
-            // 如果這一步已經被使用者手動改過,不動它
-            if (d.overrides[pipeline][s.key]?.due_date) continue;
-            const origDate = _getStepDate(pipeline, s.key, /*ignoreOverrides*/ true);
-            if (origDate) {
-              const shifted = _shiftDate(origDate, delta);
+            // 使用者手動設過的 → 不動(sticky)
+            if (d.overrides[pipeline][s.key]?.manual) continue;
+            // 其他(未設 or 自動連鎖的)→ 以當前日期為基礎 +delta
+            const curDate = _getStepDate(pipeline, s.key);
+            if (curDate) {
+              const shifted = _shiftDate(curDate, delta);
               d.overrides[pipeline][s.key] = d.overrides[pipeline][s.key] || {};
               d.overrides[pipeline][s.key].due_date = shifted;
+              d.overrides[pipeline][s.key].manual = false;  // 自動連鎖
             }
           }
         }
