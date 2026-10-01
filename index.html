@@ -27325,6 +27325,7 @@ function renderCalendar() {
     state.data.calTypeFilter = state.data.calTypeFilter ? [state.data.calTypeFilter] : [];
   }
   const calTypeFilter = state.data.calTypeFilter;    // string[]
+  const calSearchQ = (state.data.calSearchQ || '').trim().toLowerCase();
   const myId = state.user?.id;
   let allEvents = state.data.calEvents || [];
   // Apply 我的/全公司 filter — 主任務指派給我 或 任一未完成子任務指派給我 都算「我的」
@@ -27338,6 +27339,28 @@ function renderCalendar() {
     : allEvents;
   // Apply 分類 filter(多選:命中任一即通過;空=全部)
   if (calTypeFilter.length) events = events.filter(ev => calTypeFilter.includes(ev.event_type));
+  // 關鍵字搜尋:標題 / 說明 / 子任務文字 / 負責人姓名
+  const _calSearchMatch = (ev) => {
+    if (!calSearchQ) return true;
+    const q = calSearchQ;
+    if ((ev.title||'').toLowerCase().includes(q)) return true;
+    const descPlain = (ev.description||'').replace(/<[^>]*>/g,' ').toLowerCase();
+    if (descPlain.includes(q)) return true;
+    const subs = Array.isArray(ev.subtasks) ? ev.subtasks : [];
+    if (subs.some(s => (s.text||'').toLowerCase().includes(q))) return true;
+    const ids = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
+    const uList = state.data.users || [];
+    if (ids.some(uid => (uList.find(u=>u.id===uid)?.name||'').toLowerCase().includes(q))) return true;
+    if (subs.some(s => {
+      const n = uList.find(u => u.id === s.assignee_id)?.name || '';
+      return n.toLowerCase().includes(q);
+    })) return true;
+    return false;
+  };
+  // 搜尋結果(未經日期裁切、未經月份限制),供搜尋結果面板使用
+  const searchHits = calSearchQ ? events.filter(_calSearchMatch) : [];
+  // 月曆/清單呈現:有搜尋時只保留命中的事項
+  if (calSearchQ) events = searchHits;
   let calBookings = state.data.calBookings || [];
   // 體驗預約:切「我的」時,只顯示負責人(接待人員 staff_id)為自己的預約
   if (calFilter === 'mine') calBookings = calBookings.filter(b => b.staff_id === myId);
@@ -27668,6 +27691,39 @@ function renderCalendar() {
             </button>`;
           })() : ''}
         </div>
+        <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center">
+          <div style="position:relative;flex:1">
+            <span style="position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--muted);font-size:13px;pointer-events:none">🔍</span>
+            <input id="cal-search-input" type="text" placeholder="搜尋事項、說明、子任務、負責人…"
+              value="${calSearchQ.replace(/"/g,'&quot;')}"
+              oninput="window._calOnSearchInput && window._calOnSearchInput(this.value)"
+              style="width:100%;padding:7px 32px 7px 32px;border:1px solid ${calSearchQ?'var(--accent)':'var(--border)'};border-radius:8px;font-size:13px;background:${calSearchQ?'#fff8e1':'#fff'};outline:none">
+            ${calSearchQ ? `<span onclick="window._calClearSearch && window._calClearSearch()" title="清除"
+              style="position:absolute;right:8px;top:50%;transform:translateY(-50%);width:20px;height:20px;border-radius:50%;background:#ccc;color:#fff;font-size:12px;line-height:20px;text-align:center;cursor:pointer">✕</span>` : ''}
+          </div>
+          ${calSearchQ ? `<span style="font-size:12px;color:var(--accent-dark);font-weight:600;white-space:nowrap">命中 ${searchHits.length}</span>` : ''}
+        </div>
+        ${calSearchQ && searchHits.length ? `
+          <div style="margin-bottom:10px;border:1px solid var(--accent);border-radius:8px;background:#fffde7;max-height:260px;overflow-y:auto">
+            <div style="padding:6px 10px;border-bottom:1px solid #eee;font-size:11px;color:var(--muted);background:#fff9c4;position:sticky;top:0;z-index:1">搜尋結果(按日期排序,點擊可跳轉當月)</div>
+            ${[...searchHits].sort((a,b) => (a.start_date||'').localeCompare(b.start_date||'')).map(ev => {
+              const t = getCalEventTypes()[ev.event_type]||getCalEventTypes().general||{label:'一般',color:'#90a4ae',bg:'#eceff1'};
+              const dt = ev.start_date || '';
+              const [sy, sm] = dt ? dt.split('-').map(Number) : [y, m+1];
+              const isDone = !!ev.completed_at;
+              const assigneeIds = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
+              const names = assigneeIds.map(uid => (state.data.users||[]).find(u=>u.id===uid)?.name).filter(Boolean).join('、');
+              return `<div onclick="state.data.calNav={y:${sy},m:${(sm||1)-1}};calViewEvent('${ev.id}')"
+                style="padding:8px 10px;border-bottom:1px solid #f5f5f5;cursor:pointer;display:flex;align-items:center;gap:8px;${isDone?'opacity:.55':''}">
+                <span style="font-size:10px;background:${t.bg};color:${t.color};border-radius:3px;padding:2px 6px;font-weight:700;flex-shrink:0">${t.label}</span>
+                <div style="flex:1;min-width:0">
+                  <div style="font-size:13px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;${isDone?'text-decoration:line-through':''}">${ev.is_private?'🔒 ':''}${ev.title||''}</div>
+                  <div style="font-size:11px;color:var(--muted);margin-top:1px">${dt}${ev.end_date&&ev.end_date!==dt?' ~ '+ev.end_date:''}${names?' · 👤 '+names:''}</div>
+                </div>
+              </div>`;
+            }).join('')}
+          </div>` : ''}
+        ${calSearchQ && !searchHits.length ? `<div style="margin-bottom:10px;padding:14px;border:1px dashed var(--border);border-radius:8px;text-align:center;color:var(--muted);font-size:12px">沒有符合「${calSearchQ}」的事項</div>` : ''}
         ${calView === 'month' ? `
         <div style="display:grid;grid-template-columns:repeat(7,1fr);gap:2px">
           ${['日','一','二','三','四','五','六'].map((d,i)=>`<div style="font-size:11px;font-weight:600;color:${i===0||i===6?'#9e9e9e':'var(--muted)'};text-align:center;padding:3px 0">${d}</div>`).join('')}
@@ -28559,6 +28615,28 @@ window._calToggleTypeFilter = function(key) {
   const idx = arr.indexOf(key);
   if (idx >= 0) arr.splice(idx, 1);
   else arr.push(key);
+  renderApp();
+};
+
+// 行事曆:搜尋輸入(debounce,保留焦點)
+window._calSearchTimer = null;
+window._calOnSearchInput = function(val) {
+  state.data.calSearchQ = val || '';
+  if (window._calSearchTimer) clearTimeout(window._calSearchTimer);
+  window._calSearchTimer = setTimeout(() => {
+    renderApp();
+    // 重新 render 後把焦點和游標位置還給搜尋框
+    requestAnimationFrame(() => {
+      const el = document.getElementById('cal-search-input');
+      if (el) {
+        el.focus();
+        try { const l = el.value.length; el.setSelectionRange(l, l); } catch(e) {}
+      }
+    });
+  }, 180);
+};
+window._calClearSearch = function() {
+  state.data.calSearchQ = '';
   renderApp();
 };
 
