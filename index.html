@@ -11254,7 +11254,7 @@ const PIPELINE_TEMPLATES = {
       { key:'production',        name:'量產',                days:14, assignee_name:'王韋翔', parallel:true, after:'sample_approved', milestone:true, is_launch:true },
     ],
     side: [
-      { key:'plating_photo',   name:'電鍍拍照',    assignee_name:'王韋翔', trigger:'sample_approved', offset:5 },
+      { key:'plating_photo',   name:'電鍍拍照樣一套',    assignee_name:'王韋翔', trigger:'sample_approved', offset:5 },
       { key:'spec_sheet',      name:'產品規格單',  assignee_name:'郭子嫣', trigger:'sample_approved', offset:2 },
       { key:'restock_order',   name:'補貨單',      assignee_name:'陳秋惠', trigger:'sample_approved', offset:3 },
       { key:'cost_calc',       name:'成本計算',    assignee_name:'王韋翔', trigger:'sample_approved', offset:10 },
@@ -11867,6 +11867,29 @@ function _renderDevDetail(id) {
             </thead>
             <tbody>${plSide.map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
           </table>` : ''}
+
+          <!-- 自訂任務 + 新增按鈕 -->
+          ${(() => {
+            const plCustom = (p.dev_tasks||[]).filter(t => t.pipeline === pl && t.step_group === 'custom').sort((a,b)=>(a.order_num||0)-(b.order_num||0));
+            return `
+            ${plCustom.length ? `
+            <div style="font-size:11px;color:#e65100;font-weight:600;margin:12px 0 4px">自訂任務 ⭐</div>
+            <table style="width:100%;font-size:12px;border-collapse:collapse">
+              <thead style="background:#fff8e1;font-size:11px;color:var(--muted)">
+                <tr>
+                  <th style="padding:5px;text-align:center;width:34px">☐</th>
+                  <th style="padding:5px;text-align:left">步驟</th>
+                  <th style="padding:5px;text-align:left;width:140px">負責人</th>
+                  <th style="padding:5px;text-align:center;width:120px">預定完成</th>
+                  <th style="padding:5px;text-align:center;width:80px">狀態</th>
+                </tr>
+              </thead>
+              <tbody>${plCustom.map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
+            </table>` : ''}
+            <div style="text-align:center;margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">
+              <button class="btn btn-sm btn-outline" onclick="window._devAddDetailCustomTask('${p.id}','${pl}')" style="background:#fff;color:#e65100;border-color:#ffb74d;font-size:11px">⭐ + 加自訂任務到 ${t.label}</button>
+            </div>`;
+          })()}
         </div>
       `;
     }).join('')}
@@ -11904,7 +11927,14 @@ function _renderDevTaskRow(task, project) {
     <td style="padding:5px">
       ${task.step_name}
       ${isMilestone?'<span style="color:#c62828;margin-left:4px">🎯</span>':''}
-      ${task.completed_at?`<span style="font-size:10px;color:#2e7d32;margin-left:6px">✓ ${task.completed_at.slice(0,10)}</span>`:''}
+      ${task.completed_at ? `
+        <span style="font-size:10px;color:#2e7d32;margin-left:6px">
+          ✓ <input type="date" value="${task.completed_at.slice(0,10)}"
+            onchange="window._devEditCompletedDate('${task.id}',this.value)"
+            style="font-size:10px;padding:1px 3px;border:1px solid #a5d6a7;border-radius:3px;background:#f1f8e9;color:#2e7d32;font-family:monospace;width:110px"
+            title="完成日期(PM 可改,用於補登歷史)">
+        </span>
+      ` : ''}
       ${task.notes && task.notes.includes('等 PM') ? `<div style="font-size:10px;color:#e65100;background:#fff3e0;padding:2px 6px;border-radius:4px;margin-top:3px;display:inline-block">🔔 ${task.notes} <button style="border:none;background:#e65100;color:#fff;font-size:9px;padding:1px 6px;border-radius:3px;margin-left:4px;cursor:pointer" onclick="event.stopPropagation();window._devPmDecideTiming('${task.id}')">PM 處理</button></div>` : ''}
     </td>
     <td style="padding:5px">
@@ -12571,6 +12601,80 @@ window._devCreateProductsPrompt = async function(projectId, pipeline) {
   ]);
 };
 
+// PM 編輯完成日期(可補登歷史)
+window._devEditCompletedDate = async function(taskId, newDate) {
+  if (!newDate) return;
+  // 保留原本時間部分,只改日期
+  const task = state.data.dev.flatMap(p => p.dev_tasks||[]).find(t => t.id === taskId);
+  if (!task) return;
+  const oldDate = task.completed_at ? new Date(task.completed_at) : new Date();
+  const [y, m, d] = newDate.split('-').map(Number);
+  oldDate.setFullYear(y);
+  oldDate.setMonth(m-1);
+  oldDate.setDate(d);
+  await db.from('dev_tasks').update({ completed_at: oldDate.toISOString() }).eq('id', taskId);
+  showToast('✓ 完成日期已更新');
+  await loadDev();
+  // 不重新渲染全頁(避免輸入焦點跳掉)
+};
+
+// 詳情頁彈性加自訂任務到某 pipeline
+window._devAddDetailCustomTask = async function(projectId, pipeline) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const activeUsers = (state.data.users||[]).filter(u => u.is_active !== false);
+  const today = _localToday();
+  const dueD = addWorkdays(new Date(today+'T00:00:00'), 3);
+  const defaultDate = `${dueD.getFullYear()}-${String(dueD.getMonth()+1).padStart(2,'0')}-${String(dueD.getDate()).padStart(2,'0')}`;
+
+  showModal(`⭐ 加自訂任務到 ${PIPELINE_TEMPLATES[pipeline]?.label}`, `
+    <div class="form-group"><label>任務名稱 *</label>
+      <input class="form-control" id="dct-name" placeholder="例:補開發票、追蹤樣品運送、重寄催件">
+    </div>
+    <div class="form-row form-row-2">
+      <div class="form-group"><label>負責人</label>
+        <select class="form-control" id="dct-assignee">
+          <option value="">— 選擇 —</option>
+          ${activeUsers.map(u => `<option value="${u.id}" data-name="${u.name}">${u.name}</option>`).join('')}
+        </select>
+      </div>
+      <div class="form-group"><label>預定完成日 *</label>
+        <input type="date" class="form-control" id="dct-date" value="${defaultDate}">
+      </div>
+    </div>
+  `, [
+    { label:'加入', primary:true, onclick: async () => {
+      const name = document.getElementById('dct-name').value.trim();
+      const dueDate = document.getElementById('dct-date').value;
+      const sel = document.getElementById('dct-assignee');
+      if (!name) { showToast('請填任務名稱','error'); return; }
+      if (!dueDate) { showToast('請選預定完成日','error'); return; }
+      const maxOrder = Math.max(...(p.dev_tasks||[]).map(t => t.order_num||0), 0);
+      const { error } = await db.from('dev_tasks').insert({
+        project_id: projectId,
+        variant_id: null,
+        pipeline,
+        step_key: `custom_${Date.now()}`,
+        step_name: name,
+        step_group: 'custom',
+        is_milestone: false,
+        order_num: maxOrder + 1,
+        assignee_id: sel.value || null,
+        assignee_name: sel.selectedOptions[0]?.dataset?.name || null,
+        expected_date: dueDate,
+        due_date: dueDate,
+        status: '未開始',
+      });
+      if (error) { showToast('新增失敗:'+error.message,'error'); return; }
+      showToast(`✓ 已加「${name}」`);
+      closeModal();
+      await loadDev();
+      renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
 // 編輯專案基本資料
 window._devEditProject = async function(projectId) {
   const p = (state.data.dev||[]).find(x => x.id === projectId);
@@ -12683,7 +12787,8 @@ window.modalNewDevProject = async function() {
     factory_owner_id: null,
     factory_owner_name: '',
     variants: [],
-    overrides: {},   // { pipeline: { stepKey: {due_date?, assignee_id?, assignee_name?} } }
+    overrides: {},   // { pipeline: { stepKey: {due_date?, assignee_id?, assignee_name?, manual?} } }
+    customSteps: {}, // { pipeline: [{key, name, days, assignee_id, assignee_name, expected_date}] }
     notes: '',
   };
 
@@ -12827,10 +12932,11 @@ function _renderDevModalBody() {
       <div style="max-height:400px;overflow-y:auto">
         ${d.pipelines.map(pl => {
           const t = PIPELINE_TEMPLATES[pl];
-          const { dates } = _calcMainDates(pl, d.start_date);
+          const { dates, stepMap } = _calcMainDates(pl, d.start_date);
+          const sideSteps = _calcSideDates(pl, stepMap);
           // 套用使用者覆寫
           const overrides = d.overrides?.[pl] || {};
-          const finalDates = dates.map(step => {
+          const applyOv = (step) => {
             const ov = overrides[step.key] || {};
             return {
               ...step,
@@ -12838,10 +12944,12 @@ function _renderDevModalBody() {
               assignee_id: ov.assignee_id ?? null,
               assignee_name: ov.assignee_name || (step.assignee_key === 'factory_owner' ? d.factory_owner_name : step.assignee_name),
             };
-          });
+          };
+          const finalDates = dates.map(applyOv);
+          const finalSides = sideSteps.map(applyOv);
           return `
             <div style="padding:6px 14px;background:${t.color}15;border-top:1px solid var(--border);font-size:12px;font-weight:700;color:${t.color}">
-              ${t.label} · 共 ${finalDates.length} 步主線
+              ${t.label} · ${finalDates.length} 主線 + ${finalSides.length} 副線
             </div>
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               <thead style="background:#fafafa;color:var(--muted);font-size:11px">
@@ -12883,6 +12991,65 @@ function _renderDevModalBody() {
                 }).join('')}
               </tbody>
             </table>
+            ${(d.customSteps?.[pl]||[]).length ? `
+            <div style="padding:4px 14px 2px;font-size:11px;color:var(--muted);font-weight:600;background:#fff8e1">自訂任務</div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <tbody>
+                ${(d.customSteps[pl]||[]).map(step => `<tr style="border-bottom:1px solid #f5f5f5;background:#fffde7">
+                  <td style="padding:4px 8px;color:var(--muted);text-align:center;width:30px">⭐</td>
+                  <td style="padding:4px 8px">
+                    <input value="${(step.name||'').replace(/"/g,'&quot;')}" oninput="window._devUpdateCustomStep('${pl}','${step.key}','name',this.value)" style="width:100%;padding:2px 6px;font-size:11px;border:1px solid #ffcc80;border-radius:3px;background:#fff">
+                  </td>
+                  <td style="padding:4px 8px;text-align:center;width:60px"><input type="number" min="0" value="${step.days||1}" onchange="window._devUpdateCustomStep('${pl}','${step.key}','days',this.value)" style="width:40px;padding:2px;font-size:11px;text-align:center;border:1px solid var(--border);border-radius:3px"></td>
+                  <td style="padding:4px 8px;width:130px">
+                    <select onchange="window._devUpdateCustomStep('${pl}','${step.key}','assignee',this)" style="width:100%;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:3px">
+                      <option value="">(未指定)</option>
+                      ${activeUsers.map(u => `<option value="${u.id}" data-name="${u.name}" ${(step.assignee_id===u.id)?'selected':''}>${u.name}</option>`).join('')}
+                    </select>
+                  </td>
+                  <td style="padding:4px 8px;width:130px;position:relative">
+                    <input type="date" value="${step.expected_date||''}" onchange="window._devUpdateCustomStep('${pl}','${step.key}','due_date',this.value)" style="width:100%;padding:2px 4px;font-size:11px;font-family:monospace;border:1px solid var(--border);border-radius:3px">
+                    <button type="button" onclick="window._devRemoveCustomStep('${pl}','${step.key}')" style="position:absolute;right:-20px;top:50%;transform:translateY(-50%);background:none;border:none;cursor:pointer;color:#c62828;font-size:16px" title="刪除">✕</button>
+                  </td>
+                </tr>`).join('')}
+              </tbody>
+            </table>` : ''}
+            ${finalSides.length ? `
+            <div style="padding:4px 14px 2px;font-size:11px;color:var(--muted);font-weight:600;background:#fafafa">副線(系列共用,一次做完所有品相)</div>
+            <table style="width:100%;border-collapse:collapse;font-size:12px">
+              <tbody>
+                ${finalSides.map((step, i) => {
+                  const name = step.assignee_name || '(未指定)';
+                  const isManual = overrides[step.key]?.manual;
+                  const isCascaded = overrides[step.key]?.due_date && !isManual;
+                  return `<tr style="border-bottom:1px solid #f5f5f5;background:#fcfaff">
+                    <td style="padding:4px 8px;color:var(--muted);text-align:center;width:30px">${String.fromCharCode(65+i)}</td>
+                    <td style="padding:4px 8px">
+                      <span style="color:#6a1b9a">${step.name}</span>
+                    </td>
+                    <td style="padding:4px 8px;text-align:center;width:60px;color:#555;font-weight:600">—</td>
+                    <td style="padding:4px 8px;width:130px">
+                      <select onchange="window._devSetOverride('${pl}','${step.key}','assignee',this)" style="width:100%;padding:2px 4px;font-size:11px;border:1px solid ${name==='(未指定)'?'#ffab91':'var(--border)'};border-radius:3px">
+                        <option value="">(未指定)</option>
+                        ${activeUsers.map(u => `<option value="${u.id}" data-name="${u.name}" ${(name===u.name)?'selected':''}>${u.name}</option>`).join('')}
+                      </select>
+                    </td>
+                    <td style="padding:4px 8px;width:130px">
+                      <input type="date" value="${step.expected_date}"
+                        onchange="window._devSetOverride('${pl}','${step.key}','due_date',this)"
+                        style="width:100%;padding:2px 4px;font-size:11px;font-family:monospace;border:1px solid ${isManual?'#2e7d32':isCascaded?'#90caf9':'var(--border)'};border-radius:3px;background:${isManual?'#e8f5e9':isCascaded?'#e3f2fd':'#fff'}">
+                    </td>
+                  </tr>`;
+                }).join('')}
+              </tbody>
+            </table>` : ''}
+
+            <!-- 彈性新增任務 -->
+            <div style="padding:6px 14px;background:#fafafa;border-top:1px dashed var(--border);text-align:center">
+              <button type="button" onclick="window._devAddCustomStep('${pl}')" style="background:none;border:1px dashed #90caf9;color:#1565c0;font-size:11px;padding:4px 12px;border-radius:4px;cursor:pointer">
+                + 新增自訂任務到 ${t.label}
+              </button>
+            </div>
           `;
         }).join('')}
       </div>
@@ -12977,6 +13144,52 @@ function _shiftDate(dateStr, deltaDays) {
   d.setDate(d.getDate() + deltaDays);
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
+
+// 彈性加入自訂任務到某 pipeline
+window._devAddCustomStep = function(pipeline) {
+  const d = state.data._devDraft;
+  if (!d.customSteps) d.customSteps = {};
+  if (!d.customSteps[pipeline]) d.customSteps[pipeline] = [];
+  const today = _localToday();
+  // 預設加在今天 +7 天
+  const dueD = addWorkdays(new Date(today+'T00:00:00'), 7);
+  const dueStr = `${dueD.getFullYear()}-${String(dueD.getMonth()+1).padStart(2,'0')}-${String(dueD.getDate()).padStart(2,'0')}`;
+  d.customSteps[pipeline].push({
+    key: `custom_${Date.now()}_${Math.floor(Math.random()*1000)}`,
+    name: '新任務',
+    days: 1,
+    assignee_name: null,
+    assignee_id: null,
+    expected_date: dueStr,
+    is_custom: true,
+    step_group: 'custom',
+  });
+  window._devRerender();
+};
+
+window._devRemoveCustomStep = function(pipeline, key) {
+  const d = state.data._devDraft;
+  if (!d.customSteps?.[pipeline]) return;
+  d.customSteps[pipeline] = d.customSteps[pipeline].filter(s => s.key !== key);
+  window._devRerender();
+};
+
+window._devUpdateCustomStep = function(pipeline, key, field, value) {
+  const d = state.data._devDraft;
+  const step = d.customSteps?.[pipeline]?.find(s => s.key === key);
+  if (!step) return;
+  if (field === 'name') step.name = value;
+  else if (field === 'days') step.days = parseInt(value) || 1;
+  else if (field === 'due_date') step.expected_date = value;
+  else if (field === 'assignee') {
+    const el = typeof value === 'object' ? value : null;
+    if (el) {
+      step.assignee_id = el.value || null;
+      step.assignee_name = el.selectedOptions[0]?.dataset?.name || null;
+    }
+  }
+  window._devRerender();
+};
 
 window._devResetDates = function() {
   if (!confirm('重置所有日期和負責人為預設?')) return;
@@ -13081,7 +13294,8 @@ async function _saveDevProject() {
     // 副線(改為系列級 · 建案時一併生 · variant_id=null)
     const sideSteps = _calcSideDates(pl, stepMap);
     sideSteps.forEach(step => {
-      const u = findUser(step.assignee_name);
+      const ov = overrides[step.key] || {};
+      const u = ov.assignee_id ? null : findUser(step.assignee_name);
       taskInserts.push({
         project_id: projectId,
         variant_id: null,   // 系列級
@@ -13091,10 +13305,30 @@ async function _saveDevProject() {
         step_group: 'side',
         is_milestone: false,
         order_num: ++orderCounter,
-        assignee_id: u?.id || null,
-        assignee_name: step.assignee_name,
+        assignee_id: ov.assignee_id ?? u?.id ?? null,
+        assignee_name: ov.assignee_name || step.assignee_name,
         expected_date: step.expected_date,
-        due_date: step.expected_date,
+        due_date: ov.due_date || step.expected_date,
+        status: '未開始',
+      });
+    });
+
+    // 自訂任務
+    const custom = d.customSteps?.[pl] || [];
+    custom.forEach(step => {
+      taskInserts.push({
+        project_id: projectId,
+        variant_id: null,
+        pipeline: pl,
+        step_key: step.key,
+        step_name: step.name || '新任務',
+        step_group: 'custom',
+        is_milestone: false,
+        order_num: ++orderCounter,
+        assignee_id: step.assignee_id || null,
+        assignee_name: step.assignee_name || null,
+        expected_date: step.expected_date || null,
+        due_date: step.expected_date || null,
         status: '未開始',
       });
     });
