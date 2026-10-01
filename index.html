@@ -11807,7 +11807,7 @@ function _renderDevDetail(id) {
 
     <div class="cards cards-4" style="margin-bottom:14px">
       <div class="card"><div class="card-title">📊 進度</div><div class="card-value accent">${pct}%</div><div style="font-size:11px;color:var(--muted)">${done}/${total} 任務</div></div>
-      <div class="card"><div class="card-title">🎯 上市日</div><div class="card-value" style="font-size:18px">${p.launch_date||'—'}</div><div style="font-size:11px;color:var(--muted)">最快 ${p.earliest_launch||'—'}</div></div>
+      <div class="card"><div class="card-title">🎯 上市日</div><div class="card-value" style="font-size:18px">${p.launch_date||'—'}</div></div>
       <div class="card"><div class="card-title">品項</div><div class="card-value">${activeVariants.length}</div><div style="font-size:11px;color:var(--muted)">${cancelledVariants.length?`+${cancelledVariants.length} 取消`:''}</div></div>
       <div class="card" style="${overdue?'border-left:4px solid #c62828':''}"><div class="card-title">⚠ 逾期</div><div class="card-value" style="color:${overdue?'#c62828':'var(--muted)'}">${overdue}</div></div>
     </div>
