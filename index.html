@@ -12686,6 +12686,7 @@ window._devEditProject = async function(projectId) {
       <div class="form-group"><label>上市日</label><input type="date" class="form-control" id="ep-launch" value="${p.launch_date||''}"></div>
     </div>
     <div class="form-group"><label>備註</label><textarea class="form-control" rows="2" id="ep-notes">${p.notes||''}</textarea></div>
+    <div style="font-size:11px;color:var(--muted);padding:8px 12px;background:#f5f5f5;border-radius:6px">💡 改了起始日或上市日 → 系統會自動重建行事曆以同步新日期</div>
   `, [
     { label:'儲存', primary:true, onclick: async () => {
       const upd = {
@@ -12694,10 +12695,34 @@ window._devEditProject = async function(projectId) {
         launch_date: document.getElementById('ep-launch').value || null,
         notes: document.getElementById('ep-notes').value.trim() || null,
       };
+      const startChanged = upd.start_date !== p.start_date;
+      const launchChanged = upd.launch_date !== p.launch_date;
+
+      // 從現有任務重算「最快可上市日」(拿最後里程碑或最後 due_date)
+      const tasks = p.dev_tasks || [];
+      const launchTask = tasks.find(t => t.is_milestone && (t.step_name?.includes('量產') || t.step_name?.includes('到貨驗收')));
+      upd.earliest_launch = launchTask?.due_date
+        || tasks.map(t => t.due_date).filter(Boolean).sort().pop()
+        || null;
+
       await db.from('dev_projects').update(upd).eq('id', projectId);
-      showToast('已更新');
+
+      // 日期有變 → 自動重建行事曆事件(重算 event_date / description / 分類)
+      if (startChanged || launchChanged) {
+        await loadDev();
+        const p2 = (state.data.dev||[]).find(x => x.id === projectId);
+        const oldEventIds = [...new Set((p2.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
+        if (oldEventIds.length) {
+          await db.from('calendar_events').delete().in('id', oldEventIds);
+        }
+        await _buildDevCalendarEvents(p2, p2.dev_tasks||[], p2.name);
+        showToast('已更新 · 行事曆自動重建');
+      } else {
+        showToast('已更新');
+      }
       closeModal();
       await loadDev();
+      try { await loadCalendarEvents?.(); } catch(e) {}
       renderApp();
     }},
     { label:'取消', onclick: closeModal },
