@@ -11968,7 +11968,14 @@ function _renderDevTaskRow(task, project) {
         style="width:100%;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1px solid var(--border);border-radius:3px" ${isCancelled?'disabled':''}>
     </td>
     <td style="padding:5px;text-align:center;font-size:11px">
-      ${isDone?'<span style="color:#2e7d32;font-weight:600">✅ 完成</span>':isCancelled?'<span style="color:#999">取消</span>':isOverdue?'<span style="color:#c62828;font-weight:600">⚠ 逾期</span>':'<span style="color:var(--muted)">待辦</span>'}
+      <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
+        ${isDone?'<span style="color:#2e7d32;font-weight:600">✅ 完成</span>':isCancelled?'<span style="color:#999">⊘ 略過</span>':isOverdue?'<span style="color:#c62828;font-weight:600">⚠ 逾期</span>':'<span style="color:var(--muted)">待辦</span>'}
+        ${isDone ? '' : (isCancelled
+          ? `<button onclick="window._devToggleTaskSkip('${task.id}',false)" title="恢復此任務"
+              style="font-size:10px;padding:1px 6px;border:1px solid #90caf9;background:#e3f2fd;color:#1565c0;border-radius:3px;cursor:pointer">↩ 恢復</button>`
+          : `<button onclick="window._devToggleTaskSkip('${task.id}',true)" title="此任務不需要,從流程略過(可恢復)"
+              style="font-size:10px;padding:1px 6px;border:1px solid #e0e0e0;background:#fafafa;color:#888;border-radius:3px;cursor:pointer">⊘ 略過</button>`)}
+      </div>
     </td>
   </tr>`;
 }
@@ -12508,6 +12515,50 @@ window._devSetTaskDate = async function(taskId, newDate) {
     await _devSyncCalendarSubtaskDate(task, newDate);
   }
   showToast('日期已更新');
+  await loadDev();
+  try { await loadCalendarEvents?.(); } catch(e) {}
+  renderApp();
+};
+
+// 略過 / 恢復 任務 — 用於這個專案不需要跑的步驟(例如:純銀專案不需要「金標申請」)
+window._devToggleTaskSkip = async function(taskId, skip) {
+  const reason = skip ? (prompt('略過原因?(可留空)', '此專案不需要') || '此專案不需要') : null;
+  const payload = skip
+    ? { status: '取消', cancelled_at: new Date().toISOString(), cancel_reason: reason }
+    : { status: '未開始', cancelled_at: null, cancel_reason: null };
+  const { error } = await db.from('dev_tasks').update(payload).eq('id', taskId);
+  if (error) { showToast('更新失敗:'+error.message, 'error'); return; }
+
+  // 同步行事曆子任務:略過 → 從 subtasks 移除;恢復 → 下次 rebuild 會回來
+  const p = state.data.dev.find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (task?.calendar_event_id) {
+    const { data: ev } = await db.from('calendar_events').select('subtasks').eq('id', task.calendar_event_id).maybeSingle();
+    if (ev?.subtasks) {
+      let subs = ev.subtasks || [];
+      if (skip) {
+        subs = subs.filter(s => s.dev_task_id !== taskId);
+      } else {
+        // 恢復 → 加回去(若尚未存在)
+        if (!subs.some(s => s.dev_task_id === taskId)) {
+          const plLabel = PIPELINE_TEMPLATES[task.pipeline]?.label?.replace(/^[🥈🥇🎁]\s*/,'') || task.pipeline;
+          const hasMulti = (p?.pipelines||[]).length > 1;
+          subs.push({
+            id: `dev_${task.id}`,
+            text: `${hasMulti?`[${plLabel}] `:''}${task.step_name}${task.is_milestone?' 🎯':''}`,
+            done: false,
+            due_date: task.due_date,
+            dev_task_id: task.id,
+            dev_project_id: p?.id,
+            assignee_id: task.assignee_id,
+          });
+        }
+      }
+      await db.from('calendar_events').update({ subtasks: subs }).eq('id', task.calendar_event_id);
+    }
+  }
+
+  showToast(skip ? '任務已略過' : '任務已恢復');
   await loadDev();
   try { await loadCalendarEvents?.(); } catch(e) {}
   renderApp();
@@ -13635,6 +13686,7 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
   // 建 subtasks:多 pipeline 才加 [純銀]/[合金]/[周邊] 前綴
   // step_name 從最新模板取(避免舊資料落後);done 從 dev_task 狀態帶
   const subtasks = tasks
+    .filter(t => t.status !== '取消')  // 略過的任務不進行事曆
     .sort((a,b) => (a.order_num||0) - (b.order_num||0))
     .map(t => {
       const plLabel = PIPELINE_TEMPLATES[t.pipeline]?.label?.replace(/^[🥈🥇🎁]\s*/,'') || t.pipeline;
