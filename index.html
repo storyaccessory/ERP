@@ -12484,53 +12484,62 @@ window._devHandleTimingChange = function(projectId, taskId, deltaDays) {
   ]);
 };
 
-// 加品相
+// 加品相(支援單筆 or 批次貼上多行)
 window._devAddVariantPrompt = async function(projectId, pipeline) {
   const t = PIPELINE_TEMPLATES[pipeline];
   const p = (state.data.dev||[]).find(x => x.id === projectId);
-  const isJewelry = pipeline !== 'peripheral';
-  showModal(`+ 加 ${t.label} 品相`, `
-    <div class="form-group">
-      <label>品相名 *</label>
-      <input class="form-control" id="dv-name" placeholder="例:${isJewelry?'繁花_項鍊':'徽章_大'}">
+  const plLabel = (t?.label||'').replace(/^[🥈🥇🎁]\s*/,'');
+  showModal(`+ 加 ${plLabel} 品相`, `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6">
+      一行一個品相名 · 直接貼上也 OK · 空行自動跳過
     </div>
-    ${isJewelry ? `
     <div class="form-group">
-      <label>類別</label>
-      <select class="form-control" id="dv-cat">
-        <option value="">(選類別)</option>
-        ${['項鍊','手鍊','戒指','耳環'].map(c=>`<option>${c}</option>`).join('')}
-      </select>
-    </div>` : ''}
+      <label>品相名(可一次貼多筆) *</label>
+      <textarea class="form-control" id="dv-names" rows="10" placeholder="Sanrio MIX曬黑出遊趣系列_大耳狗墨鏡純銀晶鑽項鍊&#10;Sanrio MIX曬黑出遊趣系列_大耳狗墨鏡純銀手鍊&#10;Sanrio MIX曬黑出遊趣系列_大耳狗墨鏡純銀戒指&#10;Sanrio MIX曬黑出遊趣系列_大耳狗墨鏡純銀耳環&#10;…" style="font-family:monospace;font-size:12px"></textarea>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">
+        💡 快速貼上整批 24 行,系統一次全部建好
+      </div>
+    </div>
   `, [
     { label:'加入', primary:true, onclick: async () => {
-      const name = document.getElementById('dv-name').value.trim();
-      if (!name) { showToast('請填品相名','error'); return; }
-      const category = document.getElementById('dv-cat')?.value || null;
-      const { data: v, error } = await db.from('dev_variants').insert({
-        project_id: projectId,
-        pipeline,
-        name,
-        category,
-      }).select().single();
+      const raw = document.getElementById('dv-names').value;
+      const names = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+      if (!names.length) { showToast('請填品相名','error'); return; }
+
+      // 檢查重複
+      const existingNames = new Set((p?.dev_variants||[]).filter(v => v.pipeline === pipeline && !v.cancelled_at).map(v => v.name));
+      const toInsert = [];
+      const skipped = [];
+      names.forEach(n => {
+        if (existingNames.has(n)) { skipped.push(n); return; }
+        existingNames.add(n);
+        toInsert.push({ project_id: projectId, pipeline, name: n });
+      });
+      if (!toInsert.length) {
+        showToast(`全部重複 · 已跳過 ${skipped.length} 筆`,'warn');
+        return;
+      }
+
+      const { data: newVariants, error } = await db.from('dev_variants').insert(toInsert).select();
       if (error) { showToast('新增失敗:'+error.message,'error'); return; }
 
-      // 副線已在建案時生(系列級),加品相不需再生
-      // 如果設計定稿已完成,發設計圖號
+      // 如果設計定稿已完成,批次發設計圖號
       const designLock = (p?.dev_tasks||[]).find(t => t.pipeline===pipeline && (t.step_key==='design_lock' || t.step_key==='design_confirm'));
-      if (designLock?.status === '完成' && !v.design_number) {
+      let issuedCount = 0;
+      if (designLock?.status === '完成') {
         await loadDev();
         const p2 = state.data.dev.find(x => x.id === projectId);
         await _devAutoIssueDesignNumbers(p2, pipeline);
+        issuedCount = newVariants.length;
       }
 
-      showToast(`✓ 已加品相 ${name}`);
+      showToast(`✓ 已加 ${toInsert.length} 個品相${skipped.length?` · 跳過 ${skipped.length} 筆重複`:''}${issuedCount?` · 已發 ${issuedCount} 個設計圖號`:''}`, 'success', 5000);
       closeModal();
       await loadDev();
       renderApp();
     }},
     { label:'取消', onclick: closeModal },
-  ]);
+  ], { wide: true });
 };
 
 // 取消品相
