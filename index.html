@@ -11236,7 +11236,7 @@ window._rpRequote = async function(orderId) {
 
 const PIPELINE_TEMPLATES = {
   silver: {
-    label: '🥈 純銀',
+    label: '純銀',
     color: '#78909c',
     main: [
       { key:'design_draft',      name:'設計圖',              days:10, assignee_name:'劉怡汝' },
@@ -11245,7 +11245,7 @@ const PIPELINE_TEMPLATES = {
       { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子嫣' },
       { key:'design_approved',   name:'設計圖審過',          days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true },
       { key:'modeling',          name:'3D 建模 & 列印寄出送審', days:3,  assignee_name:'郭子嫣' },
-      { key:'model_approved',    name:'蠟模送審 & 追蹤 / 3D 審過', days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true },
+      { key:'model_approved',    name:'蠟模送審追蹤 / 3D 審過', days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true },
       { key:'wax_print',         name:'3D 鑄造蠟列印',       days:1,  assignee_name:'郭子嫣' },
       { key:'sampling',          name:'打樣',                days:12, assignee_name:'王韋翔' },
       { key:'sample_submit',     name:'樣品送審寄出',        days:1,  assignee_name:'郭子嫣' },
@@ -11265,7 +11265,7 @@ const PIPELINE_TEMPLATES = {
   },
 
   alloy: {
-    label: '🥇 合金',
+    label: '合金',
     color: '#c9a961',
     main: [
       // 前 7 步共用銀件的設計→3D審過(拷貝一份,獨立追蹤)
@@ -11293,7 +11293,7 @@ const PIPELINE_TEMPLATES = {
   },
 
   peripheral: {
-    label: '🎁 周邊',
+    label: '周邊',
     color: '#ec407a',
     main: [
       { key:'material_confirm', name:'先確認追素材',       days:5,  assignee_name:'蔡采玲' },
@@ -11969,18 +11969,18 @@ function _renderDevVariantRow(v, _unused, project) {
   // 品相「當前卡點」= 跟隨系列主線
   let currentStatus;
   if (isCancelled) {
-    currentStatus = { text:'已取消', bg:'#f5f5f5', color:'#999' };
+    currentStatus = { text:'已取消', color:'#999' };
   } else if (v.needs_revision) {
     const lastReview = (v.review_history||[]).filter(h => h.decision === 'reject').slice(-1)[0];
-    currentStatus = { text:`⚠ 卡在「${lastReview?.step_name||'審查'}」需校正:${v.revision_note||lastReview?.reason||'—'}`, bg:'#ffebee', color:'#c62828' };
+    currentStatus = { text:`卡在「${lastReview?.step_name||'審查'}」需校正:${v.revision_note||lastReview?.reason||'—'}`, color:'#c62828' };
   } else {
     const mainTasks = (project.dev_tasks||[]).filter(t => t.pipeline === v.pipeline && t.step_group === 'main').sort((a,b) => (a.order_num||0) - (b.order_num||0));
     const curMain = mainTasks.find(x => x.status !== '完成' && x.status !== '取消');
     if (curMain) {
       const isOverdue = curMain.due_date && curMain.due_date < today;
-      currentStatus = { text:`🔄 系列主線:${curMain.step_name}${curMain.due_date?` · ${curMain.due_date}`:''}${isOverdue?' ⚠ 逾期':''}`, bg: isOverdue?'#ffebee':'#fff3e0', color: isOverdue?'#c62828':'#e65100' };
+      currentStatus = { text:`${curMain.step_name}${curMain.due_date?` · ${curMain.due_date}`:''}${isOverdue?' · 逾期':''}`, color: isOverdue?'#c62828':'#888' };
     } else {
-      currentStatus = { text:`✅ 系列主線完成`, bg:'#e8f5e9', color:'#2e7d32' };
+      currentStatus = { text:`主線完成`, color:'#2e7d32' };
     }
   }
 
@@ -12003,7 +12003,7 @@ function _renderDevVariantRow(v, _unused, project) {
         }
       </div>
     </div>
-    <div style="padding:6px 10px;background:${currentStatus.bg};color:${currentStatus.color};border-radius:5px;font-size:12px;font-weight:600">
+    <div style="padding:4px 2px;color:${currentStatus.color};font-size:11px">
       ${currentStatus.text}
     </div>
   </div>`;
