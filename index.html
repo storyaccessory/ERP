@@ -31783,11 +31783,12 @@ function renderPurchases() {
   // 只有「老闆」(admin) 可以刪除採購申請,主管也不行
   const isAdminOnly = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
 
-  const activeStatus = state.data._purchaseStatus || '全部';
+  const activeStatus = state.data._purchaseStatus || '未結案';
   const searchQ = (state.data._purchaseSearch || '').toLowerCase().trim();
 
   let filtered = list;
-  if (activeStatus !== '全部') filtered = filtered.filter(r => r.status === activeStatus);
+  if (activeStatus === '未結案') filtered = filtered.filter(r => r.status !== '結案' && r.status !== '暫不採購');
+  else if (activeStatus !== '全部') filtered = filtered.filter(r => r.status === activeStatus);
   if (searchQ) filtered = filtered.filter(r =>
     (r.item_name||'').toLowerCase().includes(searchQ) ||
     (r.requester_name||'').toLowerCase().includes(searchQ) ||
@@ -31827,9 +31828,11 @@ function renderPurchases() {
       <div class="card"><div class="card-title">✅ 結案</div><div class="card-value success">${stats.結案}</div></div>
     </div>
     <div class="tabs">
-      ${['全部','待指派','待採購','已採購','已到貨','結案','暫不採購'].map(s =>
-        `<div class="tab ${activeStatus===s?'active':''}" data-purchase-status="${s}">${s}${s!=='全部' && stats[s]?` <span style="opacity:.6">(${stats[s]})</span>`:''}</div>`
-      ).join('')}
+      ${['未結案','全部','待指派','待採購','已採購','已到貨','結案','暫不採購'].map(s => {
+        const openCount = list.filter(r => r.status !== '結案' && r.status !== '暫不採購').length;
+        const n = s === '未結案' ? openCount : (s === '全部' ? 0 : stats[s]);
+        return `<div class="tab ${activeStatus===s?'active':''}" data-purchase-status="${s}">${s}${n?` <span style="opacity:.6">(${n})</span>`:''}</div>`;
+      }).join('')}
     </div>
     <div class="search-bar">
       <input class="search-input" id="_purchase-search" placeholder="搜尋 品項 / 申請人 / 負責人 / 類別…" value="${searchQ}">
@@ -31837,10 +31840,20 @@ function renderPurchases() {
       <button class="btn btn-outline" onclick="window.modalBatchImportPurchases()" style="background:#e8f5e9;color:#1b5e20;border-color:#a5d6a7">📥 批次匯入 (Excel)</button>
       ${isBoss ? `<button class="btn btn-outline" onclick="window.openPurchaseItemsAdmin()">⚙️ 品項庫管理</button>` : ''}
     </div>
+    ${(state.data._puSel && state.data._puSel.size) ? `
+    <div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span style="font-weight:700;color:#e65100">已選 ${state.data._puSel.size} 筆</span>
+      <span style="font-size:11px;color:var(--muted)">批次動作:</span>
+      ${isAdminOnly ? `<button class="btn btn-sm" onclick="window._puBatchChangeDate()" style="background:#fff;color:#1565c0;border:1px solid #90caf9;font-size:11px">📅 改申請日期</button>` : ''}
+      ${isAdminOnly ? `<button class="btn btn-sm" onclick="window._puBatchChangeRequester()" style="background:#fff;color:#2e7d32;border:1px solid #a5d6a7;font-size:11px">👤 改申請人</button>` : ''}
+      ${isAdminOnly ? `<button class="btn btn-sm" onclick="window._puBatchChangePurchaser()" style="background:#fff;color:#6a1b9a;border:1px solid #ce93d8;font-size:11px">🎯 改採購負責人</button>` : ''}
+      <button class="btn btn-sm" onclick="state.data._puSel=new Set();renderApp()" style="background:#fff;color:#c62828;border:1px solid #ef9a9a;font-size:11px">✕ 取消選取</button>
+    </div>` : ''}
     <div class="card">
       <div class="table-wrap">
         <table>
           <thead><tr>
+            <th style="width:32px;text-align:center"><input type="checkbox" id="pu-sel-all" onchange="window._puToggleSelAll(this.checked)"></th>
             <th style="width:90px">申請日</th>
             <th style="width:80px">申請人</th>
             <th style="width:60px">類別</th>
@@ -31858,8 +31871,11 @@ function renderPurchases() {
             <th style="width:40px"></th>
           </tr></thead>
           <tbody>
-          ${filtered.length===0 ? `<tr><td colspan="15"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
-            filtered.map(r => `<tr>
+          ${filtered.length===0 ? `<tr><td colspan="16"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
+            filtered.map(r => `<tr style="${state.data._puSel?.has(r.id)?'background:#fff3e0':''}">
+              <td style="text-align:center">
+                <input type="checkbox" ${state.data._puSel?.has(r.id)?'checked':''} onchange="window._puToggleSel('${r.id}',this.checked)">
+              </td>
               <td style="font-size:12px">${r.request_date||''}</td>
               <td style="font-size:12px">${r.requester_name||'—'}</td>
               <td><span style="background:${catColor[r.category]||'#f5f5f5'};color:${catText[r.category]||'#666'};padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600">${r.category||'—'}</span></td>
@@ -33047,6 +33063,134 @@ window._puItemDelete = async function(id, usageCount) {
 };
 
 // 清單內直接指派負責人 → 自動改狀態 待指派 → 待採購 + 建行事曆
+// ═══════════════════════════════════════════════
+// 採購申請 · 批次選取 + 批次動作
+// ═══════════════════════════════════════════════
+window._puToggleSel = function(id, checked) {
+  if (!state.data._puSel) state.data._puSel = new Set();
+  if (checked) state.data._puSel.add(id);
+  else state.data._puSel.delete(id);
+  renderApp();
+};
+window._puToggleSelAll = function(checked) {
+  if (!state.data._puSel) state.data._puSel = new Set();
+  if (!checked) { state.data._puSel = new Set(); renderApp(); return; }
+  // 把當前顯示的全部加入
+  const list = state.data.purchases || [];
+  const activeStatus = state.data._purchaseStatus || '未結案';
+  const searchQ = (state.data._purchaseSearch || '').toLowerCase().trim();
+  let filtered = list;
+  if (activeStatus === '未結案') filtered = filtered.filter(r => r.status !== '結案' && r.status !== '暫不採購');
+  else if (activeStatus !== '全部') filtered = filtered.filter(r => r.status === activeStatus);
+  if (searchQ) filtered = filtered.filter(r =>
+    (r.item_name||'').toLowerCase().includes(searchQ) ||
+    (r.requester_name||'').toLowerCase().includes(searchQ) ||
+    (r.purchaser_name||'').toLowerCase().includes(searchQ) ||
+    (r.category||'').toLowerCase().includes(searchQ)
+  );
+  filtered.forEach(r => state.data._puSel.add(r.id));
+  renderApp();
+};
+
+window._puBatchChangeDate = function() {
+  const sel = [...(state.data._puSel||[])];
+  if (!sel.length) return;
+  const today = _localToday();
+  showModal(`📅 批次改申請日期 · ${sel.length} 筆`, `
+    <div class="form-group">
+      <label>新的申請日期</label>
+      <input type="date" class="form-control" id="pu-batch-date" value="${today}">
+    </div>
+  `, [
+    { label:'套用', primary:true, onclick: async () => {
+      const d = document.getElementById('pu-batch-date').value;
+      if (!d) { showToast('請選日期','error'); return; }
+      const { error } = await db.from('purchase_requests').update({ request_date: d }).in('id', sel);
+      if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+      showToast(`✓ 已更新 ${sel.length} 筆`);
+      state.data._puSel = new Set();
+      closeModal();
+      await loadPurchases(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+window._puBatchChangeRequester = function() {
+  const sel = [...(state.data._puSel||[])];
+  if (!sel.length) return;
+  const activeUsers = (state.data.users||[]).filter(u => u.is_active !== false);
+  showModal(`👤 批次改申請人 · ${sel.length} 筆`, `
+    <div class="form-group">
+      <label>新的申請人</label>
+      <select class="form-control" id="pu-batch-requester">
+        <option value="">— 選擇 —</option>
+        ${activeUsers.map(u => `<option value="${u.id}" data-name="${u.name}">${u.name}</option>`).join('')}
+      </select>
+    </div>
+  `, [
+    { label:'套用', primary:true, onclick: async () => {
+      const el = document.getElementById('pu-batch-requester');
+      const rid = el.value;
+      const rname = el.selectedOptions[0]?.dataset?.name;
+      if (!rid) { showToast('請選申請人','error'); return; }
+      const { error } = await db.from('purchase_requests').update({ requester_id: rid, requester_name: rname }).in('id', sel);
+      if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+      showToast(`✓ 已更新 ${sel.length} 筆`);
+      state.data._puSel = new Set();
+      closeModal();
+      await loadPurchases(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+window._puBatchChangePurchaser = function() {
+  const sel = [...(state.data._puSel||[])];
+  if (!sel.length) return;
+  const activeUsers = (state.data.users||[]).filter(u => u.is_active !== false);
+  const top = PURCHASER_NAMES.map(n => activeUsers.find(u => u.name === n)).filter(Boolean);
+  const rest = activeUsers.filter(u => !PURCHASER_NAMES.includes(u.name));
+  const purchaserOpts = [...top, ...rest];
+  showModal(`🎯 批次改採購負責人 · ${sel.length} 筆`, `
+    <div class="form-group">
+      <label>新的採購負責人</label>
+      <select class="form-control" id="pu-batch-purchaser">
+        <option value="">— 選擇(或清空為未指派) —</option>
+        ${purchaserOpts.map(u => `<option value="${u.id}" data-name="${u.name}">${u.name}</option>`).join('')}
+      </select>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">指派後若原狀態為「待指派」會自動改為「待採購」並建行事曆提醒</div>
+    </div>
+  `, [
+    { label:'套用', primary:true, onclick: async () => {
+      const el = document.getElementById('pu-batch-purchaser');
+      const pid = el.value || null;
+      const pname = pid ? el.selectedOptions[0]?.dataset?.name : null;
+      const upd = { purchaser_id: pid, purchaser_name: pname };
+      // 若有指派,原本是「待指派」的改為「待採購」
+      if (pid) {
+        // 一次撈目前狀態
+        const toReview = (state.data.purchases||[]).filter(x => sel.includes(x.id));
+        const needStatus = toReview.filter(x => x.status === '待指派').map(x => x.id);
+        if (needStatus.length) {
+          await db.from('purchase_requests').update({ ...upd, status:'待採購' }).in('id', needStatus);
+          const others = sel.filter(id => !needStatus.includes(id));
+          if (others.length) await db.from('purchase_requests').update(upd).in('id', others);
+        } else {
+          await db.from('purchase_requests').update(upd).in('id', sel);
+        }
+      } else {
+        await db.from('purchase_requests').update(upd).in('id', sel);
+      }
+      showToast(`✓ 已更新 ${sel.length} 筆`);
+      state.data._puSel = new Set();
+      closeModal();
+      await loadPurchases(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
 window._puInlinePurchaser = async function(id, sel) {
   // 權限守門:只有老闆可指派
   const _ep = effectiveProfile() || {};
