@@ -4264,7 +4264,7 @@ async function modalEditCasting(id) {
       <span style="color:#c62828">❌ 錯誤:</span> <code>cn-戒指</code>(小寫)、<code>戒指(2)</code>(無代碼)
     </div>
 
-    <!-- IP / 系列 樹狀選擇（與商品相同）-->
+    <!-- IP / 系列 樹狀選擇（與商品項同）-->
     <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin-bottom:8px;padding-bottom:6px;border-bottom:1px solid var(--border)">🏷️ IP授權 / 系列</div>
     <div id="cs-ip-display" style="font-size:13px;color:var(--accent-dark);margin-bottom:8px;padding:6px 10px;background:var(--accent-light);border-radius:6px;${c?.series_id?'':'display:none'}">
       已選：<strong id="cs-ip-display-text">${c ? buildIPLabel(c) : ''}</strong>
@@ -4522,7 +4522,7 @@ async function modalEditCasting(id) {
   setTimeout(() => window._csRecalcCastLabor && window._csRecalcCastLabor(), 50);
 }
 
-// 鑄件用的 IP 樹狀渲染（跟商品相同邏輯，id 前綴 cs-）
+// 鑄件用的 IP 樹狀渲染（跟商品項同邏輯，id 前綴 cs-）
 function renderIPTreeForCasting(casting, searchQ) {
   const tree = state.data.ipTree || [];
   if (!tree.length) return '<div style="padding:16px;color:var(--muted);font-size:13px;text-align:center">⚠️ 無法載入 IP 分類</div>';
@@ -11419,7 +11419,7 @@ function _renderDesignNumbers() {
     </div>
 
     <div class="search-bar" style="gap:8px;flex-wrap:wrap">
-      <input class="search-input" placeholder="搜尋號碼、品相、系列、設計師…" value="${(state.data._dnSearch||'').replace(/"/g,'&quot;')}"
+      <input class="search-input" placeholder="搜尋號碼、品項、系列、設計師…" value="${(state.data._dnSearch||'').replace(/"/g,'&quot;')}"
         oninput="state.data._dnSearch=this.value;renderApp()"
         oncompositionend="state.data._dnSearch=this.value;renderApp()"
         style="max-width:280px">
@@ -11438,7 +11438,7 @@ function _renderDesignNumbers() {
               <th style="padding:8px 12px;text-align:left;width:120px">設計圖號</th>
               <th style="padding:8px 12px;text-align:left;width:100px">日期</th>
               <th style="padding:8px 12px;text-align:left;width:60px">序號</th>
-              <th style="padding:8px 12px;text-align:left">品相</th>
+              <th style="padding:8px 12px;text-align:left">品項</th>
               <th style="padding:8px 12px;text-align:left">系列</th>
               <th style="padding:8px 12px;text-align:left;width:100px">設計師</th>
               <th style="padding:8px 12px;text-align:left">備註</th>
@@ -11500,7 +11500,7 @@ window.modalIssueDesignNumber = async function() {
     </div>
 
     <div class="form-group">
-      <label>品相(商品名稱)* <span style="font-size:11px;color:var(--muted);font-weight:400">— 這個設計圖用在哪個品項</span></label>
+      <label>品項(商品名稱)* <span style="font-size:11px;color:var(--muted);font-weight:400">— 這個設計圖用在哪個品項</span></label>
       <input class="form-control" id="dn-variant" placeholder="例:Kuromi繁花項鍊 · 大耳狗喜拿戒指" list="dn-product-list">
       <datalist id="dn-product-list">
         ${(state.data.products||[]).slice(0,300).map(p => `<option value="${(p.name||'').replace(/"/g,'&quot;')}"></option>`).join('')}
@@ -11530,7 +11530,7 @@ window.modalIssueDesignNumber = async function() {
   `, [
     { label:'✅ 確認發號', primary:true, onclick: async () => {
       const variant = document.getElementById('dn-variant').value.trim();
-      if (!variant) { showToast('請填品相名稱','error'); return; }
+      if (!variant) { showToast('請填品項名稱','error'); return; }
       const seriesName = document.getElementById('dn-series').value.trim() || null;
       const designerSel = document.getElementById('dn-designer');
       const designerId = designerSel.value || null;
@@ -11745,7 +11745,7 @@ function _renderDevProjectCard(p) {
       const mileDaysLeft = nextMile?.due_date ? _daysDiff(today, nextMile.due_date) : null;
       return `<div style="border-left:3px solid ${tpl.color};padding:8px 12px;background:${tpl.color}0d;border-radius:0 6px 6px 0;margin-bottom:6px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:5px">
-          <span style="font-weight:700;color:${tpl.color};font-size:13px">${(tpl.label||'').replace(/^[🥈🥇🎁]\s*/,'')} · ${vCount}品相 · ${pDone}/${pTotal}</span>
+          <span style="font-weight:700;color:${tpl.color};font-size:13px">${(tpl.label||'').replace(/^[🥈🥇🎁]\s*/,'')} · ${vCount}品項 · ${pDone}/${pTotal}</span>
           <span style="font-size:11px;font-weight:700;color:${pPct===100?'#2e7d32':tpl.color}">${pPct}%</span>
         </div>
         <div style="height:6px;background:#eee;border-radius:3px;overflow:hidden;margin-bottom:6px">
@@ -11808,7 +11808,7 @@ function _renderDevDetail(id) {
     <div class="cards cards-4" style="margin-bottom:14px">
       <div class="card"><div class="card-title">📊 進度</div><div class="card-value accent">${pct}%</div><div style="font-size:11px;color:var(--muted)">${done}/${total} 任務</div></div>
       <div class="card"><div class="card-title">🎯 上市日</div><div class="card-value" style="font-size:18px">${p.launch_date||'—'}</div><div style="font-size:11px;color:var(--muted)">最快 ${p.earliest_launch||'—'}</div></div>
-      <div class="card"><div class="card-title">🏷 品相</div><div class="card-value">${activeVariants.length}</div><div style="font-size:11px;color:var(--muted)">${cancelledVariants.length?`+${cancelledVariants.length} 取消`:''}</div></div>
+      <div class="card"><div class="card-title">品項</div><div class="card-value">${activeVariants.length}</div><div style="font-size:11px;color:var(--muted)">${cancelledVariants.length?`+${cancelledVariants.length} 取消`:''}</div></div>
       <div class="card" style="${overdue?'border-left:4px solid #c62828':''}"><div class="card-title">⚠ 逾期</div><div class="card-value" style="color:${overdue?'#c62828':'var(--muted)'}">${overdue}</div></div>
     </div>
 
@@ -11860,7 +11860,7 @@ function _renderDevDetail(id) {
 
           <!-- 副線 -->
           ${plSide.length ? `
-          <div style="font-size:11px;color:var(--muted);font-weight:600;margin:12px 0 4px">副線 <span style="font-weight:400">(系列共用,一次做完所有品相)</span></div>
+          <div style="font-size:11px;color:var(--muted);font-weight:600;margin:12px 0 4px">副線 <span style="font-weight:400">(系列共用,一次做完所有品項)</span></div>
           <table style="width:100%;font-size:12px;border-collapse:collapse">
             <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
               <tr>
@@ -11900,16 +11900,16 @@ function _renderDevDetail(id) {
       `;
     }).join('')}
 
-    <!-- 品相清單(只顯示品相基本資訊 + 設計圖號 + 校正歷程) -->
+    <!-- 品項清單(只顯示品項基本資訊 + 設計圖號 + 校正歷程) -->
     <div class="card" style="margin-bottom:14px">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-        <div style="font-size:15px;font-weight:700;color:#6a1b9a">🏷 品相清單 <span style="font-size:11px;color:var(--muted);font-weight:400">(用於發設計圖號、送審審查、建商品)</span></div>
+        <div style="font-size:15px;font-weight:700;color:#6a1b9a">品項清單 <span style="font-size:11px;color:var(--muted);font-weight:400">(用於發設計圖號、送審審查、建商品)</span></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
           ${variants.filter(v => !v.cancelled_at && !v.design_number).length ? `<button class="btn btn-sm" onclick="window._devBatchIssueNumbers('${p.id}')" style="background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;font-size:11px">🔢 批次發/補圖號 (${variants.filter(v => !v.cancelled_at && !v.design_number).length})</button>` : ''}
-          ${pipelines.map(pl => `<button class="btn btn-sm btn-outline" onclick="window._devAddVariantPrompt('${p.id}','${pl}')" style="background:${PIPELINE_TEMPLATES[pl]?.color}15;color:${PIPELINE_TEMPLATES[pl]?.color};font-size:11px">+ ${(PIPELINE_TEMPLATES[pl]?.label||'').replace(/^[🥈🥇🎁]\s*/,'')} 品相</button>`).join('')}
+          ${pipelines.map(pl => `<button class="btn btn-sm btn-outline" onclick="window._devAddVariantPrompt('${p.id}','${pl}')" style="background:${PIPELINE_TEMPLATES[pl]?.color}15;color:${PIPELINE_TEMPLATES[pl]?.color};font-size:11px">+ ${(PIPELINE_TEMPLATES[pl]?.label||'').replace(/^[🥈🥇🎁]\s*/,'')} 品項</button>`).join('')}
         </div>
       </div>
-      ${variants.length === 0 ? `<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">還沒加品相 · 通常等「設計圖初稿」開始時加</div>` :
+      ${variants.length === 0 ? `<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">還沒加品項 · 通常等「設計圖初稿」開始時加</div>` :
         variants.map(v => _renderDevVariantRow(v, [], p)).join('')}
     </div>
   `;
@@ -11960,13 +11960,13 @@ function _renderDevTaskRow(task, project) {
   </tr>`;
 }
 
-// 品相列(系列共用副線;品相只顯示基本資訊 + 圖號 + 校正歷程)
+// 品項列(系列共用副線;品項只顯示基本資訊 + 圖號 + 校正歷程)
 function _renderDevVariantRow(v, _unused, project) {
   const t = PIPELINE_TEMPLATES[v.pipeline];
   const isCancelled = !!v.cancelled_at;
   const today = _localToday();
 
-  // 品相「當前卡點」= 跟隨系列主線
+  // 品項「當前卡點」= 跟隨系列主線
   let currentStatus;
   if (isCancelled) {
     currentStatus = { text:'已取消', color:'#999' };
@@ -12029,7 +12029,7 @@ window._devShowReviewHistory = function(variantId) {
       </div>`
     }
     ${v.needs_revision ? `<div style="margin-top:12px;padding:10px 12px;background:#fff3e0;border-radius:6px;font-size:12px;color:#e65100">
-      💡 這個品相目前狀態為「需校正」· 完成校正後可到品相清單「重新標為通過」
+      💡 這個品項目前狀態為「需校正」· 完成校正後可到品項清單「重新標為通過」
     </div>
     <button class="btn btn-sm btn-primary" style="margin-top:10px;width:100%" onclick="window._devMarkVariantOk('${v.id}')">✅ 校正完成 · 重新標為通過</button>` : ''}
   `, [
@@ -12037,19 +12037,19 @@ window._devShowReviewHistory = function(variantId) {
   ]);
 };
 
-// 批次發/補圖號 - 給一次有很多未發號品相的專案用
+// 批次發/補圖號 - 給一次有很多未發號品項的專案用
 window._devBatchIssueNumbers = async function(projectId) {
   const p = (state.data.dev||[]).find(x => x.id === projectId);
   if (!p) return;
   const pending = (p.dev_variants||[]).filter(v => !v.cancelled_at && !v.design_number);
-  if (!pending.length) { showToast('沒有待發圖號的品相','info'); return; }
+  if (!pending.length) { showToast('沒有待發圖號的品項','info'); return; }
 
   const today = _localToday();
   const todayStr = today.replace(/-/g,'');
 
-  showModal(`🔢 批次發/補圖號 · ${pending.length} 個品相`, `
+  showModal(`🔢 批次發/補圖號 · ${pending.length} 個品項`, `
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.7">
-      下面列出要發號的品相(依建立順序)。選一種方式:
+      下面列出要發號的品項(依建立順序)。選一種方式:
     </div>
     <div class="tabs" style="margin-bottom:12px">
       <div class="tab active" onclick="document.querySelectorAll('.bi-mode').forEach(e=>e.style.display='none');document.getElementById('bi-auto').style.display='block';document.querySelectorAll('.tabs .tab').forEach(e=>e.classList.remove('active'));this.classList.add('active')">自動產號</div>
@@ -12069,16 +12069,16 @@ window._devBatchIssueNumbers = async function(projectId) {
 
     <div id="bi-manual" class="bi-mode" style="display:none">
       <div class="form-group">
-        <label>手動輸入每筆圖號(依品相順序 · 一行一個)</label>
+        <label>手動輸入每筆圖號(依品項順序 · 一行一個)</label>
         <textarea class="form-control" id="bi-nums" rows="12" style="font-family:monospace;font-size:12px" placeholder="${pending.map((v,i)=>`${todayStr}${String(i+1).padStart(2,'0')}  ← ${v.name}`).join('\n')}" oninput="this.value=this.value.split(/\\r?\\n/).map(_toHalfWidthDigit).join('\\n')"></textarea>
         <div style="font-size:11px;color:var(--muted);margin-top:4px">
-          每行一個 10 碼數字 · 空行會對應跳過該品相不發
+          每行一個 10 碼數字 · 空行會對應跳過該品項不發
         </div>
       </div>
     </div>
 
     <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
-      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">待發號品相:</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">待發號品項:</div>
       <div style="max-height:150px;overflow-y:auto;font-size:11px;line-height:1.8">
         ${pending.map((v,i)=>`<div><span style="color:var(--muted);font-family:monospace">${i+1}.</span> ${v.name}</div>`).join('')}
       </div>
@@ -12196,7 +12196,7 @@ window._devEditDesignNumber = async function(variantId) {
         前 8 碼 = 日期 · 後 2 碼 = 當日序號 · 全系統不可重複
       </div>
     </div>
-    ${v.design_number_id ? `<div style="padding:8px 10px;background:#fff3e0;border-radius:6px;font-size:12px;color:#e65100">⚠ 這個品相原本已有圖號 ${v.design_number} · 改了會覆蓋原記錄(作廢舊號)</div>` : ''}
+    ${v.design_number_id ? `<div style="padding:8px 10px;background:#fff3e0;border-radius:6px;font-size:12px;color:#e65100">⚠ 這個品項原本已有圖號 ${v.design_number} · 改了會覆蓋原記錄(作廢舊號)</div>` : ''}
   `, [
     { label:'儲存', primary:true, onclick: async () => {
       const num = _toHalfWidthDigit(document.getElementById('dn-num').value.trim());
@@ -12205,7 +12205,7 @@ window._devEditDesignNumber = async function(variantId) {
       // 檢查是否已被用
       const { data: dup } = await db.from('design_numbers').select('id, variant_name').eq('number', num).is('voided_at', null).maybeSingle();
       if (dup && dup.id !== v.design_number_id) {
-        showToast(`這個圖號已被使用:${dup.variant_name||'(未知品相)'}`, 'error', 5000);
+        showToast(`這個圖號已被使用:${dup.variant_name||'(未知品項)'}`, 'error', 5000);
         return;
       }
 
@@ -12258,18 +12258,18 @@ function _findStepDef(pipeline, stepKey) {
   return tpl.main.find(s => s.key === stepKey) || tpl.side?.find(s => s.key === stepKey) || null;
 }
 
-// 送審審查 modal — 勾選哪些品相通過/需校正
+// 送審審查 modal — 勾選哪些品項通過/需校正
 function _devOpenReviewModal(project, task) {
   const activeVariants = (project.dev_variants||[]).filter(v => v.pipeline === task.pipeline && !v.cancelled_at);
   if (!activeVariants.length) {
-    // 沒品相就直接完成(不彈)
+    // 沒品項就直接完成(不彈)
     _devFinalizeTaskComplete(project.id, task.id, []);
     return;
   }
-  showModal(`📋 ${task.step_name} · 品相審查`, `
+  showModal(`📋 ${task.step_name} · 品項審查`, `
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
-      逐個勾選品相審查結果 · 未通過的會 revision +1,系統記錄校正歷程<br>
-      🎯 這個步驟本身仍會標記完成,但未通過的品相會標紅提示重做
+      逐個勾選品項審查結果 · 未通過的會 revision +1,系統記錄校正歷程<br>
+      🎯 這個步驟本身仍會標記完成,但未通過的品項會標紅提示重做
     </div>
     <div id="dev-review-list" style="display:grid;gap:10px">
       ${activeVariants.map(v => `<div data-vid="${v.id}" style="padding:10px 12px;border:1px solid var(--border);border-radius:8px">
@@ -12304,7 +12304,7 @@ function _devOpenReviewModal(project, task) {
       });
       const rejected = results.filter(r => r.decision === 'reject');
       const missing = rejected.filter(r => !r.reason);
-      if (missing.length) { showToast('未通過的品相必須填校正原因','error'); return; }
+      if (missing.length) { showToast('未通過的品項必須填校正原因','error'); return; }
       await _devFinalizeTaskComplete(project.id, task.id, results);
       closeModal();
     }},
@@ -12317,7 +12317,7 @@ window._devToggleReviewReason = function(vid, show) {
   if (el) el.style.display = show ? 'block' : 'none';
 };
 
-// 完成任務(送審後或普通任務)+ 寫入品相審查結果 + 校正歷程
+// 完成任務(送審後或普通任務)+ 寫入品項審查結果 + 校正歷程
 async function _devFinalizeTaskComplete(projectId, taskId, reviewResults) {
   const p = state.data.dev.find(x => x.id === projectId);
   const task = p?.dev_tasks?.find(t => t.id === taskId);
@@ -12370,8 +12370,8 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults) {
   await _devUpdateEventDateToNextTask(projectId);
 
   const msg = rejectedCount > 0
-    ? `✓ 已完成 · ⚠ ${rejectedCount} 個品相需校正`
-    : `✓ 已完成 · 所有品相通過`;
+    ? `✓ 已完成 · ⚠ ${rejectedCount} 個品項需校正`
+    : `✓ 已完成 · 所有品項通過`;
   showToast(msg, rejectedCount ? 'warn' : 'success');
   await loadDev();
   try { await loadCalendarEvents?.(); } catch(e) {}
@@ -12402,7 +12402,7 @@ async function _devUpdateEventDateToNextTask(projectId) {
   const description = [
     daysToLaunch !== null && daysToLaunch >= 0 ? `⏰ 距上市 ${daysToLaunch} 天 · 未完成 ${undone.length} 項${overdue.length?` · ⚠ 逾期 ${overdue.length} 項`:''}` : null,
     designer ? `主要設計師:${designer}` : null,
-    `系列開發數量:${variantCount} 個品相`,
+    `系列開發數量:${variantCount} 個品項`,
     ...keyMilestones,
     launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
   ].filter(Boolean).join('<br>');
@@ -12421,7 +12421,7 @@ window._devToggleTaskDone = async function(taskId, checked) {
   const today = _localToday();
 
   if (checked) {
-    // 送審步驟 → 先開品相審查 modal(A 選項)
+    // 送審步驟 → 先開品項審查 modal(A 選項)
     const stepDef = _findStepDef(task.pipeline, task.step_key);
     if (stepDef?.is_review) {
       _devOpenReviewModal(p, task);
@@ -12439,7 +12439,7 @@ window._devToggleTaskDone = async function(taskId, checked) {
 
     // 里程碑觸發
     if (task.step_key === 'design_lock' || task.step_key === 'design_confirm') {
-      // 設計定稿完成 → 為每個品相發設計圖號
+      // 設計定稿完成 → 為每個品項發設計圖號
       await _devAutoIssueDesignNumbers(p, task.pipeline);
     }
     // 副線已在建案時就生(系列級),不再由樣品審過觸發
@@ -12535,7 +12535,7 @@ async function _devSyncCalendarSubtaskDate(task, newDate) {
   await db.from('calendar_events').update({ subtasks: subs }).eq('id', task.calendar_event_id);
 }
 
-// 設計定稿完成 → 自動為每個品相發圖號
+// 設計定稿完成 → 自動為每個品項發圖號
 async function _devAutoIssueDesignNumbers(project, pipeline) {
   const variants = (project.dev_variants||[]).filter(v => v.pipeline === pipeline && !v.cancelled_at && !v.design_number);
   if (!variants.length) return;
@@ -12559,13 +12559,13 @@ async function _devAutoIssueDesignNumbers(project, pipeline) {
     await db.from('dev_variants').update({ design_number_id: dn.id, design_number: number }).eq('id', v.id);
     nextSeq++;
   }
-  showToast(`🔢 已為 ${variants.length} 個品相發設計圖號`);
+  showToast(`🔢 已為 ${variants.length} 個品項發設計圖號`);
 }
 
 // 樣品審過完成 → 自動生副線任務
 async function _devAutoGenerateSideTasks(project, pipeline) {
   const activeVariants = (project.dev_variants||[]).filter(v => v.pipeline === pipeline && !v.cancelled_at);
-  if (!activeVariants.length) { showToast('沒有品相 · 無法生副線任務','info'); return; }
+  if (!activeVariants.length) { showToast('沒有品項 · 無法生副線任務','info'); return; }
 
   // 已存在的副線任務不重建
   const existing = (project.dev_tasks||[]).filter(t => t.step_group === 'side' && t.pipeline === pipeline);
@@ -12608,7 +12608,7 @@ async function _devAutoGenerateSideTasks(project, pipeline) {
   if (error) { showToast('生副線失敗:'+error.message,'error'); return; }
   // 加到行事曆同一個事件的 subtasks
   await _devAppendSideTasksToCalendar(project, data);
-  showToast(`✓ 已生 ${data.length} 個副線任務(${activeVariants.length} 品相 × ${sideSteps.length} 步)`);
+  showToast(`✓ 已生 ${data.length} 個副線任務(${activeVariants.length} 品項 × ${sideSteps.length} 步)`);
 }
 
 async function _devAppendSideTasksToCalendar(project, newTasks) {
@@ -12698,17 +12698,17 @@ window._devHandleTimingChange = function(projectId, taskId, deltaDays) {
   ]);
 };
 
-// 加品相(支援單筆 or 批次貼上多行)
+// 加品項(支援單筆 or 批次貼上多行)
 window._devAddVariantPrompt = async function(projectId, pipeline) {
   const t = PIPELINE_TEMPLATES[pipeline];
   const p = (state.data.dev||[]).find(x => x.id === projectId);
   const plLabel = (t?.label||'').replace(/^[🥈🥇🎁]\s*/,'');
-  showModal(`+ 加 ${plLabel} 品相`, `
+  showModal(`+ 加 ${plLabel} 品項`, `
     <div style="font-size:12px;color:var(--muted);margin-bottom:10px;line-height:1.6">
-      一行一個品相名 · 直接貼上也 OK · 空行自動跳過
+      一行一個品項名 · 直接貼上也 OK · 空行自動跳過
     </div>
     <div class="form-group">
-      <label>品相名(可一次貼多筆) *</label>
+      <label>品項名(可一次貼多筆) *</label>
       <textarea class="form-control" id="dv-names" rows="10" placeholder="Sanrio MIX曬黑出遊趣系列_大耳狗墨鏡純銀晶鑽項鍊&#10;Sanrio MIX曬黑出遊趣系列_大耳狗墨鏡純銀手鍊&#10;Sanrio MIX曬黑出遊趣系列_大耳狗墨鏡純銀戒指&#10;Sanrio MIX曬黑出遊趣系列_大耳狗墨鏡純銀耳環&#10;…" style="font-family:monospace;font-size:12px"></textarea>
       <div style="font-size:11px;color:var(--muted);margin-top:4px">
         💡 快速貼上整批 24 行,系統一次全部建好
@@ -12718,7 +12718,7 @@ window._devAddVariantPrompt = async function(projectId, pipeline) {
     { label:'加入', primary:true, onclick: async () => {
       const raw = document.getElementById('dv-names').value;
       const names = raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
-      if (!names.length) { showToast('請填品相名','error'); return; }
+      if (!names.length) { showToast('請填品項名','error'); return; }
 
       // 檢查重複
       const existingNames = new Set((p?.dev_variants||[]).filter(v => v.pipeline === pipeline && !v.cancelled_at).map(v => v.name));
@@ -12747,7 +12747,7 @@ window._devAddVariantPrompt = async function(projectId, pipeline) {
         issuedCount = newVariants.length;
       }
 
-      showToast(`✓ 已加 ${toInsert.length} 個品相${skipped.length?` · 跳過 ${skipped.length} 筆重複`:''}${issuedCount?` · 已發 ${issuedCount} 個設計圖號`:''}`, 'success', 5000);
+      showToast(`✓ 已加 ${toInsert.length} 個品項${skipped.length?` · 跳過 ${skipped.length} 筆重複`:''}${issuedCount?` · 已發 ${issuedCount} 個設計圖號`:''}`, 'success', 5000);
       closeModal();
       await loadDev();
       renderApp();
@@ -12756,31 +12756,31 @@ window._devAddVariantPrompt = async function(projectId, pipeline) {
   ], { wide: true });
 };
 
-// 取消品相
+// 取消品項
 window._devCancelVariant = async function(variantId) {
-  const reason = prompt('取消品相原因(選填):');
+  const reason = prompt('取消品項原因(選填):');
   if (reason === null) return;
   await db.from('dev_variants').update({
     cancelled_at: new Date().toISOString(),
     cancel_reason: reason||null,
   }).eq('id', variantId);
   // 相關副線任務標記取消
-  await db.from('dev_tasks').update({ status: '取消', cancelled_at: new Date().toISOString(), cancel_reason: '品相取消' }).eq('variant_id', variantId);
-  showToast('已取消品相');
+  await db.from('dev_tasks').update({ status: '取消', cancelled_at: new Date().toISOString(), cancel_reason: '品項取消' }).eq('variant_id', variantId);
+  showToast('已取消品項');
   await loadDev();
   renderApp();
 };
 
 window._devRestoreVariant = async function(variantId) {
-  if (!confirm('還原此品相?')) return;
+  if (!confirm('還原此品項?')) return;
   await db.from('dev_variants').update({ cancelled_at: null, cancel_reason: null }).eq('id', variantId);
   await db.from('dev_tasks').update({ status: '未開始', cancelled_at: null, cancel_reason: null }).eq('variant_id', variantId).eq('status','取消');
-  showToast('已還原品相');
+  showToast('已還原品項');
   await loadDev();
   renderApp();
 };
 
-// 量產完成 → 提示為品相建商品
+// 量產完成 → 提示為品項建商品
 window._devCreateProductsPrompt = async function(projectId, pipeline) {
   const p = (state.data.dev||[]).find(x => x.id === projectId);
   if (!p) return;
@@ -12788,7 +12788,7 @@ window._devCreateProductsPrompt = async function(projectId, pipeline) {
   if (!variants.length) return;
   showModal(`🎉 ${PIPELINE_TEMPLATES[pipeline]?.label} 量產完成 · 建商品`, `
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px">
-      勾選要建立商品的品相 · 建好會綁定到品相
+      勾選要建立商品的品項 · 建好會綁定到品項
     </div>
     <div id="dev-cp-list">
       ${variants.map((v, i) => `<label style="display:flex;gap:8px;padding:6px 10px;border:1px solid var(--border);border-radius:6px;margin-bottom:4px;cursor:pointer">
@@ -12797,9 +12797,9 @@ window._devCreateProductsPrompt = async function(projectId, pipeline) {
       </label>`).join('')}
     </div>
   `, [
-    { label:'✅ 為選中品相建商品', primary:true, onclick: async () => {
+    { label:'✅ 為選中品項建商品', primary:true, onclick: async () => {
       const checked = [...document.querySelectorAll('#dev-cp-list input[type=checkbox]:checked')];
-      if (!checked.length) { showToast('請選至少一個品相','error'); return; }
+      if (!checked.length) { showToast('請選至少一個品項','error'); return; }
       const categories = state.data.categories || [];
       for (const cb of checked) {
         const catObj = categories.find(c => c.name === cb.dataset.vcat);
@@ -12988,7 +12988,7 @@ window._devRebuildCalendar = async function(id) {
 window._devDeleteProject = async function(id) {
   const p = (state.data.dev||[]).find(x => x.id === id);
   if (!p) return;
-  if (!confirm(`確定要刪除「${p.name}」?\n\n將一併刪除:\n· ${(p.dev_tasks||[]).length} 個任務\n· ${(p.dev_variants||[]).length} 個品相\n· 所有相關行事曆事件\n\n此動作無法復原!`)) return;
+  if (!confirm(`確定要刪除「${p.name}」?\n\n將一併刪除:\n· ${(p.dev_tasks||[]).length} 個任務\n· ${(p.dev_variants||[]).length} 個品項\n· 所有相關行事曆事件\n\n此動作無法復原!`)) return;
 
   // 收集所有 calendar_event_id
   const eventIds = [...new Set((p.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
@@ -13147,10 +13147,10 @@ function _renderDevModalBody() {
       </div>` : ''}
     </div>
 
-    <!-- 品相說明(改在初稿完成後才加) -->
+    <!-- 品項說明(改在初稿完成後才加) -->
     ${d.pipelines.length ? `
     <div style="background:#f3e5f5;padding:10px 14px;border-radius:8px;margin-bottom:12px;font-size:12px;color:#6a1b9a;line-height:1.7">
-      💡 <b>品相清單稍後再加</b> — 建案後先跑主線,等「設計圖(初稿)」完成時再進專案詳情頁加品相,副線任務會依當時的品相清單建立
+      💡 <b>品項清單稍後再加</b> — 建案後先跑主線,等「設計圖(初稿)」完成時再進專案詳情頁加品項,副線任務會依當時的品項清單建立
     </div>
     ` : ''}
 
@@ -13268,7 +13268,7 @@ function _renderDevModalBody() {
               </tbody>
             </table>` : ''}
             ${finalSides.length ? `
-            <div style="padding:4px 14px 2px;font-size:11px;color:var(--muted);font-weight:600;background:#fafafa">副線(系列共用,一次做完所有品相)</div>
+            <div style="padding:4px 14px 2px;font-size:11px;color:var(--muted);font-weight:600;background:#fafafa">副線(系列共用,一次做完所有品項)</div>
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               <tbody>
                 ${finalSides.map((step, i) => {
@@ -13503,7 +13503,7 @@ async function _saveDevProject() {
   if (pErr) { showToast('建專案失敗:'+pErr.message,'error'); return; }
   const projectId = proj.id;
 
-  // ─── 2. 建 tasks(只建主線;副線等加品相時再建) ───
+  // ─── 2. 建 tasks(只建主線;副線等加品項時再建) ───
   const users = state.data.users || [];
   const findUser = name => users.find(u => u.name === name);
   const taskInserts = [];
@@ -13640,7 +13640,7 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
       };
     });
 
-  // 產生 description:主要設計師 + 品相數 + 關鍵里程碑日期
+  // 產生 description:主要設計師 + 品項數 + 關鍵里程碑日期
   const designer = tasks.find(t => t.step_key === 'design_draft' || t.step_key === 'item_design')?.assignee_name;
   const variantCount = (project.dev_variants||[]).filter(v => !v.cancelled_at).length;
   const keyMilestones = tasks
@@ -13652,7 +13652,7 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
     });
   const description = [
     designer ? `主要設計師:${designer}` : null,
-    `系列開發數量:${variantCount} 個品相`,
+    `系列開發數量:${variantCount} 個品項`,
     ...keyMilestones,
     launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
   ].filter(Boolean).join('<br>');
@@ -25768,7 +25768,7 @@ window._pltUpdateUnitPrice = async function(recordId, itemIdx, value) {
   const price = parseFloat(value) || null;
   const cur = items[itemIdx];
 
-  // ── 同品相(product_id + color)歷史單價比對 ──
+  // ── 同品項(product_id + color)歷史單價比對 ──
   if (price && price > 0) {
     const history = [];
     (state.data.plate||[]).forEach(rec => {
@@ -32307,7 +32307,7 @@ function renderPurchases() {
     const da = a.request_date || '';
     const db2 = b.request_date || '';
     if (da !== db2) return db2.localeCompare(da);
-    // 同一天的類別排在一起,再依品項名稱排(讓「類似品相」自然靠攏)
+    // 同一天的類別排在一起,再依品項名稱排(讓「類似品項」自然靠攏)
     const ca = a.category || '';
     const cb = b.category || '';
     if (ca !== cb) return ca.localeCompare(cb, 'zh-TW');
