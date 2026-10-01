@@ -11910,7 +11910,20 @@ function _renderDevDetail(id) {
         </div>
       </div>
       ${variants.length === 0 ? `<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">還沒加品項 · 通常等「設計圖初稿」開始時加</div>` :
-        variants.map(v => _renderDevVariantRow(v, [], p)).join('')}
+        [...variants].sort((a, b) => {
+          // 1) 狀態分組:需校正 > 進行中 > 已取消
+          const statusRank = v => v.cancelled_at ? 2 : (v.needs_revision ? 0 : 1);
+          const sa = statusRank(a); const sb = statusRank(b);
+          if (sa !== sb) return sa - sb;
+          // 2) 有圖號的在前
+          const hasA = !!a.design_number;
+          const hasB = !!b.design_number;
+          if (hasA !== hasB) return hasA ? -1 : 1;
+          // 3) 都有圖號 → 依圖號遞增
+          if (hasA && hasB) return (a.design_number||'').localeCompare(b.design_number||'');
+          // 4) 都沒圖號 → 依建立順序(created_at)
+          return (a.created_at||'').localeCompare(b.created_at||'');
+        }).map(v => _renderDevVariantRow(v, [], p)).join('')}
     </div>
   `;
 }
