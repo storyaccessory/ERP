@@ -11630,11 +11630,16 @@ function _renderDevMatrix(projects) {
   const today = _localToday();
   const cellIcon = (task) => {
     if (!task) return '<span style="color:#ddd">—</span>';
-    if (task.status === '完成') return '<span style="color:#2e7d32;font-weight:700" title="完成 '+task.completed_at?.slice(0,10)+'">✓</span>';
-    if (task.status === '取消') return '<span style="color:#999">✕</span>';
-    if (task.due_date && task.due_date < today) return '<span style="color:#c62828;font-weight:700" title="逾期 '+task.due_date+'">⚠</span>';
-    // 是不是目前進行中的?(前面都完成才算)
-    return '<span style="color:#f57c00;font-weight:700" title="'+(task.assignee_name||'')+' · '+task.due_date+'">🔄</span>';
+    if (task.status === '完成') {
+      const d = task.completed_at ? task.completed_at.slice(5,10).replace('-','/') : '';
+      return `<span style="color:#2e7d32;font-weight:700" title="完成 ${task.completed_at?.slice(0,10)||''}">✓${d?' '+d:''}</span>`;
+    }
+    if (task.status === '取消') return '<span style="color:#999">—</span>';
+    const dueShort = task.due_date ? task.due_date.slice(5,10).replace('-','/') : '';
+    if (task.due_date && task.due_date < today) {
+      return `<span style="color:#c62828;font-weight:700" title="⚠ 逾期 · ${task.assignee_name||'未指定'} · 原定 ${task.due_date}">${dueShort}</span>`;
+    }
+    return `<span style="color:#555" title="${task.assignee_name||'未指定'} · ${task.due_date}">${dueShort}</span>`;
   };
 
   return `
@@ -11645,7 +11650,7 @@ function _renderDevMatrix(projects) {
       <div class="tab" data-dev-tab="設計圖號">🔢 設計圖號</div>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
-      ✓ 完成 · 🔄 進行中 · ⚠ 逾期 · ✕ 取消 · — 未開始 · 滑鼠移到格子看詳情
+      <b style="color:#2e7d32">✓</b> 已完成 · <b style="color:#555">日期</b> 預計完成 · <b style="color:#c62828">紅色日期</b> 逾期 · — 未開始/取消 · 滑鼠移到格子看負責人
     </div>
     ${Object.entries(groupByPipeline).map(([pl, plProjects]) => {
       const tpl = PIPELINE_TEMPLATES[pl];
@@ -11660,8 +11665,9 @@ function _renderDevMatrix(projects) {
               <thead style="background:#f5f5f5">
                 <tr>
                   <th style="padding:6px 8px;text-align:left;position:sticky;left:0;background:#f5f5f5;z-index:1;min-width:140px;border-right:1px solid var(--border)">專案</th>
-                  ${steps.map((s, i) => `<th style="padding:4px 3px;text-align:center;min-width:32px;max-width:40px;font-size:10px;color:var(--muted);border-right:1px solid #eee" title="${s.name}">
-                    ${s.milestone?'<span style="color:#c62828">🎯</span>':i+1}
+                  ${steps.map((s, i) => `<th style="padding:4px 4px;text-align:center;min-width:70px;max-width:90px;font-size:10px;color:var(--muted);border-right:1px solid #eee" title="${s.name}">
+                    <div style="font-weight:600;color:${s.milestone?'#c62828':'var(--text)'}">${s.name.replace(/\s*\/\s*/g,'/').replace(/\s*&\s*/g,'&').slice(0, 12)}</div>
+                    <div style="font-size:9px;color:var(--muted);margin-top:2px">${s.milestone?'🎯 里程碑':`${s.days}天`}</div>
                   </th>`).join('')}
                   <th style="padding:6px 8px;text-align:center;min-width:60px">進度</th>
                 </tr>
