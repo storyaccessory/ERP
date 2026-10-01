@@ -12933,9 +12933,14 @@ function _renderDevModalBody() {
         ${d.pipelines.map(pl => {
           const t = PIPELINE_TEMPLATES[pl];
           const { dates, stepMap } = _calcMainDates(pl, d.start_date);
-          const sideSteps = _calcSideDates(pl, stepMap);
-          // 套用使用者覆寫
           const overrides = d.overrides?.[pl] || {};
+          // ⭐ 把 overrides 的日期套進 stepMap,讓副線觸發計算用「使用者改過的」樣品審過日
+          const effectiveStepMap = { ...stepMap };
+          Object.entries(overrides).forEach(([k, ov]) => {
+            if (ov.due_date) effectiveStepMap[k] = ov.due_date;
+          });
+          const sideSteps = _calcSideDates(pl, effectiveStepMap);
+          // 套用使用者覆寫
           const applyOv = (step) => {
             const ov = overrides[step.key] || {};
             return {
@@ -13292,7 +13297,12 @@ async function _saveDevProject() {
       });
     });
     // 副線(改為系列級 · 建案時一併生 · variant_id=null)
-    const sideSteps = _calcSideDates(pl, stepMap);
+    // ⭐ 用 overrides 修正過的 stepMap 來算副線觸發,讓副線跟著樣品審過等里程碑調整
+    const effectiveStepMap = { ...stepMap };
+    Object.entries(overrides).forEach(([k, ov]) => {
+      if (ov.due_date) effectiveStepMap[k] = ov.due_date;
+    });
+    const sideSteps = _calcSideDates(pl, effectiveStepMap);
     sideSteps.forEach(step => {
       const ov = overrides[step.key] || {};
       const u = ov.assignee_id ? null : findUser(step.assignee_name);
