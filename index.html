@@ -11992,7 +11992,7 @@ function _renderDevVariantRow(v, _unused, project) {
         ${(v.revision||1) > 1?`<span style="background:#fff3e0;color:#e65100;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;margin-left:6px" title="校正輪次">v${v.revision}</span>`:''}
         ${v.category?`<span style="font-size:11px;color:var(--muted);margin-left:6px">${v.category}</span>`:''}
         ${v.design_number
-          ? `<span style="background:#e3f2fd;color:#1565c0;padding:1px 8px;border-radius:8px;font-size:10px;font-family:monospace;margin-left:6px;cursor:pointer" onclick="event.stopPropagation();window._devEditDesignNumber('${v.id}')" title="點擊修改">🔢 ${v.design_number} ✎</span>`
+          ? `<span style="background:#e3f2fd;color:#1565c0;padding:1px 8px;border-radius:8px;font-size:10px;font-family:monospace;margin-left:6px;cursor:pointer" onclick="event.stopPropagation();window._devCopyDesignNumber('${v.design_number}')" title="點擊複製 · 右鍵修改" oncontextmenu="event.preventDefault();window._devEditDesignNumber('${v.id}')">圖號:${v.design_number}</span>`
           : `<button class="btn btn-sm" onclick="event.stopPropagation();window._devEditDesignNumber('${v.id}')" style="background:#e3f2fd;color:#1565c0;border:1px dashed #90caf9;font-size:10px;padding:1px 8px;margin-left:6px">+ 輸入圖號</button>`}
       </div>
       <div style="display:flex;gap:6px;align-items:center">
@@ -12160,6 +12160,16 @@ window._devBatchIssueNumbers = async function(projectId) {
     }},
     { label:'取消', onclick: closeModal },
   ], { wide: true });
+};
+
+// 點擊圖號 → 複製到剪貼簿
+window._devCopyDesignNumber = async function(number) {
+  try {
+    await navigator.clipboard.writeText(number);
+    showToast(`已複製:${number}`);
+  } catch(e) {
+    showToast('複製失敗 · 可右鍵選取','error');
+  }
 };
 
 // 手動輸入/修改單筆圖號(通常用於既有專案補登)
