@@ -31834,6 +31834,7 @@ function renderPurchases() {
     <div class="search-bar">
       <input class="search-input" id="_purchase-search" placeholder="搜尋 品項 / 申請人 / 負責人 / 類別…" value="${searchQ}">
       <button class="btn btn-primary" onclick="window.openPurchaseBatchModal()">+ 新增採購申請</button>
+      <button class="btn btn-outline" onclick="window.modalBatchImportPurchases()" style="background:#e8f5e9;color:#1b5e20;border-color:#a5d6a7">📥 批次匯入 (Excel)</button>
       ${isBoss ? `<button class="btn btn-outline" onclick="window.openPurchaseItemsAdmin()">⚙️ 品項庫管理</button>` : ''}
     </div>
     <div class="card">
@@ -31933,6 +31934,197 @@ function renderPurchases() {
 
 // 開啟採購申請 modal(新增/編輯)
 // 🆕 新增申請:多品項一次填(送出時每個品項各自成為獨立待指派事件)
+// ═══════════════════════════════════════════════
+// 批次匯入採購申請 (Excel)
+// ═══════════════════════════════════════════════
+const PURCHASE_IMPORT_COLS = [
+  { key:'category',      label:'類別 *',    sample:'商品', hint:'商品 / 包材 / 耗材 / 零件 / 辦公用品 / 其他' },
+  { key:'item_name',     label:'品項名稱 *', sample:'Kuromi繁花_項鍊', required:true },
+  { key:'batch_no',      label:'批次',       sample:'2026-11-A', hint:'可空,方便追蹤同批次採購' },
+  { key:'expected_qty',  label:'預計採購數量', sample:'100', hint:'支援文字,如 100 或 藍*5 粉*3' },
+  { key:'current_stock', label:'目前庫存',   sample:'0', hint:'支援文字' },
+  { key:'reference_link',label:'參考連結',   sample:'https://...', hint:'可空' },
+  { key:'notes',         label:'備註',       sample:'', hint:'可空' },
+];
+
+window.modalBatchImportPurchases = function() {
+  showModal('📥 批次匯入採購申請 (Excel)', `
+    <div style="font-size:13px;color:var(--muted);margin-bottom:14px;line-height:1.8">
+      <div style="padding:10px 12px;background:#e8f5e9;border-left:3px solid #43a047;border-radius:4px;margin-bottom:12px">
+        <strong style="color:#1b5e20">操作步驟</strong>
+        <ol style="margin:6px 0 0 20px;padding:0;line-height:1.7;color:#555">
+          <li>按「⬇ 下載範本」拿到 Excel 範本</li>
+          <li>Excel 填好資料(每行一筆)後存檔</li>
+          <li>按「📂 選擇檔案」上傳,系統會預覽</li>
+          <li>確認無誤後按「確認匯入」</li>
+        </ol>
+      </div>
+      <div style="padding:10px 12px;background:#fff8e1;border-left:3px solid #f57c00;border-radius:4px;font-size:12px;line-height:1.7;color:#444">
+        <strong>規則</strong>
+        <br>• 類別必須是:商品 / 包材 / 耗材 / 零件 / 辦公用品 / 其他 其中之一
+        <br>• 建單狀態預設「待指派」,老闆之後再指派採購負責人
+        <br>• 申請人 = 你(目前登入帳號)
+        <br>• 申請日期 = 今天
+      </div>
+    </div>
+    <div style="display:flex;gap:10px;margin-bottom:12px">
+      <button class="btn btn-outline" onclick="window.downloadPurchaseImportTemplate()" style="background:#e3f2fd;color:#1565c0;border-color:#90caf9">⬇ 下載範本 (.xlsx)</button>
+      <label class="btn btn-outline" style="background:#f3e5f5;color:#6a1b9a;border-color:#ce93d8;cursor:pointer;margin:0">
+        📂 選擇檔案
+        <input type="file" id="bip-pr-file" accept=".xlsx,.xls" style="display:none" onchange="window._bipPrReadFile(this)">
+      </label>
+      <span id="bip-pr-filename" style="font-size:12px;color:var(--muted);align-self:center"></span>
+    </div>
+    <div id="bip-pr-preview" style="max-height:400px;overflow:auto"></div>
+  `, [
+    { label:'確認匯入', primary:true, onclick: window._bipPrDoImport },
+    { label:'取消', onclick: closeModal },
+  ]);
+  window._bipPrRows = null;
+};
+
+window.downloadPurchaseImportTemplate = function() {
+  const headers = PURCHASE_IMPORT_COLS.map(c => c.label);
+  const hints   = PURCHASE_IMPORT_COLS.map(c => c.hint || '');
+  const sample  = PURCHASE_IMPORT_COLS.map(c => c.sample);
+  const aoa = [headers, hints, sample];
+  const ws = XLSX.utils.aoa_to_sheet(aoa);
+  ws['!cols'] = PURCHASE_IMPORT_COLS.map(c => ({ wch: Math.max(c.label.length*2, 14) }));
+  const wb = XLSX.utils.book_new();
+  XLSX.utils.book_append_sheet(wb, ws, '採購匯入');
+  XLSX.writeFile(wb, `採購批次匯入範本_${new Date().toISOString().slice(0,10)}.xlsx`);
+  showToast('範本已下載');
+};
+
+window._bipPrReadFile = function(input) {
+  const file = input.files?.[0];
+  if (!file) return;
+  document.getElementById('bip-pr-filename').textContent = file.name;
+  const reader = new FileReader();
+  reader.onload = (e) => {
+    try {
+      const wb = XLSX.read(e.target.result, { type:'array' });
+      const ws = wb.Sheets[wb.SheetNames[0]];
+      const rows = XLSX.utils.sheet_to_json(ws, { header:1, defval:'' });
+      if (!rows.length) throw new Error('檔案是空的');
+      const headerRow = rows[0].map(h => String(h||'').trim());
+      const dataRows = rows.slice(2).filter(r => r.some(v => String(v||'').trim()));
+      const colMap = {};
+      PURCHASE_IMPORT_COLS.forEach(c => {
+        const idx = headerRow.findIndex(h => h === c.label || h.replace(/\s*\*/,'')===c.label.replace(/\s*\*/,''));
+        if (idx >= 0) colMap[c.key] = idx;
+      });
+      const parsed = dataRows.map((r, i) => {
+        const obj = { _row: i+3 };
+        Object.entries(colMap).forEach(([key, idx]) => { obj[key] = r[idx]; });
+        return obj;
+      });
+      window._bipPrRows = parsed;
+      _bipPrRenderPreview(parsed);
+    } catch(err) {
+      document.getElementById('bip-pr-preview').innerHTML = `<div style="color:var(--danger);padding:10px">讀取失敗:${err.message}</div>`;
+    }
+  };
+  reader.readAsArrayBuffer(file);
+};
+
+function _bipPrRenderPreview(rows) {
+  if (!rows.length) {
+    document.getElementById('bip-pr-preview').innerHTML = `<div style="color:var(--muted);padding:10px">檔案沒有資料列</div>`;
+    return;
+  }
+  const html = `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:6px">共 ${rows.length} 筆待匯入</div>
+    <table style="width:100%;border-collapse:collapse;font-size:11px">
+      <thead style="background:#f5f5f5;position:sticky;top:0">
+        <tr>
+          <th style="padding:4px 6px;border:1px solid #ddd">#</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">類別</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">品項名稱</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">批次</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">預計數量</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">庫存</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">備註</th>
+          <th style="padding:4px 6px;border:1px solid #ddd">問題</th>
+        </tr>
+      </thead>
+      <tbody>
+        ${rows.map(r => {
+          const errs = [];
+          const cat = String(r.category||'').trim();
+          const name = String(r.item_name||'').trim();
+          if (!cat) errs.push('類別空白');
+          else if (!PURCHASE_CATEGORIES.includes(cat)) errs.push(`類別「${cat}」不是合法選項`);
+          if (!name) errs.push('品項名稱空白');
+          return `<tr style="background:${errs.length?'#ffebee':'#fff'}">
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:center">${r._row}</td>
+            <td style="padding:3px 6px;border:1px solid #eee">${cat||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;font-weight:500">${name||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;color:#1565c0">${r.batch_no||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:right">${r.expected_qty||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;text-align:right">${r.current_stock||'—'}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;color:var(--muted);font-size:10px">${r.notes||''}</td>
+            <td style="padding:3px 6px;border:1px solid #eee;color:${errs.length?'#c62828':'#888'};font-size:10px">${errs.join(' · ')||'—'}</td>
+          </tr>`;
+        }).join('')}
+      </tbody>
+    </table>`;
+  document.getElementById('bip-pr-preview').innerHTML = html;
+}
+
+window._bipPrDoImport = async function() {
+  const rows = window._bipPrRows;
+  if (!rows || !rows.length) { showToast('請先選擇檔案','error'); return; }
+
+  const today = _localToday();
+  const todayPrefix = today.replace(/-/g,'');
+  const requesterId = state.user?.id || null;
+  const requesterName = state.profile?.name || state.user?.email || '';
+
+  let ok = 0;
+  const errors = [];
+  const inserts = [];
+
+  rows.forEach(r => {
+    const cat = String(r.category||'').trim();
+    const name = String(r.item_name||'').trim();
+    if (!cat || !PURCHASE_CATEGORIES.includes(cat)) { errors.push(`第 ${r._row} 列:類別「${cat}」錯誤`); return; }
+    if (!name) { errors.push(`第 ${r._row} 列:品項名稱空白`); return; }
+    inserts.push({
+      request_no: `PR-${todayPrefix}-${String(Math.floor(Math.random()*9000)+1000)}`,
+      requester_id: requesterId,
+      requester_name: requesterName,
+      request_date: today,
+      status: '待指派',
+      category: cat,
+      item_name: name,
+      batch_no: String(r.batch_no||'').trim() || null,
+      expected_qty: String(r.expected_qty||'').trim() || null,
+      current_stock: String(r.current_stock||'').trim() || null,
+      reference_link: String(r.reference_link||'').trim() || null,
+      notes: String(r.notes||'').trim() || null,
+    });
+    ok++;
+  });
+
+  if (!inserts.length) {
+    document.getElementById('bip-pr-preview').innerHTML = `<div style="color:var(--danger);padding:10px">沒有合法資料,請檢查上方「問題」欄</div>`;
+    return;
+  }
+
+  const { error } = await db.from('purchase_requests').insert(inserts);
+  if (error) { showToast('匯入失敗:'+error.message,'error'); return; }
+
+  const summary = `✓ 已匯入 ${ok} 筆採購申請${errors.length?` · 失敗 ${errors.length} 筆`:''}`;
+  showToast(summary, errors.length?'warn':'success');
+  if (errors.length) {
+    document.getElementById('bip-pr-preview').innerHTML = `<div style="padding:10px;background:#ffebee;border-radius:6px;margin-bottom:8px">${summary}</div><div style="font-size:11px;color:#c62828">${errors.slice(0,30).join('<br>')}</div>`;
+  } else {
+    closeModal();
+  }
+  await loadPurchases(); renderApp();
+};
+
 window.openPurchaseBatchModal = function() {
   state.data._puBatchRows = [{ category:'', item_name:'', expected_qty:'', current_stock:'', reference_link:'', notes:'' }];
   const _renderRows = () => {
