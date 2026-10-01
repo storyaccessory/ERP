@@ -31847,6 +31847,8 @@ function renderPurchases() {
       ${isAdminOnly ? `<button class="btn btn-sm" onclick="window._puBatchChangeDate()" style="background:#fff;color:#1565c0;border:1px solid #90caf9;font-size:11px">📅 改申請日期</button>` : ''}
       ${isAdminOnly ? `<button class="btn btn-sm" onclick="window._puBatchChangeRequester()" style="background:#fff;color:#2e7d32;border:1px solid #a5d6a7;font-size:11px">👤 改申請人</button>` : ''}
       ${isAdminOnly ? `<button class="btn btn-sm" onclick="window._puBatchChangePurchaser()" style="background:#fff;color:#6a1b9a;border:1px solid #ce93d8;font-size:11px">🎯 改採購負責人</button>` : ''}
+      <button class="btn btn-sm" onclick="window._puBatchChangePurchaseDate()" style="background:#fff;color:#e65100;border:1px solid #ffb74d;font-size:11px">🛒 改採購日期</button>
+      <button class="btn btn-sm" onclick="window._puBatchChangeArrivalDate()" style="background:#fff;color:#00695c;border:1px solid #80cbc4;font-size:11px">📦 回壓到貨日期</button>
       <button class="btn btn-sm" onclick="state.data._puSel=new Set();renderApp()" style="background:#fff;color:#c62828;border:1px solid #ef9a9a;font-size:11px">✕ 取消選取</button>
     </div>` : ''}
     <div class="card">
@@ -33137,6 +33139,110 @@ window._puBatchChangeRequester = function() {
       const { error } = await db.from('purchase_requests').update({ requester_id: rid, requester_name: rname }).in('id', sel);
       if (error) { showToast('更新失敗:'+error.message,'error'); return; }
       showToast(`✓ 已更新 ${sel.length} 筆`);
+      state.data._puSel = new Set();
+      closeModal();
+      await loadPurchases(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+window._puBatchChangePurchaseDate = function() {
+  const sel = [...(state.data._puSel||[])];
+  if (!sel.length) return;
+  // 僅老闆或該筆的採購負責人可以改
+  const _ep = effectiveProfile() || {};
+  const amAdmin = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com';
+  const myId = state.user?.id;
+  const list = state.data.purchases || [];
+  const unauthorized = list.filter(x => sel.includes(x.id) && !amAdmin && x.purchaser_id !== myId);
+  if (unauthorized.length) {
+    showToast(`${unauthorized.length} 筆你不是採購負責人,無法改 · 請先取消選取或改單筆`, 'error', 5000);
+    return;
+  }
+  const today = _localToday();
+  showModal(`🛒 批次改採購日期 · ${sel.length} 筆`, `
+    <div class="form-group">
+      <label>新的採購日期</label>
+      <input type="date" class="form-control" id="pu-batch-pdate" value="${today}">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">批次填入後,原本「待採購」且已有實際採購數的會自動改為「已採購」</div>
+    </div>
+  `, [
+    { label:'套用', primary:true, onclick: async () => {
+      const d = document.getElementById('pu-batch-pdate').value;
+      if (!d) { showToast('請選日期','error'); return; }
+      // 挑出有實際採購數的 → 連狀態一起改
+      const list = state.data.purchases || [];
+      const withQty = list.filter(x => sel.includes(x.id) && x.actual_qty && x.status === '待採購');
+      const withQtyIds = withQty.map(x => x.id);
+      const others = sel.filter(id => !withQtyIds.includes(id));
+      if (withQtyIds.length) {
+        await db.from('purchase_requests').update({ purchase_date: d, status: '已採購' }).in('id', withQtyIds);
+      }
+      if (others.length) {
+        await db.from('purchase_requests').update({ purchase_date: d }).in('id', others);
+      }
+      showToast(`✓ 已更新 ${sel.length} 筆 · ${withQtyIds.length} 筆推進為「已採購」`);
+      state.data._puSel = new Set();
+      closeModal();
+      await loadPurchases(); renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ]);
+};
+
+window._puBatchChangeArrivalDate = function() {
+  const sel = [...(state.data._puSel||[])];
+  if (!sel.length) return;
+  // 僅老闆或該筆的採購負責人可以改
+  const _ep = effectiveProfile() || {};
+  const amAdmin = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com';
+  const myId = state.user?.id;
+  const list = state.data.purchases || [];
+  const unauthorized = list.filter(x => sel.includes(x.id) && !amAdmin && x.purchaser_id !== myId);
+  if (unauthorized.length) {
+    showToast(`${unauthorized.length} 筆你不是採購負責人,無法改 · 請先取消選取或改單筆`, 'error', 5000);
+    return;
+  }
+  const today = _localToday();
+  showModal(`📦 批次回壓到貨日期 · ${sel.length} 筆`, `
+    <div class="form-group">
+      <label>新的到貨日期</label>
+      <input type="date" class="form-control" id="pu-batch-adate" value="${today}">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">批次填入後,狀態自動推進為「已到貨」,並為每筆建一個 QC 提醒給申請人</div>
+    </div>
+  `, [
+    { label:'套用', primary:true, onclick: async () => {
+      const d = document.getElementById('pu-batch-adate').value;
+      if (!d) { showToast('請選日期','error'); return; }
+      const list = state.data.purchases || [];
+      const toUpdate = list.filter(x => sel.includes(x.id));
+
+      // 一次更新 arrival_date + 推進狀態
+      const needStatus = toUpdate.filter(x => ['待採購','已採購'].includes(x.status)).map(x => x.id);
+      if (needStatus.length) {
+        await db.from('purchase_requests').update({ arrival_date: d, status: '已到貨' }).in('id', needStatus);
+      }
+      const others = toUpdate.filter(x => !needStatus.includes(x.id)).map(x => x.id);
+      if (others.length) {
+        await db.from('purchase_requests').update({ arrival_date: d }).in('id', others);
+      }
+
+      // 為沒 QC event 的建 QC 提醒
+      let qcCreated = 0;
+      for (const r of toUpdate) {
+        if (!r.qc_event_id && typeof _puCreateQcReminder === 'function') {
+          try {
+            const qcId = await _puCreateQcReminder({ ...r, arrival_date: d });
+            if (qcId) {
+              await db.from('purchase_requests').update({ qc_event_id: qcId }).eq('id', r.id);
+              qcCreated++;
+            }
+          } catch(e) { console.warn('QC 建立失敗', e); }
+        }
+      }
+
+      showToast(`✓ 已回壓 ${sel.length} 筆 · ${needStatus.length} 筆改為「已到貨」 · 建 ${qcCreated} 個 QC 提醒`);
       state.data._puSel = new Set();
       closeModal();
       await loadPurchases(); renderApp();
