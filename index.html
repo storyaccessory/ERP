@@ -11905,7 +11905,8 @@ function _renderDevDetail(id) {
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
         <div style="font-size:15px;font-weight:700;color:#6a1b9a">🏷 品相清單 <span style="font-size:11px;color:var(--muted);font-weight:400">(用於發設計圖號、送審審查、建商品)</span></div>
         <div style="display:flex;gap:6px;flex-wrap:wrap">
-          ${pipelines.map(pl => `<button class="btn btn-sm btn-outline" onclick="window._devAddVariantPrompt('${p.id}','${pl}')" style="background:${PIPELINE_TEMPLATES[pl]?.color}15;color:${PIPELINE_TEMPLATES[pl]?.color};font-size:11px">+ ${PIPELINE_TEMPLATES[pl]?.label} 品相</button>`).join('')}
+          ${variants.filter(v => !v.cancelled_at && !v.design_number).length ? `<button class="btn btn-sm" onclick="window._devBatchIssueNumbers('${p.id}')" style="background:#e3f2fd;color:#1565c0;border:1px solid #90caf9;font-size:11px">🔢 批次發/補圖號 (${variants.filter(v => !v.cancelled_at && !v.design_number).length})</button>` : ''}
+          ${pipelines.map(pl => `<button class="btn btn-sm btn-outline" onclick="window._devAddVariantPrompt('${p.id}','${pl}')" style="background:${PIPELINE_TEMPLATES[pl]?.color}15;color:${PIPELINE_TEMPLATES[pl]?.color};font-size:11px">+ ${(PIPELINE_TEMPLATES[pl]?.label||'').replace(/^[🥈🥇🎁]\s*/,'')} 品相</button>`).join('')}
         </div>
       </div>
       ${variants.length === 0 ? `<div style="text-align:center;padding:14px;color:var(--muted);font-size:12px">還沒加品相 · 通常等「設計圖初稿」開始時加</div>` :
@@ -11990,7 +11991,9 @@ function _renderDevVariantRow(v, _unused, project) {
         <span style="font-weight:600;${isCancelled?'text-decoration:line-through':''}">${v.name}</span>
         ${(v.revision||1) > 1?`<span style="background:#fff3e0;color:#e65100;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;margin-left:6px" title="校正輪次">v${v.revision}</span>`:''}
         ${v.category?`<span style="font-size:11px;color:var(--muted);margin-left:6px">${v.category}</span>`:''}
-        ${v.design_number?`<span style="background:#e3f2fd;color:#1565c0;padding:1px 6px;border-radius:8px;font-size:10px;font-family:monospace;margin-left:6px">🔢 ${v.design_number}</span>`:''}
+        ${v.design_number
+          ? `<span style="background:#e3f2fd;color:#1565c0;padding:1px 8px;border-radius:8px;font-size:10px;font-family:monospace;margin-left:6px;cursor:pointer" onclick="event.stopPropagation();window._devEditDesignNumber('${v.id}')" title="點擊修改">🔢 ${v.design_number} ✎</span>`
+          : `<button class="btn btn-sm" onclick="event.stopPropagation();window._devEditDesignNumber('${v.id}')" style="background:#e3f2fd;color:#1565c0;border:1px dashed #90caf9;font-size:10px;padding:1px 8px;margin-left:6px">+ 輸入圖號</button>`}
       </div>
       <div style="display:flex;gap:6px;align-items:center">
         ${(v.review_history||[]).length ? `<button class="btn btn-sm btn-outline" onclick="window._devShowReviewHistory('${v.id}')" style="font-size:10px">📜 校正歷程</button>` : ''}
@@ -12031,6 +12034,191 @@ window._devShowReviewHistory = function(variantId) {
     <button class="btn btn-sm btn-primary" style="margin-top:10px;width:100%" onclick="window._devMarkVariantOk('${v.id}')">✅ 校正完成 · 重新標為通過</button>` : ''}
   `, [
     { label:'關閉', onclick: closeModal },
+  ]);
+};
+
+// 批次發/補圖號 - 給一次有很多未發號品相的專案用
+window._devBatchIssueNumbers = async function(projectId) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const pending = (p.dev_variants||[]).filter(v => !v.cancelled_at && !v.design_number);
+  if (!pending.length) { showToast('沒有待發圖號的品相','info'); return; }
+
+  const today = _localToday();
+  const todayStr = today.replace(/-/g,'');
+
+  showModal(`🔢 批次發/補圖號 · ${pending.length} 個品相`, `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.7">
+      下面列出要發號的品相(依建立順序)。選一種方式:
+    </div>
+    <div class="tabs" style="margin-bottom:12px">
+      <div class="tab active" onclick="document.querySelectorAll('.bi-mode').forEach(e=>e.style.display='none');document.getElementById('bi-auto').style.display='block';document.querySelectorAll('.tabs .tab').forEach(e=>e.classList.remove('active'));this.classList.add('active')">自動產號</div>
+      <div class="tab" onclick="document.querySelectorAll('.bi-mode').forEach(e=>e.style.display='none');document.getElementById('bi-manual').style.display='block';document.querySelectorAll('.tabs .tab').forEach(e=>e.classList.remove('active'));this.classList.add('active')">手動填入</div>
+    </div>
+
+    <div id="bi-auto" class="bi-mode" style="display:block">
+      <div class="form-group">
+        <label>起始日期</label>
+        <input type="date" class="form-control" id="bi-date" value="${today}">
+      </div>
+      <div style="padding:10px;background:#f5f5f5;border-radius:6px;font-size:12px;line-height:1.7">
+        系統會依「選擇日期 + 當日下一個序號」自動發號 × ${pending.length}<br>
+        例:${todayStr}01 · ${todayStr}02 · ${todayStr}03 ...
+      </div>
+    </div>
+
+    <div id="bi-manual" class="bi-mode" style="display:none">
+      <div class="form-group">
+        <label>手動輸入每筆圖號(依品相順序 · 一行一個)</label>
+        <textarea class="form-control" id="bi-nums" rows="12" style="font-family:monospace;font-size:12px" placeholder="${pending.map((v,i)=>`${todayStr}${String(i+1).padStart(2,'0')}  ← ${v.name}`).join('\n')}"></textarea>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">
+          每行一個 10 碼數字 · 空行會對應跳過該品相不發
+        </div>
+      </div>
+    </div>
+
+    <div style="margin-top:14px;padding-top:10px;border-top:1px solid var(--border)">
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">待發號品相:</div>
+      <div style="max-height:150px;overflow-y:auto;font-size:11px;line-height:1.8">
+        ${pending.map((v,i)=>`<div><span style="color:var(--muted);font-family:monospace">${i+1}.</span> ${v.name}</div>`).join('')}
+      </div>
+    </div>
+  `, [
+    { label:'發號', primary:true, onclick: async () => {
+      const mode = document.getElementById('bi-auto').style.display !== 'none' ? 'auto' : 'manual';
+      let assignments = [];
+
+      if (mode === 'auto') {
+        const date = document.getElementById('bi-date').value || today;
+        const datePref = date.replace(/-/g,'');
+        // 找當日已發到的最大序號
+        const { data: existing } = await db.from('design_numbers').select('seq').eq('date', date).is('voided_at', null).order('seq', { ascending: false }).limit(1);
+        let nextSeq = (existing?.[0]?.seq || 0) + 1;
+        assignments = pending.map(v => ({
+          variant: v,
+          number: datePref + String(nextSeq++).padStart(2,'0'),
+          date,
+          seq: nextSeq - 1,
+        }));
+      } else {
+        const raw = document.getElementById('bi-nums').value;
+        const lines = raw.split(/\r?\n/).map(s => s.trim());
+        if (!lines.length) { showToast('請輸入圖號','error'); return; }
+        // 格式檢查 + 分配
+        for (let i = 0; i < pending.length; i++) {
+          const num = lines[i] || '';
+          if (!num) continue; // 空行 → 這筆跳過
+          if (!/^\d{10}$/.test(num)) { showToast(`第 ${i+1} 筆「${num}」格式錯誤,需 10 碼數字`, 'error'); return; }
+          assignments.push({
+            variant: pending[i],
+            number: num,
+            date: `${num.slice(0,4)}-${num.slice(4,6)}-${num.slice(6,8)}`,
+            seq: parseInt(num.slice(8,10)),
+          });
+        }
+      }
+
+      if (!assignments.length) { showToast('沒有要發的號','error'); return; }
+
+      // 檢查全系統重複
+      const allNums = assignments.map(a => a.number);
+      const { data: dups } = await db.from('design_numbers').select('number, variant_name').in('number', allNums).is('voided_at', null);
+      if (dups?.length) {
+        const dupList = dups.map(d => `${d.number} 已被 ${d.variant_name||'(未知)'} 使用`).join('\n');
+        showToast(`圖號重複:\n${dupList}`, 'error', 8000);
+        return;
+      }
+
+      // 批次 insert
+      const inserts = assignments.map(a => ({
+        number: a.number,
+        date: a.date,
+        seq: a.seq,
+        project_id: p.id,
+        variant_name: a.variant.name,
+        series_name: p.name,
+        designer_id: state.user?.id || null,
+        designer_name: state.profile?.name || '',
+        note: mode === 'auto' ? '批次自動發號' : '批次手動補登',
+      }));
+      const { data: inserted, error } = await db.from('design_numbers').insert(inserts).select();
+      if (error) { showToast('發號失敗:'+error.message,'error'); return; }
+
+      // 更新 dev_variants
+      for (let i = 0; i < inserted.length; i++) {
+        await db.from('dev_variants').update({
+          design_number_id: inserted[i].id,
+          design_number: inserted[i].number,
+        }).eq('id', assignments[i].variant.id);
+      }
+
+      showToast(`✓ 已發 ${inserted.length} 個圖號`);
+      closeModal();
+      await loadDev();
+      await loadDesignNumbers();
+      renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
+  ], { wide: true });
+};
+
+// 手動輸入/修改單筆圖號(通常用於既有專案補登)
+window._devEditDesignNumber = async function(variantId) {
+  const p = state.data.dev.find(x => x.dev_variants?.some(v => v.id === variantId));
+  const v = p?.dev_variants?.find(x => x.id === variantId);
+  if (!v) return;
+  const current = v.design_number || '';
+  showModal(`🔢 設計圖號 · ${v.name}`, `
+    <div class="form-group">
+      <label>圖號(格式 YYYYMMDDNN · 10 碼數字)</label>
+      <input class="form-control" id="dn-num" value="${current}" placeholder="例:2026101801" style="font-family:monospace;font-size:14px;letter-spacing:1px">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">
+        前 8 碼 = 日期 · 後 2 碼 = 當日序號 · 全系統不可重複
+      </div>
+    </div>
+    ${v.design_number_id ? `<div style="padding:8px 10px;background:#fff3e0;border-radius:6px;font-size:12px;color:#e65100">⚠ 這個品相原本已有圖號 ${v.design_number} · 改了會覆蓋原記錄(作廢舊號)</div>` : ''}
+  `, [
+    { label:'儲存', primary:true, onclick: async () => {
+      const num = document.getElementById('dn-num').value.trim();
+      if (!/^\d{10}$/.test(num)) { showToast('圖號格式錯誤,需要 10 碼數字','error'); return; }
+
+      // 檢查是否已被用
+      const { data: dup } = await db.from('design_numbers').select('id, variant_name').eq('number', num).is('voided_at', null).maybeSingle();
+      if (dup && dup.id !== v.design_number_id) {
+        showToast(`這個圖號已被使用:${dup.variant_name||'(未知品相)'}`, 'error', 5000);
+        return;
+      }
+
+      const date = `${num.slice(0,4)}-${num.slice(4,6)}-${num.slice(6,8)}`;
+      const seq = parseInt(num.slice(8,10));
+
+      // 作廢舊號(若有)
+      if (v.design_number_id) {
+        await db.from('design_numbers').update({ voided_at: new Date().toISOString(), void_reason: '手動覆蓋' }).eq('id', v.design_number_id);
+      }
+
+      // 建新號
+      const { data: dn, error } = await db.from('design_numbers').insert({
+        number: num,
+        date,
+        seq,
+        project_id: p.id,
+        variant_name: v.name,
+        series_name: p.name,
+        designer_id: state.user?.id || null,
+        designer_name: state.profile?.name || '',
+        note: '手動補登',
+      }).select().single();
+      if (error) { showToast('發號失敗:'+error.message,'error'); return; }
+
+      await db.from('dev_variants').update({ design_number_id: dn.id, design_number: num }).eq('id', v.id);
+      showToast(`✓ 已登 ${num}`);
+      closeModal();
+      await loadDev();
+      await loadDesignNumbers();
+      renderApp();
+    }},
+    { label:'取消', onclick: closeModal },
   ]);
 };
 
