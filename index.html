@@ -32403,8 +32403,8 @@ window.openPurchaseModal = async function(id) {
       <div class="form-group"><label>申請人</label>
         <input class="form-control" id="pu-requester" value="${r.requester_name||''}" ${r.id?'disabled':''}>
       </div>
-      <div class="form-group"><label>申請日期</label>
-        <input type="date" class="form-control" id="pu-date" value="${r.request_date||_localToday()}">
+      <div class="form-group"><label>申請日期 ${!isAdminOnly?'<span style="font-size:11px;color:var(--muted);font-weight:400">(只有老闆可改)</span>':''}</label>
+        <input type="date" class="form-control" id="pu-date" value="${r.request_date||_localToday()}" ${isAdminOnly?'':'disabled style="background:#f5f5f5;cursor:not-allowed"'}>
       </div>
       <div class="form-group"><label>類別</label>
         <select class="form-control" id="pu-category">
@@ -32513,7 +32513,13 @@ window._puCollect = function(existing) {
     request_no: existing?.request_no || `PR-${new Date().toISOString().slice(0,10).replace(/-/g,'')}-${String(Math.floor(Math.random()*900)+100)}`,
     requester_id: existing?.requester_id || state.user?.id || null,
     requester_name: existing?.requester_name || state.profile?.name || state.user?.email || '',
-    request_date: document.getElementById('pu-date')?.value || _localToday(),
+    // 申請日期:非老闆一律用「申請當天」(新建)或既有日期(編輯),不能被前端覆寫
+    request_date: (() => {
+      const _ep2 = effectiveProfile() || {};
+      const amAdmin = _ep2.role === 'admin' || _ep2.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
+      if (amAdmin) return document.getElementById('pu-date')?.value || _localToday();
+      return existing?.request_date || _localToday();
+    })(),
     category: document.getElementById('pu-category')?.value || null,
     item_name: document.getElementById('pu-item')?.value.trim() || null,
     batch_no: document.getElementById('pu-batch')?.value.trim() || null,
