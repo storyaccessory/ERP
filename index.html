@@ -31864,6 +31864,8 @@ function renderPurchases() {
               <td><span style="background:${catColor[r.category]||'#f5f5f5'};color:${catText[r.category]||'#666'};padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600">${r.category||'—'}</span></td>
               <td style="cursor:pointer" onclick="window.openPurchaseModal('${r.id}')">
                 <div style="font-size:13px;font-weight:600">${r.item_name}</div>
+                ${r.variant_name?`<div style="font-size:11px;color:#6a1b9a;margin-top:1px">🏷 ${r.variant_name}</div>`:''}
+                ${r.batch_no?`<div style="font-size:11px;color:#1565c0;margin-top:1px">📦 批次:${r.batch_no}</div>`:''}
                 ${r.notes?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${r.notes}</div>`:''}
                 ${r.reference_link?`<a href="${r.reference_link}" target="_blank" onclick="event.stopPropagation()" style="font-size:11px;color:var(--accent)">🔗 連結</a>`:''}
               </td>
@@ -32226,6 +32228,20 @@ window.openPurchaseModal = async function(id) {
       <div id="pu-item-drop" style="display:none;position:absolute;z-index:200;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:6px;max-height:280px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15);margin-top:2px"></div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
+      <div class="form-group" style="position:relative"><label>品相 / 商品 <span style="font-size:11px;color:var(--muted);font-weight:400">(可空,從商品資料庫找或自行輸入)</span></label>
+        <input class="form-control" id="pu-variant" autocomplete="off" value="${(r.variant_name||'').replace(/"/g,'&quot;')}" placeholder="例:Kuromi繁花_項鍊" list="pu-variant-list">
+        <datalist id="pu-variant-list">
+          ${(state.data.products||[]).slice(0, 300).map(p => `<option value="${(p.name||'').replace(/"/g,'&quot;')}">`).join('')}
+        </datalist>
+      </div>
+      <div class="form-group"><label>採購批次 <span style="font-size:11px;color:var(--muted);font-weight:400">(自訂編號,方便追蹤)</span></label>
+        <input class="form-control" id="pu-batch" value="${(r.batch_no||'').replace(/"/g,'&quot;')}" placeholder="例:2026-11-A / Kuromi首批" list="pu-batch-list">
+        <datalist id="pu-batch-list">
+          ${[...new Set((state.data.purchases||[]).map(x => x.batch_no).filter(Boolean))].slice(0, 50).map(b => `<option value="${b}">`).join('')}
+        </datalist>
+      </div>
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group"><label>預計採購數量</label>
         <input class="form-control" id="pu-expected" value="${(r.expected_qty||'').replace(/"/g,'&quot;')}" placeholder="支援文字,如 100 或 藍*5 粉*3">
       </div>
@@ -32317,6 +32333,8 @@ window._puCollect = function(existing) {
     request_date: document.getElementById('pu-date')?.value || _localToday(),
     category: document.getElementById('pu-category')?.value || null,
     item_name: document.getElementById('pu-item')?.value.trim() || null,
+    variant_name: document.getElementById('pu-variant')?.value.trim() || null,
+    batch_no: document.getElementById('pu-batch')?.value.trim() || null,
     expected_qty: document.getElementById('pu-expected')?.value.trim() || null,
     current_stock: document.getElementById('pu-stock')?.value.trim() || null,
     reference_link: document.getElementById('pu-link')?.value.trim() || null,
