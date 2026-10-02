@@ -13495,8 +13495,8 @@ window._devUpdateCustomStep = function(pipeline, key, field, value) {
   const d = state.data._devDraft;
   const step = d.customSteps?.[pipeline]?.find(s => s.key === key);
   if (!step) return;
-  if (field === 'name') step.name = value;
-  else if (field === 'days') step.days = parseInt(value) || 1;
+  if (field === 'name') { step.name = value; return; }  // 文字輸入:只更新資料,不 rerender(避免輸入框被重建、焦點掉)
+  if (field === 'days') step.days = parseInt(value) || 1;
   else if (field === 'due_date') step.expected_date = value;
   else if (field === 'assignee') {
     const el = typeof value === 'object' ? value : null;
@@ -24708,14 +24708,15 @@ window.postageExportXlsx = function() {
   const recMap = {}; records.forEach(r => { recMap[r.date] = r; });
 
   // 先算月合計
-  let totalCash = 0, totalPostal = 0, totalFM = 0, total711 = 0;
+  let totalCash = 0, totalPostal = 0, totalFM = 0, total711 = 0, totalOther = 0;
   records.forEach(r => {
     totalCash += r.cash_received || 0;
     totalPostal += r.postal_amount || 0;
     totalFM += r.familymart_amount || 0;
     total711 += r.seveneleven_amount || 0;
+    totalOther += r.other_amount || 0;
   });
-  const totalExpense = totalPostal + totalFM + total711;
+  const totalExpense = totalPostal + totalFM + total711 + totalOther;
   const balance = totalCash - totalExpense;
 
   // 建工作表(rows 為二維陣列)
@@ -24724,12 +24725,13 @@ window.postageExportXlsx = function() {
   rows.push([`列印日期:${_localToday()}`]);
   rows.push([]);
   // 月統計摘要
-  rows.push(['📊 月統計摘要']);
-  rows.push(['取現金合計', totalCash, '', '郵局支出', totalPostal, '', '全家支出', totalFM, '']);
-  rows.push(['7-11 支出', total711, '', '總支出', totalExpense, '', '餘額', balance, '']);
+  rows.push(['月統計摘要']);
+  rows.push(['取現金合計', totalCash, '', '郵局支出', totalPostal, '', '全家支出', totalFM, '', '']);
+  rows.push(['7-11 支出', total711, '', '其他支出', totalOther, '', '總支出', totalExpense, '', '']);
+  rows.push(['餘額', balance]);
   rows.push([]);
-  rows.push(['📅 每日明細']);
-  rows.push(['日期','星期','取現金','郵局','全家發票','全家金額','7-11發票','7-11金額','剩餘餘額']);
+  rows.push(['每日明細']);
+  rows.push(['日期','星期','取現金','郵局','全家發票','全家金額','7-11發票','7-11金額','其他備註','其他金額','剩餘餘額']);
 
   let bal = 0;
   for (let i = 1; i <= daysInMonth; i++) {
@@ -24743,22 +24745,24 @@ window.postageExportXlsx = function() {
     const fmAmt = r?.familymart_amount || 0;
     const s11Inv = r?.seveneleven_invoice || '';
     const s11Amt = r?.seveneleven_amount || 0;
-    const expense = postal + fmAmt + s11Amt;
+    const otherNote = r?.other_note || '';
+    const otherAmt = r?.other_amount || 0;
+    const expense = postal + fmAmt + s11Amt + otherAmt;
     bal += cash - expense;
-    rows.push([i, dow, cash || '', postal || '', fmInv, fmAmt || '', s11Inv, s11Amt || '', bal]);
+    rows.push([i, dow, cash || '', postal || '', fmInv, fmAmt || '', s11Inv, s11Amt || '', otherNote, otherAmt || '', bal]);
   }
   rows.push([]);
-  rows.push(['月合計','',totalCash, totalPostal, '', totalFM, '', total711, balance]);
+  rows.push(['月合計','',totalCash, totalPostal, '', totalFM, '', total711, '', totalOther, balance]);
 
   const ws = XLSX.utils.aoa_to_sheet(rows);
   // 欄寬
-  ws['!cols'] = [{wch:6},{wch:6},{wch:10},{wch:10},{wch:15},{wch:10},{wch:15},{wch:10},{wch:12}];
+  ws['!cols'] = [{wch:6},{wch:6},{wch:10},{wch:10},{wch:15},{wch:10},{wch:15},{wch:10},{wch:24},{wch:10},{wch:12}];
   // 合併儲存格(標題橫跨所有欄)
   ws['!merges'] = [
-    {s:{r:0,c:0},e:{r:0,c:8}},  // 大標題
-    {s:{r:1,c:0},e:{r:1,c:8}},  // 列印日期
-    {s:{r:3,c:0},e:{r:3,c:8}},  // 📊 月統計摘要
-    {s:{r:7,c:0},e:{r:7,c:8}},  // 📅 每日明細
+    {s:{r:0,c:0},e:{r:0,c:10}},  // 大標題
+    {s:{r:1,c:0},e:{r:1,c:10}},  // 列印日期
+    {s:{r:3,c:0},e:{r:3,c:10}},  // 月統計摘要
+    {s:{r:8,c:0},e:{r:8,c:10}},  // 每日明細
   ];
 
   const wb = XLSX.utils.book_new();
@@ -24779,7 +24783,8 @@ function renderPostage() {
   const totalPostal = records.reduce((s,r)=>s+(r.postal_amount||0),0);
   const totalFM = records.reduce((s,r)=>s+(r.familymart_amount||0),0);
   const total711 = records.reduce((s,r)=>s+(r.seveneleven_amount||0),0);
-  const totalExpense = totalPostal + totalFM + total711;
+  const totalOther = records.reduce((s,r)=>s+(r.other_amount||0),0);
+  const totalExpense = totalPostal + totalFM + total711 + totalOther;
   const balance = totalCash - totalExpense;
 
   return `
@@ -24805,6 +24810,7 @@ function renderPostage() {
         { label:'郵局支出',   val: totalPostal, color:'#c62828', bg:'#ffebee' },
         { label:'全家支出',   val: totalFM,     color:'#388e3c', bg:'#e8f5e9' },
         { label:'7-11 支出',  val: total711,    color:'#f57c00', bg:'#fff3e0' },
+        { label:'其他支出',   val: totalOther,  color:'#5e35b1', bg:'#ede7f6' },
         { label:'總支出',     val: totalExpense, color:'#6a1b9a', bg:'#f3e5f5' },
         { label:'餘額',       val: balance, color: balance>=0?'#2e7d32':'#c62828', bg: balance>=0?'#e8f5e9':'#ffebee' },
       ].map(s=>`
@@ -24835,7 +24841,7 @@ function renderPostage() {
         const isPast = dateStr < today || (dateStr === today);
         const isFuture = dateStr > today;
         const cashIn = r?.cash_received || 0;
-        const expense = r ? ((r.postal_amount||0)+(r.familymart_amount||0)+(r.seveneleven_amount||0)) : 0;
+        const expense = r ? ((r.postal_amount||0)+(r.familymart_amount||0)+(r.seveneleven_amount||0)+(r.other_amount||0)) : 0;
         // 累計餘額(當日結束後剩多少零用金)
         runningBalance += cashIn - expense;
         const balColor = runningBalance < 0 ? '#c62828' : (runningBalance < 200 ? '#f57c00' : '#2e7d32');
@@ -24854,7 +24860,7 @@ function renderPostage() {
           <td style="padding:5px 8px;border:1px solid var(--border);white-space:nowrap;font-weight:600;color:${dateColor}">
             ${day}<span style="font-size:10px;color:var(--muted);margin-left:3px">(${DAY_ZH[dow]})</span>
             ${isMissing ? '<span style="font-size:10px;background:#f57c00;color:#fff;padding:1px 5px;border-radius:8px;margin-left:4px">未填</span>' : ''}
-            ${r && (r.familymart_image_url || r.seveneleven_image_url) ? '<span style="font-size:10px;margin-left:3px" title="有發票照片">📎</span>' : ''}
+            ${r && (r.familymart_image_url || r.seveneleven_image_url || r.other_image_url) ? '<span style="font-size:10px;margin-left:3px" title="有發票照片">📎</span>' : ''}
           </td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#1565c0;font-weight:${r?.cash_received?'700':'400'}">${r?.cash_received ? r.cash_received.toLocaleString() : '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#c62828;font-weight:${r?.postal_amount?'700':'400'}">${r?.postal_amount ? r.postal_amount.toLocaleString() : '—'}</td>
@@ -24862,23 +24868,27 @@ function renderPostage() {
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#388e3c;font-weight:${r?.familymart_amount?'700':'400'}">${r?.familymart_amount ? r.familymart_amount.toLocaleString() : '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:center;font-family:monospace;font-size:11px;color:#f57c00">${r?.seveneleven_invoice || '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#f57c00;font-weight:${r?.seveneleven_amount?'700':'400'}">${r?.seveneleven_amount ? r.seveneleven_amount.toLocaleString() : '—'}</td>
+          <td style="padding:5px 6px;border:1px solid var(--border);text-align:left;font-size:11px;color:#5e35b1" title="${(r?.other_note||'').replace(/"/g,'&quot;')}">${r?.other_note ? `<span style="display:inline-block;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">${r.other_note}</span>` : '—'}${r?.other_image_url?' 📎':''}</td>
+          <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#5e35b1;font-weight:${r?.other_amount?'700':'400'}">${r?.other_amount ? r.other_amount.toLocaleString() : '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:${balColor};font-weight:700;background:${showBal?balBg:''}" title="累計取現 − 累計支出">${showBal ? runningBalance.toLocaleString() : '—'}</td>
         </tr>`;
       }).join('');
 
       return `<div class="card" style="padding:8px">
         <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:900px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px">
             <thead>
               <tr style="background:var(--surface)">
                 <th style="padding:6px 8px;border:1px solid var(--border);text-align:left;white-space:nowrap;min-width:80px">日期</th>
                 <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#1565c0;min-width:80px">取現金</th>
                 <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#c62828;min-width:80px">郵局</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#388e3c;min-width:110px">🟢 全家發票</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#388e3c;min-width:110px">全家發票</th>
                 <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#388e3c;min-width:80px">全家 $</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#f57c00;min-width:110px">🟠 7-11 發票</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#f57c00;min-width:110px">7-11 發票</th>
                 <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#f57c00;min-width:80px">7-11 $</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#2e7d32;background:#e8f5e9;min-width:90px" title="累計取現 − 累計支出 = 當日結束時零用金剩餘">💰 剩餘餘額</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#5e35b1;min-width:150px">其他(順風/快遞…)</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#5e35b1;min-width:80px">其他 $</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#2e7d32;background:#e8f5e9;min-width:90px" title="累計取現 − 累計支出 = 當日結束時零用金剩餘">剩餘餘額</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
@@ -24891,6 +24901,8 @@ function renderPostage() {
                 <td style="padding:6px;border:1px solid var(--border);text-align:right;color:#388e3c">${totalFM.toLocaleString()}</td>
                 <td style="padding:6px;border:1px solid var(--border)"></td>
                 <td style="padding:6px;border:1px solid var(--border);text-align:right;color:#f57c00">${total711.toLocaleString()}</td>
+                <td style="padding:6px;border:1px solid var(--border)"></td>
+                <td style="padding:6px;border:1px solid var(--border);text-align:right;color:#5e35b1">${totalOther.toLocaleString()}</td>
                 <td style="padding:6px;border:1px solid var(--border);text-align:right;color:${balance<0?'#c62828':'#2e7d32'};background:${balance<0?'#ffebee':'#e8f5e9'};font-size:14px" title="月底剩餘 = 總取現 ${totalCash.toLocaleString()} − 總支出 ${totalExpense.toLocaleString()}">${balance.toLocaleString()}</td>
               </tr>
             </tfoot>
@@ -24962,6 +24974,22 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
       </div>
       ${existing?.seveneleven_image_url ? `<img id="pe-711-preview" src="${existing.seveneleven_image_url}" style="height:80px;margin-top:6px;border-radius:6px;display:block;cursor:pointer" onclick="window.open('${existing.seveneleven_image_url}','_blank')">` : `<img id="pe-711-preview" style="height:80px;margin-top:6px;border-radius:6px;display:none;cursor:pointer">`}
     </div>
+    <div style="background:#ede7f6;border-radius:8px;padding:12px;margin-bottom:12px;border:1px solid #d1c4e9">
+      <div style="font-size:13px;font-weight:600;margin-bottom:8px;color:#5e35b1">其他(順風、快遞、宅配…)</div>
+      <div class="form-group">
+        <label>備註 <span style="color:var(--muted);font-size:11px;font-weight:400">(例:順風寄客人、黑貓宅配、快遞到台北門市)</span></label>
+        <input class="form-control" id="pe-other-note" placeholder="說明這筆支出用途" value="${(existing?.other_note||'').replace(/"/g,'&quot;')}">
+      </div>
+      <div class="form-group">
+        <label>金額</label>
+        <input class="form-control" type="number" min="0" id="pe-other-amt" placeholder="0" value="${existing?.other_amount||''}">
+      </div>
+      <div class="form-group">
+        <label>發票 / 收據拍照</label>
+        <input type="file" id="pe-other-img" accept="image/*" capture="environment" onchange="window._peOtherImgPick(this)" class="form-control" style="padding:6px">
+      </div>
+      ${existing?.other_image_url ? `<img id="pe-other-preview" src="${existing.other_image_url}" style="height:80px;margin-top:6px;border-radius:6px;display:block;cursor:pointer" onclick="window.open('${existing.other_image_url}','_blank')">` : `<img id="pe-other-preview" style="height:80px;margin-top:6px;border-radius:6px;display:none;cursor:pointer">`}
+    </div>
   `, [
     { label: existing ? '儲存' : '新增', primary: true, onclick: async () => {
       const date    = document.getElementById('pe-date').value;
@@ -24971,10 +24999,13 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
       const fmAmt   = parseInt(document.getElementById('pe-fm-amt').value)||0;
       const s11Inv  = document.getElementById('pe-711-inv').value.trim().toUpperCase();
       const s11Amt  = parseInt(document.getElementById('pe-711-amt').value)||0;
+      const otherAmt  = parseInt(document.getElementById('pe-other-amt')?.value)||0;
+      const otherNote = (document.getElementById('pe-other-note')?.value||'').trim() || null;
 
       // 上傳智慧拍照的圖片(依 AI 判斷的 side 決定要塞到 fm 或 711)
       let fmUrl = existing?.familymart_image_url || null;
       let s11Url = existing?.seveneleven_image_url || null;
+      let otherUrl = existing?.other_image_url || null;
       if (window._peCvsFile && window._peCvsType) {
         const filename = `${date}_${window._peCvsType}_${Date.now()}.jpg`;
         const { error: upErr } = await db.storage.from('postage-invoices').upload(filename, window._peCvsFile, { contentType:'image/jpeg', upsert:true });
@@ -24986,6 +25017,17 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
         // 清掉暫存
         window._peCvsFile = null; window._peCvsType = null;
       }
+      // 其他:若有選檔案就壓縮上傳
+      if (window._peOtherFile) {
+        const compressed = await window._compressImage(window._peOtherFile, 50);
+        const filename = `${date}_other_${Date.now()}.jpg`;
+        const { error: upErr } = await db.storage.from('postage-invoices').upload(filename, compressed, { contentType:'image/jpeg', upsert:true });
+        if (!upErr) {
+          const { data: urlData } = db.storage.from('postage-invoices').getPublicUrl(filename);
+          otherUrl = urlData?.publicUrl || otherUrl;
+        }
+        window._peOtherFile = null;
+      }
 
       // 若不是編輯模式,或日期被 AI 改了,先查 DB 該日是否已有紀錄
       let targetExisting = existing;
@@ -24995,7 +25037,9 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
       }
 
       // 合併邏輯:如果該日已有紀錄,只覆蓋有值的欄位(避免清空原本資料)
-      const payload = targetExisting ? {
+      // 編輯模式(existing 本身):空值也要寫入,讓使用者可以清空欄位
+      const inEdit = !!existing && targetExisting?.id === existing.id;
+      const payload = targetExisting && !inEdit ? {
         date,
         cash_received: cash || targetExisting.cash_received || 0,
         postal_amount: postal || targetExisting.postal_amount || 0,
@@ -25005,12 +25049,16 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
         seveneleven_invoice: s11Inv || targetExisting.seveneleven_invoice || null,
         seveneleven_amount: s11Amt || targetExisting.seveneleven_amount || 0,
         seveneleven_image_url: s11Url || targetExisting.seveneleven_image_url || null,
+        other_amount: otherAmt || targetExisting.other_amount || 0,
+        other_note: otherNote || targetExisting.other_note || null,
+        other_image_url: otherUrl || targetExisting.other_image_url || null,
       } : {
         date, cash_received: cash, postal_amount: postal,
         familymart_invoice: fmInv||null, familymart_amount: fmAmt,
         familymart_image_url: fmUrl,
         seveneleven_invoice: s11Inv||null, seveneleven_amount: s11Amt,
         seveneleven_image_url: s11Url,
+        other_amount: otherAmt, other_note: otherNote, other_image_url: otherUrl,
       };
       let dbErr;
       if (targetExisting) {
@@ -25037,6 +25085,16 @@ window.modalAddPostage = async function(editId = null, prefillDate = null) {
 // ── 舊 _peOCR 保留(相容),新增 _peSmartOCR:AI 自動判斷店家 ──
 window._peOCR = async function(input, type) {
   // (舊功能保留 for backward compat,實務用 _peSmartOCR)
+};
+
+// 其他發票照片:選檔後暫存 + 顯示預覽
+window._peOtherImgPick = function(input) {
+  const file = input.files && input.files[0];
+  if (!file) return;
+  window._peOtherFile = file;
+  const url = URL.createObjectURL(file);
+  const prev = document.getElementById('pe-other-preview');
+  if (prev) { prev.src = url; prev.style.display = 'block'; }
 };
 
 // ── 快速拍照(頁面級):AI 判斷日期+店家+金額 → 自動塞到對應天 ──
