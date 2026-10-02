@@ -24868,7 +24868,7 @@ function renderPostage() {
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#388e3c;font-weight:${r?.familymart_amount?'700':'400'}">${r?.familymart_amount ? r.familymart_amount.toLocaleString() : '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:center;font-family:monospace;font-size:11px;color:#f57c00">${r?.seveneleven_invoice || '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#f57c00;font-weight:${r?.seveneleven_amount?'700':'400'}">${r?.seveneleven_amount ? r.seveneleven_amount.toLocaleString() : '—'}</td>
-          <td style="padding:5px 6px;border:1px solid var(--border);text-align:left;font-size:11px;color:#5e35b1" title="${(r?.other_note||'').replace(/"/g,'&quot;')}">${r?.other_note ? `<span style="display:inline-block;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:middle">${r.other_note}</span>` : '—'}${r?.other_image_url?' 📎':''}</td>
+          <td style="padding:5px 6px;border:1px solid var(--border);text-align:left;font-size:11px;color:#5e35b1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r?.other_note||'').replace(/"/g,'&quot;')}">${r?.other_note || '—'}${r?.other_image_url?' 📎':''}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:#5e35b1;font-weight:${r?.other_amount?'700':'400'}">${r?.other_amount ? r.other_amount.toLocaleString() : '—'}</td>
           <td style="padding:5px 6px;border:1px solid var(--border);text-align:right;color:${balColor};font-weight:700;background:${showBal?balBg:''}" title="累計取現 − 累計支出">${showBal ? runningBalance.toLocaleString() : '—'}</td>
         </tr>`;
@@ -24876,19 +24876,19 @@ function renderPostage() {
 
       return `<div class="card" style="padding:8px">
         <div style="overflow-x:auto">
-          <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px">
+          <table style="width:100%;border-collapse:collapse;font-size:12px;min-width:1100px;table-layout:fixed">
             <thead>
               <tr style="background:var(--surface)">
-                <th style="padding:6px 8px;border:1px solid var(--border);text-align:left;white-space:nowrap;min-width:80px">日期</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#1565c0;min-width:80px">取現金</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#c62828;min-width:80px">郵局</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#388e3c;min-width:110px">全家發票</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#388e3c;min-width:80px">全家 $</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#f57c00;min-width:110px">7-11 發票</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#f57c00;min-width:80px">7-11 $</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#5e35b1;min-width:150px">其他(順風/快遞…)</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#5e35b1;min-width:80px">其他 $</th>
-                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#2e7d32;background:#e8f5e9;min-width:90px" title="累計取現 − 累計支出 = 當日結束時零用金剩餘">剩餘餘額</th>
+                <th style="padding:6px 8px;border:1px solid var(--border);text-align:left;white-space:nowrap;width:10%">日期</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#1565c0;width:10%">取現金</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#c62828;width:10%">郵局</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#388e3c;width:10%">全家發票</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#388e3c;width:10%">全家 $</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#f57c00;width:10%">7-11 發票</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#f57c00;width:10%">7-11 $</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:center;color:#5e35b1;width:10%">其他</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#5e35b1;width:10%">其他 $</th>
+                <th style="padding:6px;border:1px solid var(--border);text-align:right;color:#2e7d32;background:#e8f5e9;width:10%" title="累計取現 − 累計支出 = 當日結束時零用金剩餘">剩餘餘額</th>
               </tr>
             </thead>
             <tbody>${rows}</tbody>
