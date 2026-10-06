@@ -32911,26 +32911,40 @@ window.openPurchaseBatchModal = function() {
     const parts = (state.data.parts||[]).slice().sort((a,b)=>(a.category||'').localeCompare(b.category||'','zh-TW') || (a.name||'').localeCompare(b.name||'','zh-TW'));
     if (!parts.length) { showToast('沒有零件資料,請先到零件管理新增','info'); return; }
     window._pubPartsFilter = '';
+    // 已挑選列表 render(頂部提示列)
+    window._pubPickedRender = () => {
+      const rows = (state.data._puBatchRows || []).filter(r => r.part_id);
+      if (!rows.length) {
+        return `<div style="padding:10px 14px;background:#f5f5f5;border-radius:6px;color:var(--muted);font-size:12px">尚未挑選任何零件</div>`;
+      }
+      return `<div style="padding:10px 14px;background:#e8f5e9;border:1px solid #a5d6a7;border-radius:6px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">
+          <span style="font-weight:700;color:#2e7d32;font-size:13px">✓ 已挑選 ${rows.length} 筆</span>
+          <button class="btn btn-sm" onclick="window._pubFinishPicking()" style="background:#2e7d32;color:#fff;border:none;padding:4px 12px;font-size:12px;font-weight:700">✓ 完成,前往批次單 →</button>
+        </div>
+        <div style="display:flex;flex-wrap:wrap;gap:4px">
+          ${rows.map(r => `<span style="display:inline-flex;align-items:center;gap:4px;background:#fff;border:1px solid #a5d6a7;border-radius:12px;padding:2px 8px;font-size:11px;color:#2e7d32">
+            ${r.item_name} × ${r.expected_qty}
+            <button onclick="window._pubRemovePickedPart('${r.part_id}')" style="background:none;border:none;cursor:pointer;color:#c62828;padding:0;font-size:12px;line-height:1" title="移除">✕</button>
+          </span>`).join('')}
+        </div>
+      </div>`;
+    };
     const _render = () => {
-      const q = (window._pubPartsFilter||'').toLowerCase().trim();
-      const filtered = q ? parts.filter(p =>
-        (p.name||'').toLowerCase().includes(q) ||
-        (p.spec||'').toLowerCase().includes(q) ||
-        (p.category||'').toLowerCase().includes(q)
-      ) : parts;
       return `
+        <div id="pub-picked-wrap" style="margin-bottom:10px">${window._pubPickedRender()}</div>
         <input class="form-control" id="pub-part-search" placeholder="🔍 搜尋零件名稱/規格/分類..." autocomplete="off"
           oninput="window._pubPartsFilter=this.value;document.getElementById('pub-part-body').innerHTML=window._pubPartsListRender()"
           oncompositionend="window._pubPartsFilter=this.value;document.getElementById('pub-part-body').innerHTML=window._pubPartsListRender()"
           style="margin-bottom:8px">
-        <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+        <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
           <table style="width:100%;border-collapse:collapse;font-size:12px">
             <thead style="position:sticky;top:0;background:#f5f5f5"><tr>
               <th style="padding:6px;text-align:left;width:90px">分類</th>
               <th style="padding:6px;text-align:left">零件</th>
               <th style="padding:6px;text-align:center;width:60px">現有</th>
               <th style="padding:6px;text-align:center;width:60px">安庫</th>
-              <th style="padding:6px;text-align:center;width:80px"></th>
+              <th style="padding:6px;text-align:center;width:90px"></th>
             </tr></thead>
             <tbody id="pub-part-body">${window._pubPartsListRender()}</tbody>
           </table>
@@ -32945,23 +32959,51 @@ window.openPurchaseBatchModal = function() {
         (p.category||'').toLowerCase().includes(q)
       ) : parts;
       if (!filtered.length) return `<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--muted)">沒有符合的零件</td></tr>`;
-      return filtered.slice(0, 200).map(p => `<tr style="border-top:1px solid #eee">
-        <td style="padding:5px 6px">${p.category||'—'}</td>
-        <td style="padding:5px 6px;font-weight:600">${p.name}${p.spec?`<div style="font-size:10px;color:var(--muted)">${p.spec}</div>`:''}</td>
-        <td style="padding:5px;text-align:center;font-size:12px">${p.stock||0}</td>
-        <td style="padding:5px;text-align:center;font-size:12px">${p.safety_stock||0}</td>
-        <td style="padding:5px;text-align:center">
-          <button class="btn btn-sm btn-primary" style="padding:3px 10px;font-size:11px" onclick="window._pubAddPart('${p.id}')">+ 加入</button>
-        </td>
-      </tr>`).join('');
+      const pickedIds = new Set((state.data._puBatchRows||[]).filter(r => r.part_id).map(r => r.part_id));
+      return filtered.slice(0, 200).map(p => {
+        const picked = pickedIds.has(p.id);
+        return `<tr style="border-top:1px solid #eee;${picked?'background:#f1f8e9':''}">
+          <td style="padding:5px 6px">${p.category||'—'}</td>
+          <td style="padding:5px 6px;font-weight:600">${p.name}${p.spec?`<div style="font-size:10px;color:var(--muted)">${p.spec}</div>`:''}</td>
+          <td style="padding:5px;text-align:center;font-size:12px">${p.stock||0}</td>
+          <td style="padding:5px;text-align:center;font-size:12px">${p.safety_stock||0}</td>
+          <td style="padding:5px;text-align:center">
+            ${picked
+              ? `<button class="btn btn-sm" style="padding:3px 8px;font-size:11px;background:#fff;color:#c62828;border:1px solid #ef9a9a" onclick="window._pubRemovePickedPart('${p.id}')">✕ 移除</button>`
+              : `<button class="btn btn-sm btn-primary" style="padding:3px 10px;font-size:11px" onclick="window._pubAddPart('${p.id}')">+ 加入</button>`}
+          </td>
+        </tr>`;
+      }).join('');
     };
-    // 停止顯示 modal 中的另一組 rendering
     showModal('🔧 從零件庫挑選', _render(), [
-      { label:'關閉', onclick: () => {
+      { label:'✓ 完成,前往批次單', primary:true, onclick: () => window._pubFinishPicking() },
+      { label:'取消', onclick: () => {
         closeModal();
         setTimeout(() => window.openPurchaseBatchModal && window.openPurchaseBatchModal(), 100);
       }},
     ], { width: '900px' });
+  };
+
+  // 完成挑選,回批次單
+  window._pubFinishPicking = function() {
+    closeModal();
+    setTimeout(() => window.openPurchaseBatchModal && window.openPurchaseBatchModal(), 100);
+  };
+
+  // 從挑選清單移除某零件
+  window._pubRemovePickedPart = function(partId) {
+    if (!state.data._puBatchRows) return;
+    state.data._puBatchRows = state.data._puBatchRows.filter(r => r.part_id !== partId);
+    // 若全空了,補一列空白
+    if (!state.data._puBatchRows.length) {
+      state.data._puBatchRows = [{ category:'', item_name:'', expected_qty:'', current_stock:'', reference_link:'', notes:'' }];
+    }
+    // 更新頂部提示列 + 表格
+    const topWrap = document.getElementById('pub-picked-wrap');
+    if (topWrap) topWrap.innerHTML = window._pubPickedRender();
+    const body = document.getElementById('pub-part-body');
+    if (body) body.innerHTML = window._pubPartsListRender();
+    showToast('已移除');
   };
   window._pubAddPart = function(partId) {
     const parts = state.data.parts || [];
@@ -32989,6 +33031,11 @@ window.openPurchaseBatchModal = function() {
     }
     const total = state.data._puBatchRows.length;
     showToast(`已加入 ${p.name}(目前 ${total} 筆)`);
+    // 更新頂部「已挑選」區塊 + 表格按鈕狀態
+    const topWrap = document.getElementById('pub-picked-wrap');
+    if (topWrap && typeof window._pubPickedRender === 'function') topWrap.innerHTML = window._pubPickedRender();
+    const body = document.getElementById('pub-part-body');
+    if (body && typeof window._pubPartsListRender === 'function') body.innerHTML = window._pubPartsListRender();
   };
   window._pubRemove = (i) => {
     if (state.data._puBatchRows.length <= 1) { showToast('至少要有一項','info'); return; }
