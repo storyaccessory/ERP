@@ -32867,7 +32867,10 @@ window._bipPrDoImport = async function() {
 };
 
 window.openPurchaseBatchModal = function() {
-  state.data._puBatchRows = [{ category:'', item_name:'', expected_qty:'', current_stock:'', reference_link:'', notes:'' }];
+  // 若已有暫存列(例如從零件庫挑完回來)就保留;否則給一列空白
+  if (!Array.isArray(state.data._puBatchRows) || !state.data._puBatchRows.length) {
+    state.data._puBatchRows = [{ category:'', item_name:'', expected_qty:'', current_stock:'', reference_link:'', notes:'' }];
+  }
   const _renderRows = () => {
     const rows = state.data._puBatchRows || [];
     return rows.map((r, i) => `
@@ -32967,7 +32970,7 @@ window.openPurchaseBatchModal = function() {
     const shortage = Math.max(1, (p.safety_stock||0) - (p.stock||0));
     // 加到 batch 列表
     if (!state.data._puBatchRows) state.data._puBatchRows = [];
-    state.data._puBatchRows.push({
+    const row = {
       category: '零件',
       item_name: p.name + (p.spec?` (${p.spec})`:''),
       expected_qty: String(shortage),
@@ -32975,8 +32978,17 @@ window.openPurchaseBatchModal = function() {
       reference_link: '',
       notes: '',
       part_id: p.id,
-    });
-    showToast(`已加入 ${p.name}`);
+    };
+    // 若第一列是空白列,直接取代;否則 push
+    const first = state.data._puBatchRows[0];
+    const firstEmpty = first && !first.item_name && !first.expected_qty && !first.part_id;
+    if (firstEmpty && state.data._puBatchRows.length === 1) {
+      state.data._puBatchRows[0] = row;
+    } else {
+      state.data._puBatchRows.push(row);
+    }
+    const total = state.data._puBatchRows.length;
+    showToast(`已加入 ${p.name}(目前 ${total} 筆)`);
   };
   window._pubRemove = (i) => {
     if (state.data._puBatchRows.length <= 1) { showToast('至少要有一項','info'); return; }
@@ -33156,8 +33168,12 @@ window.openPurchaseModal = async function(id) {
     </div>
 
     <div class="form-group" style="position:relative"><label>品項名稱 * <span style="font-size:11px;color:var(--muted);font-weight:400">(輸入關鍵字即時搜尋品項庫)</span></label>
-      <input class="form-control" id="pu-item" autocomplete="off" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱 / 絨布 / K金" oninput="window._puSearchItems(this.value)" onfocus="window._puSearchItems(this.value)" onblur="setTimeout(()=>{const d=document.getElementById('pu-item-drop');if(d) d.style.display='none';},200)">
+      <input class="form-control" id="pu-item" autocomplete="off" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱 / 絨布 / K金" oninput="window._puSearchItems(this.value);window._puUpdateSpecHint(this.value)" onfocus="window._puSearchItems(this.value)" onblur="setTimeout(()=>{const d=document.getElementById('pu-item-drop');if(d) d.style.display='none';},200)">
       <div id="pu-item-drop" style="display:none;position:absolute;z-index:200;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:6px;max-height:280px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15);margin-top:2px"></div>
+      <div id="pu-spec-hint" style="font-size:11px;color:#999;margin-top:4px;padding-left:2px">${(() => {
+        const matched = (state.data.purchaseItems||[]).find(x => x.name === r.item_name);
+        return matched?.spec ? `規格:${matched.spec}` : '';
+      })()}</div>
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group"><label>預計採購數量</label>
@@ -33432,14 +33448,18 @@ window._puSearchItems = function(q) {
   const qs = (q||'').toLowerCase().trim();
   // 沒輸入 → 顯示前 20 個最常用的;有輸入 → 過濾包含關鍵字
   const filtered = qs
-    ? items.filter(it => (it.name||'').toLowerCase().includes(qs) || (it.category||'').toLowerCase().includes(qs)).slice(0, 30)
+    ? items.filter(it =>
+        (it.name||'').toLowerCase().includes(qs) ||
+        (it.category||'').toLowerCase().includes(qs) ||
+        (it.spec||'').toLowerCase().includes(qs)
+      ).slice(0, 30)
     : items.slice(0, 20);
   if (!filtered.length) { drop.style.display = 'none'; return; }
   drop.innerHTML = filtered.map(it => `<div style="padding:7px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center"
     onmouseover="this.style.background='#e0f2f1'" onmouseout="this.style.background=''"
     onmousedown="window._puPickItem('${it.id}')">
     <div style="flex:1">
-      <div style="font-size:13px;font-weight:600">${it.name}</div>
+      <div style="font-size:13px;font-weight:600">${it.name}${it.spec?`<span style="font-size:11px;color:#999;font-weight:400;margin-left:6px">${it.spec}</span>`:''}</div>
       ${it.note?`<div style="font-size:11px;color:var(--muted);margin-top:1px">${it.note}</div>`:''}
     </div>
     <div style="display:flex;align-items:center;gap:6px">
@@ -33507,9 +33527,21 @@ window._puPickItem = function(id) {
   if (itemEl) itemEl.value = it.name;
   if (catEl && it.category) catEl.value = it.category;
   if (linkEl && it.reference_link && !linkEl.value) linkEl.value = it.reference_link;
+  // 更新規格說明提示
+  window._puUpdateSpecHint(it.name);
   // 隱藏下拉
   const drop = document.getElementById('pu-item-drop');
   if (drop) drop.style.display = 'none';
+};
+
+// 依品項名稱更新「規格說明」提示列
+window._puUpdateSpecHint = function(name) {
+  const hint = document.getElementById('pu-spec-hint');
+  if (!hint) return;
+  const n = (name||'').trim();
+  if (!n) { hint.textContent = ''; return; }
+  const matched = (state.data.purchaseItems||[]).find(x => x.name === n);
+  hint.textContent = matched?.spec ? `規格:${matched.spec}` : '';
 };
 
 // 選品項自動帶入類別/連結
