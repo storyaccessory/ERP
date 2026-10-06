@@ -32585,7 +32585,10 @@ function renderPurchases() {
               <td style="font-size:12px">${r.requester_name||'—'}</td>
               <td><span style="background:${catColor[r.category]||'#f5f5f5'};color:${catText[r.category]||'#666'};padding:2px 6px;border-radius:4px;font-size:11px;font-weight:600">${r.category||'—'}</span></td>
               <td style="cursor:pointer" onclick="window.openPurchaseModal('${r.id}')">
-                <div style="font-size:13px;font-weight:600">${r.item_name}</div>
+                <div style="font-size:13px;font-weight:600">${r.item_name}${(() => {
+                  const matched = (state.data.purchaseItems||[]).find(x => x.name === r.item_name);
+                  return matched?.spec ? `<span style="font-size:11px;color:#999;font-weight:400;margin-left:6px">${matched.spec}</span>` : '';
+                })()}</div>
                 ${r.batch_no?`<div style="font-size:11px;color:#1565c0;margin-top:1px">📦 批次:${r.batch_no}</div>`:''}
                 ${r.notes?`<div style="font-size:11px;color:var(--muted);margin-top:2px">${r.notes}</div>`:''}
                 ${r.reference_link?`<a href="${r.reference_link}" target="_blank" onclick="event.stopPropagation()" style="font-size:11px;color:var(--accent)">🔗 連結</a>`:''}
@@ -33650,15 +33653,14 @@ window.openPurchaseItemsAdmin = async function() {
     const cnt = document.getElementById('pi-count');
     if (cnt) cnt.textContent = `共 ${filtered.length} 項`;
     return filtered.length===0
-      ? `<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--muted)">沒有符合的品項</td></tr>`
+      ? `<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--muted)">沒有符合的品項</td></tr>`
       : filtered.map(it => {
         const link = it.reference_link || '';
         const isUrl = /^https?:\/\//i.test(link);
         return `<tr style="border-top:1px solid #eee;${!it.is_active?'opacity:.5':''}">
         <td style="padding:5px 6px">${it.category||'—'}</td>
-        <td style="padding:5px 6px;font-weight:600">${it.name}${it.note?`<div style="font-size:10px;color:var(--muted)">${it.note}</div>`:''}</td>
+        <td style="padding:5px 6px;font-weight:600">${it.name}${it.spec?`<span style="font-size:11px;color:#999;font-weight:400;margin-left:6px">${it.spec}</span>`:''}${it.note?`<div style="font-size:10px;color:var(--muted)">${it.note}</div>`:''}</td>
         <td style="padding:5px 6px;text-align:center;color:var(--muted)">${it.usage_count||0}</td>
-        <td style="padding:5px 6px;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(it.spec||'').replace(/"/g,'&quot;')}">${it.spec||'—'}</td>
         <td style="padding:5px 6px;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
           ${link
             ? (isUrl
@@ -33697,7 +33699,6 @@ window.openPurchaseItemsAdmin = async function() {
             <th style="padding:6px;text-align:left">分類</th>
             <th style="padding:6px;text-align:left">品項名稱</th>
             <th style="padding:6px;text-align:center;width:60px">次數</th>
-            <th style="padding:6px;text-align:left">規格說明</th>
             <th style="padding:6px;text-align:left;width:120px">連結</th>
             <th style="padding:6px;text-align:center;width:60px">狀態</th>
             <th style="padding:6px;text-align:center;width:120px">操作</th>
