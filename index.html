@@ -33641,17 +33641,31 @@ window.openPurchaseItemsAdmin = async function() {
     const items = state.data.purchaseItems || [];
     const q = (window._puItemsFilter||'').toLowerCase().trim();
     const filtered = q
-      ? items.filter(it => (it.name||'').toLowerCase().includes(q) || (it.category||'').toLowerCase().includes(q))
+      ? items.filter(it =>
+          (it.name||'').toLowerCase().includes(q) ||
+          (it.category||'').toLowerCase().includes(q) ||
+          (it.spec||'').toLowerCase().includes(q) ||
+          (it.note||'').toLowerCase().includes(q))
       : items;
     const cnt = document.getElementById('pi-count');
     if (cnt) cnt.textContent = `共 ${filtered.length} 項`;
     return filtered.length===0
-      ? `<tr><td colspan="6" style="padding:20px;text-align:center;color:var(--muted)">沒有符合的品項</td></tr>`
-      : filtered.map(it => `<tr style="border-top:1px solid #eee;${!it.is_active?'opacity:.5':''}">
+      ? `<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--muted)">沒有符合的品項</td></tr>`
+      : filtered.map(it => {
+        const link = it.reference_link || '';
+        const isUrl = /^https?:\/\//i.test(link);
+        return `<tr style="border-top:1px solid #eee;${!it.is_active?'opacity:.5':''}">
         <td style="padding:5px 6px">${it.category||'—'}</td>
         <td style="padding:5px 6px;font-weight:600">${it.name}${it.note?`<div style="font-size:10px;color:var(--muted)">${it.note}</div>`:''}</td>
         <td style="padding:5px 6px;text-align:center;color:var(--muted)">${it.usage_count||0}</td>
-        <td style="padding:5px 6px;font-size:11px;max-width:200px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${it.reference_link||''}</td>
+        <td style="padding:5px 6px;font-size:11px;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(it.spec||'').replace(/"/g,'&quot;')}">${it.spec||'—'}</td>
+        <td style="padding:5px 6px;font-size:11px;max-width:180px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+          ${link
+            ? (isUrl
+                ? `<a href="${link}" target="_blank" rel="noopener" onclick="event.stopPropagation()" style="color:#1565c0;text-decoration:underline" title="${link.replace(/"/g,'&quot;')}">🔗 開啟連結</a>`
+                : `<span style="color:#c62828" title="不是有效的網址:${link.replace(/"/g,'&quot;')}">⚠ ${link}</span>`)
+            : '—'}
+        </td>
         <td style="padding:5px 6px;text-align:center">
           <span class="tag ${it.is_active?'tag-green':'tag-grey'}" style="font-size:10px">${it.is_active?'啟用':'停用'}</span>
         </td>
@@ -33660,7 +33674,8 @@ window.openPurchaseItemsAdmin = async function() {
           <button class="btn-table" style="padding:2px 6px;font-size:11px" onclick="window._puItemToggle('${it.id}',${!it.is_active})">${it.is_active?'停用':'啟用'}</button>
           <button class="btn-table danger" style="padding:2px 6px;font-size:11px" onclick="window._puItemDelete('${it.id}',${it.usage_count||0})">刪</button>
         </td>
-      </tr>`).join('');
+      </tr>`;
+      }).join('');
   };
 
   // 兼容舊呼叫:如果 body 存在,重建 tbody 而非整個 body
@@ -33682,7 +33697,8 @@ window.openPurchaseItemsAdmin = async function() {
             <th style="padding:6px;text-align:left">分類</th>
             <th style="padding:6px;text-align:left">品項名稱</th>
             <th style="padding:6px;text-align:center;width:60px">次數</th>
-            <th style="padding:6px;text-align:left">連結</th>
+            <th style="padding:6px;text-align:left">規格說明</th>
+            <th style="padding:6px;text-align:left;width:120px">連結</th>
             <th style="padding:6px;text-align:center;width:60px">狀態</th>
             <th style="padding:6px;text-align:center;width:120px">操作</th>
           </tr></thead>
@@ -33715,7 +33731,7 @@ function _puSaveScroll() {
 // 新增品項
 window._puItemNew = function() {
   _puSaveScroll();
-  window._puItemEditRaw({ id:null, name:'', category:'其他', reference_link:'', note:'', is_active:true });
+  window._puItemEditRaw({ id:null, name:'', category:'其他', spec:'', reference_link:'', note:'', is_active:true });
 };
 // 編輯品項
 window._puItemEdit = function(id) {
@@ -33733,10 +33749,19 @@ window._puItemEditRaw = function(it) {
     <div class="form-group"><label>品項名稱 *</label>
       <input class="form-control" id="pie-name" value="${(it.name||'').replace(/"/g,'&quot;')}">
     </div>
-    <div class="form-group"><label>參考連結(選填)</label>
-      <input class="form-control" id="pie-link" value="${it.reference_link||''}">
+    <div class="form-group"><label>規格說明(選填)
+      <span style="font-size:11px;color:var(--muted);font-weight:400">(例:1.2x2.2cm · 500以下 · 書本盒贈品 · 淺藍珠寶盒贈品)</span>
+    </label>
+      <input class="form-control" id="pie-spec" value="${(it.spec||'').replace(/"/g,'&quot;')}" placeholder="尺寸、用途、適用對象…">
     </div>
-    <div class="form-group"><label>備註(選填)</label>
+    <div class="form-group"><label>參考連結(選填)
+      <span style="font-size:11px;color:var(--muted);font-weight:400">(填網址才會變成可點擊連結)</span>
+    </label>
+      <input class="form-control" id="pie-link" value="${it.reference_link||''}" placeholder="https://…">
+    </div>
+    <div class="form-group"><label>內部備註(選填)
+      <span style="font-size:11px;color:var(--muted);font-weight:400">(給自己人看的註記,會顯示在品項名稱下方)</span>
+    </label>
       <input class="form-control" id="pie-note" value="${(it.note||'').replace(/"/g,'&quot;')}">
     </div>
   `, [
@@ -33744,6 +33769,7 @@ window._puItemEditRaw = function(it) {
       const payload = {
         name: document.getElementById('pie-name').value.trim(),
         category: document.getElementById('pie-cat').value,
+        spec: document.getElementById('pie-spec').value.trim() || null,
         reference_link: document.getElementById('pie-link').value.trim() || null,
         note: document.getElementById('pie-note').value.trim() || null,
       };
