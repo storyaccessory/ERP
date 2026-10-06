@@ -33159,12 +33159,6 @@ window.openPurchaseModal = async function(id) {
       <input class="form-control" id="pu-item" autocomplete="off" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱 / 絨布 / K金" oninput="window._puSearchItems(this.value)" onfocus="window._puSearchItems(this.value)" onblur="setTimeout(()=>{const d=document.getElementById('pu-item-drop');if(d) d.style.display='none';},200)">
       <div id="pu-item-drop" style="display:none;position:absolute;z-index:200;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:6px;max-height:280px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15);margin-top:2px"></div>
     </div>
-    <div class="form-group"><label>採購批次 <span style="font-size:11px;color:var(--muted);font-weight:400">(自訂編號,方便追蹤;下拉可選過往批次)</span></label>
-      <input class="form-control" id="pu-batch" value="${(r.batch_no||'').replace(/"/g,'&quot;')}" placeholder="例:2026-11-A / Kuromi首批" list="pu-batch-list">
-      <datalist id="pu-batch-list">
-        ${[...new Set((state.data.purchases||[]).map(x => x.batch_no).filter(Boolean))].slice(0, 50).map(b => `<option value="${b}">`).join('')}
-      </datalist>
-    </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group"><label>預計採購數量</label>
         <input class="form-control" id="pu-expected" value="${(r.expected_qty||'').replace(/"/g,'&quot;')}" placeholder="支援文字,如 100 或 藍*5 粉*3">
@@ -33263,7 +33257,7 @@ window._puCollect = function(existing) {
     })(),
     category: document.getElementById('pu-category')?.value || null,
     item_name: document.getElementById('pu-item')?.value.trim() || null,
-    batch_no: document.getElementById('pu-batch')?.value.trim() || null,
+    batch_no: document.getElementById('pu-batch')?.value.trim() ?? existing?.batch_no ?? null,  // modal 已拿掉輸入框,保留原值不覆蓋
     expected_qty: document.getElementById('pu-expected')?.value.trim() || null,
     current_stock: document.getElementById('pu-stock')?.value.trim() || null,
     reference_link: document.getElementById('pu-link')?.value.trim() || null,
