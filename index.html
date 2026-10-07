@@ -24107,6 +24107,8 @@ function renderJournal() {
     const filterDate   = state.data.journalHistDate  || yesterday;
     const filterStart  = state.data.journalHistStart || yesterday;
     const filterEnd    = state.data.journalHistEnd   || yesterday;
+    const filterStatus = state.data.journalHistStatus || 'all';  // all/submitted/missed/leave
+    const filterKw     = (state.data.journalHistKw || '').toLowerCase().trim();
 
     // 過濾 + 排序
     let viewLogs = [...history];
@@ -24115,6 +24117,22 @@ function renderJournal() {
       viewLogs = viewLogs.filter(l => l.date === filterDate);
     } else {
       viewLogs = viewLogs.filter(l => l.date >= filterStart && l.date <= filterEnd);
+    }
+    // 關鍵字搜尋:比對 fields.* 的所有文字內容
+    if (filterKw) {
+      viewLogs = viewLogs.filter(l => {
+        const fields = l.fields || {};
+        const texts = [];
+        Object.values(fields).forEach(v => {
+          if (Array.isArray(v)) v.forEach(it => { if (it?.desc) texts.push(String(it.desc)); if (it?.qty) texts.push(String(it.qty)); });
+          else if (typeof v === 'string') texts.push(v);
+        });
+        // 也搜尋傳統欄位
+        Object.keys(l).forEach(k => {
+          if (typeof l[k] === 'string' && !['id','user_id','date','created_at','updated_at','template_type','user_name'].includes(k)) texts.push(l[k]);
+        });
+        return texts.join(' ').toLowerCase().includes(filterKw);
+      });
     }
     viewLogs.sort((a,b) => b.date > a.date ? 1 : b.date < a.date ? -1 : 0);
 
@@ -24214,6 +24232,25 @@ function renderJournal() {
               onclick="state.data.journalHistMode='range';renderApp()">區間</button>
           </div>
         </div>
+        <!-- 狀態篩選 + 關鍵字 -->
+        <div style="display:flex;align-items:center;gap:10px;margin-top:10px;flex-wrap:wrap">
+          <div style="display:flex;align-items:center;gap:6px">
+            <span style="font-size:12px;color:var(--muted);white-space:nowrap">狀態:</span>
+            ${['all','submitted','missed','leave'].map(st => {
+              const label = { all:'全部', submitted:'✓ 已填', missed:'✗ 未填', leave:'🏖 休假' }[st];
+              const act = filterStatus === st;
+              return `<button class="btn btn-sm ${act?'btn-primary':'btn-outline'}"
+                onclick="state.data.journalHistStatus='${st}';renderApp()">${label}</button>`;
+            }).join('')}
+          </div>
+          <div style="display:flex;align-items:center;gap:6px;flex:1;min-width:220px">
+            <span style="font-size:12px;color:var(--muted);white-space:nowrap">🔍 搜尋:</span>
+            <input class="form-control" style="flex:1;max-width:320px;font-size:13px" placeholder="日誌內容關鍵字…"
+              value="${filterKw.replace(/"/g,'&quot;')}"
+              oninput="state.data.journalHistKw=this.value;renderApp()">
+            ${filterKw ? `<button class="btn btn-sm btn-outline" onclick="state.data.journalHistKw='';renderApp()" style="color:#c62828">✕</button>` : ''}
+          </div>
+        </div>
         <!-- 日期輸入 -->
         <div style="display:flex;align-items:center;gap:8px;margin-top:10px;flex-wrap:wrap">
           ${filterMode === 'date' ? `
@@ -24236,6 +24273,65 @@ function renderJournal() {
           <span style="font-size:12px;color:var(--muted)">${viewLogs.length} 筆</span>
         </div>
       </div>
+      ${(() => {
+        // 區間摘要卡(區間模式才顯示)
+        if (filterMode !== 'range') return '';
+        let totalRequired = 0, totalSubmitted = 0, totalMissed = 0, totalLeave = 0;
+        const missedByPerson = {}; // name → count
+        Object.keys(grouped).forEach(d => {
+          const req = (missingByDate[d]?.length || 0) + (grouped[d]?.length || 0);
+          totalRequired += req;
+          totalSubmitted += grouped[d]?.length || 0;
+          totalMissed += missingByDate[d]?.length || 0;
+          totalLeave += onLeaveByDate[d]?.length || 0;
+          (missingByDate[d]||[]).forEach(p => { missedByPerson[p.name] = (missedByPerson[p.name]||0) + 1; });
+        });
+        const workdayCount = Object.keys(grouped).filter(d => {
+          const dow = new Date(d+'T00:00:00').getDay();
+          const isWknd = dow === 0 || dow === 6;
+          const isNat = typeof getTwHoliday === 'function' && !!getTwHoliday(d);
+          return !isWknd && !isNat;
+        }).length;
+        const rateG = totalRequired > 0 ? Math.round(totalSubmitted*100/totalRequired) : 100;
+        const missRanking = Object.entries(missedByPerson)
+          .sort((a,b) => b[1]-a[1])
+          .slice(0,10)
+          .map(([n,c]) => `<span style="display:inline-block;padding:3px 10px;border-radius:12px;background:#ffebee;color:#c62828;font-size:11px;font-weight:600;margin-right:4px;margin-bottom:4px">${n} ${c}</span>`)
+          .join('');
+        return `<div class="card" style="margin-bottom:12px;padding:12px 14px;background:linear-gradient(135deg,#e3f2fd,#fff)">
+          <div style="font-size:13px;font-weight:700;color:var(--accent-dark);margin-bottom:8px">📊 區間摘要 · ${filterStart} ~ ${filterEnd}</div>
+          <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:8px;margin-bottom:${missRanking?'10px':'0'}">
+            <div style="padding:8px;background:#fff;border-radius:6px;text-align:center">
+              <div style="font-size:11px;color:var(--muted)">工作天</div>
+              <div style="font-size:18px;font-weight:800;color:#1565c0">${workdayCount}</div>
+            </div>
+            <div style="padding:8px;background:#fff;border-radius:6px;text-align:center">
+              <div style="font-size:11px;color:var(--muted)">應填</div>
+              <div style="font-size:18px;font-weight:800;color:var(--text)">${totalRequired}</div>
+            </div>
+            <div style="padding:8px;background:#fff;border-radius:6px;text-align:center">
+              <div style="font-size:11px;color:var(--muted)">實填</div>
+              <div style="font-size:18px;font-weight:800;color:#2e7d32">${totalSubmitted}</div>
+            </div>
+            <div style="padding:8px;background:#fff;border-radius:6px;text-align:center">
+              <div style="font-size:11px;color:var(--muted)">漏填</div>
+              <div style="font-size:18px;font-weight:800;color:${totalMissed>0?'#c62828':'#999'}">${totalMissed}</div>
+            </div>
+            <div style="padding:8px;background:#fff;border-radius:6px;text-align:center">
+              <div style="font-size:11px;color:var(--muted)">填寫率</div>
+              <div style="font-size:18px;font-weight:800;color:${rateG>=95?'#2e7d32':rateG>=80?'#f57c00':'#c62828'}">${rateG}%</div>
+            </div>
+            ${totalLeave>0?`<div style="padding:8px;background:#fff;border-radius:6px;text-align:center">
+              <div style="font-size:11px;color:var(--muted)">🏖 休假</div>
+              <div style="font-size:18px;font-weight:800;color:#e65100">${totalLeave}</div>
+            </div>`:''}
+          </div>
+          ${missRanking ? `<div style="padding-top:8px;border-top:1px dashed var(--border)">
+            <div style="font-size:11px;color:var(--muted);margin-bottom:6px">漏填人員(按次數):</div>
+            ${missRanking}
+          </div>` : ''}
+        </div>`;
+      })()}
       ${sortedDates.length === 0
         ? `<div class="card"><div class="empty"><div class="empty-icon">📋</div><p>這個條件沒有日誌記錄</p></div></div>`
         : sortedDates.map(date => {
@@ -24254,17 +24350,25 @@ function renderJournal() {
             : effectiveRequired > 0
               ? `<span style="font-size:11px;color:${missing.length>0?'#e65100':'#2e7d32'};background:${missing.length>0?'#fff3e0':'#e8f5e9'};padding:2px 8px;border-radius:10px;font-weight:600;margin-left:8px">填寫 ${submittedCount}/${effectiveRequired}${missing.length>0?` · 缺 ${missing.length}`:''}${onLeave.length>0?` · 休假 ${onLeave.length}`:''}</span>`
               : (onLeave.length > 0 ? `<span style="font-size:11px;color:#e65100;background:#fff3e0;padding:2px 8px;border-radius:10px;font-weight:600;margin-left:8px">全體休假 · 不需填寫</span>` : '');
+          // 依狀態篩選決定要顯示哪類卡片
+          const showSubmitted = filterStatus === 'all' || filterStatus === 'submitted';
+          const showMissed    = filterStatus === 'all' || filterStatus === 'missed';
+          const showLeave     = filterStatus === 'all' || filterStatus === 'leave';
+          // 如果這天選了「未填/休假」但本日沒有對應 → 整天不顯示(避免空列很醜)
+          if (filterStatus === 'submitted' && grouped[date].length === 0) return '';
+          if (filterStatus === 'missed' && missing.length === 0) return '';
+          if (filterStatus === 'leave' && onLeave.length === 0) return '';
           return `
           <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:18px 0 8px;display:flex;align-items:center;flex-wrap:wrap">📅 ${date} (${dowLabel}) ${summaryTag}</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:4px">
-            ${grouped[date].map(log => {
+            ${showSubmitted ? grouped[date].map(log => {
               const li = _getLeaveInfoForHist(log.user_id, date);
               const leaveTag = (li && !li.fullDay)
                 ? `<span style="font-size:11px;background:#ff9800;color:#fff;padding:2px 10px;border-radius:12px;font-weight:700;white-space:nowrap">🏖 請假 ${li.timeRange}</span>`
                 : '';
               return _jnlCard(log, {}, leaveTag);
-            }).join('')}
-            ${missing.map(p => {
+            }).join('') : ''}
+            ${showMissed ? missing.map(p => {
               const li = p._leave;
               const leaveChip = (li && !li.fullDay)
                 ? `<span style="font-size:11px;background:#ff9800;color:#fff;padding:2px 10px;border-radius:12px;font-weight:700;white-space:nowrap">🏖 請假 ${li.timeRange}</span>`
@@ -24276,17 +24380,17 @@ function renderJournal() {
                 </div>
                 <div style="font-size:12px;color:#c62828;margin-top:6px">⚠ 未填寫日誌</div>
               </div>`;
-            }).join('')}
-            ${onLeave.map(p => `<div class="card" style="border-left:4px solid #ff9800;background:#fff8e1">
+            }).join('') : ''}
+            ${showLeave ? onLeave.map(p => `<div class="card" style="border-left:4px solid #ff9800;background:#fff8e1">
               <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
                 <div style="font-size:14px;font-weight:700;color:#e65100">${p.name||'—'}</div>
                 <span style="font-size:11px;background:#ff9800;color:#fff;padding:2px 10px;border-radius:12px;font-weight:700">🏖 全天休假</span>
               </div>
               <div style="font-size:12px;color:#e65100;margin-top:6px">${p._leave?.title || '請假'} · 不需填寫</div>
-            </div>`).join('')}
+            </div>`).join('') : ''}
           </div>
         `;
-        }).join('')
+        }).filter(Boolean).join('')
       }`;
   };
 
@@ -24364,12 +24468,12 @@ function renderJournal() {
               ${rows.map((r,i) => {
                 const sc = r.rate >= 95 ? '#2e7d32' : r.rate >= 80 ? '#f57c00' : '#c62828';
                 const dot = r.rate >= 95 ? '🟢' : r.rate >= 80 ? '🟡' : '🔴';
-                return `<tr style="border-top:1px solid #eee" title="點擊查看此人紀錄">
-                  <td style="padding:5px 6px;cursor:pointer" onclick="state.data.journalHistUser='${r.profile.id}';state.data.journalTab='全員歷史記錄';renderApp()">
+                return `<tr style="border-top:1px solid #eee">
+                  <td style="padding:5px 6px;cursor:pointer" onclick="window._jnlJumpToUser('${r.profile.id}','${_targetYm}','all')" title="查看此人歷史">
                     <span style="margin-right:6px">${dot}</span><b>${r.profile.name||'—'}</b>
                   </td>
-                  <td style="padding:5px 6px;text-align:center;font-family:monospace">${r.submitted}/${r.required}</td>
-                  <td style="padding:5px 6px;text-align:center;color:${r.missed.length>0?'#c62828':'#999'};font-weight:${r.missed.length>0?700:400}">${r.missed.length||'—'}</td>
+                  <td style="padding:5px 6px;text-align:center;font-family:monospace;cursor:pointer" onclick="window._jnlJumpToUser('${r.profile.id}','${_targetYm}','submitted')" title="查看此人已填的日誌">${r.submitted}/${r.required}</td>
+                  <td style="padding:5px 6px;text-align:center;color:${r.missed.length>0?'#c62828':'#999'};font-weight:${r.missed.length>0?700:400};cursor:${r.missed.length>0?'pointer':'default'};${r.missed.length>0?'text-decoration:underline dotted;':''}" ${r.missed.length>0?`onclick="window._jnlJumpToUser('${r.profile.id}','${_targetYm}','missed')" title="查看漏填的日期"`:''}>${r.missed.length||'—'}</td>
                   <td style="padding:5px 6px;text-align:center;color:${sc};font-weight:700">${r.rate}%</td>
                   <td style="padding:5px 6px">${r.strip}</td>
                 </tr>`;
@@ -24425,6 +24529,28 @@ window.loadJournalForDate = async function(date) {
 };
 
 // 全員歷史記錄：依篩選條件重新從 DB 拉資料（避免 300 筆快取不足的情況）
+// 排行榜點擊 → 跳轉到全員歷史紀錄 + 預設篩選
+window._jnlJumpToUser = function(userId, ym, status = 'all') {
+  // 計算該月份的區間;若當月則區間終點改成今天
+  const [y, m] = ym.split('-').map(Number);
+  const monEnd = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2,'0')}`;
+  const today = _localToday();
+  const endDate = (ym === today.slice(0,7)) ? today : monEnd;
+  state.data.journalHistUser   = userId;
+  state.data.journalHistMode   = 'range';
+  state.data.journalHistStart  = `${ym}-01`;
+  state.data.journalHistEnd    = endDate;
+  state.data.journalHistStatus = status;    // all / submitted / missed / leave
+  state.data.journalHistKw     = '';        // 清空關鍵字
+  state.data.journalTab        = '全員歷史記錄';
+  // 跑一次 filter 載入該區間資料
+  if (typeof window.loadJournalHistoryFilter === 'function') {
+    window.loadJournalHistoryFilter();
+  } else {
+    renderApp();
+  }
+};
+
 // 老闆排行榜:載入指定月份的日誌 + 請假事項 → 寫入 bossMonthCache,再 render
 window.loadJournalBossMonth = async function(ym) {
   state.data.journalBossYm = ym;
