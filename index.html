@@ -23737,10 +23737,13 @@ function renderJournal() {
     return `<div class="card" style="border-left:4px solid ${isMe?'var(--accent)':'var(--border)'}">
       <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
         <div>
-          <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}${extraNameTag||''}</div>
+          <div style="font-size:14px;font-weight:700">${log.user_name||'—'} ${isMe?'<span style="font-size:11px;color:var(--accent)">(我)</span>':''}</div>
           <div style="font-size:11px;color:var(--muted)">${logProfile?.job_title||tpl.label}${monthlyTag}</div>
         </div>
-        <div style="font-size:11px;color:var(--muted);display:flex;align-items:center">${backfillTag}${log.updated_at ? new Date(log.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : ''}</div>
+        <div style="display:flex;align-items:center;gap:6px">
+          ${extraNameTag||''}
+          <span style="font-size:11px;color:var(--muted);display:flex;align-items:center">${backfillTag}${log.updated_at ? new Date(log.updated_at).toLocaleTimeString('zh-TW',{hour:'2-digit',minute:'2-digit'}) : ''}</span>
+        </div>
       </div>
       ${tpl.fields.map(f => {
         if (f.private && !isMe && !isAdmin) return '';
@@ -23921,22 +23924,24 @@ function renderJournal() {
         `<div class="card"><div class="empty"><div class="empty-icon">📝</div><p>這天還沒有人填寫日誌</p></div></div>` : ''}
       <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(320px,1fr));gap:14px">
         ${allLogs.map(log => {
-          // 若此人今天有部分請假 → 加上請假 chip
+          // 若此人今天有部分請假 → 加上請假 chip(右上角)
           const li = _getLeaveInfo(log.user_id, today);
           const leaveTag = (li && !li.fullDay)
-            ? `<span style="display:inline-block;margin-left:6px;font-size:10px;background:#fff3e0;color:#e65100;padding:2px 7px;border-radius:10px;font-weight:600">🏖 請假 ${li.timeRange}</span>`
+            ? `<span style="font-size:11px;background:#ff9800;color:#fff;padding:2px 10px;border-radius:12px;font-weight:700;white-space:nowrap">🏖 請假 ${li.timeRange}</span>`
             : '';
           return `<div>${_jnlCard(log, {}, leaveTag)}</div>`;
         }).join('')}
         ${missing.map(p => {
           const li = p._leave;
-          const leaveTag = (li && !li.fullDay)
-            ? `<div style="font-size:11px;color:#e65100;background:#fff3e0;padding:3px 8px;border-radius:10px;display:inline-block;margin-top:4px;font-weight:600">🏖 請假 ${li.timeRange}</div>`
+          const leaveChip = (li && !li.fullDay)
+            ? `<span style="font-size:11px;background:#ff9800;color:#fff;padding:2px 10px;border-radius:12px;font-weight:700;white-space:nowrap">🏖 請假 ${li.timeRange}</span>`
             : '';
           return `<div class="card" style="border-left:4px solid var(--border);opacity:.7">
-            <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
-            <div style="font-size:12px;color:var(--muted);margin-top:4px">尚未填寫日誌</div>
-            ${leaveTag}
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+              <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
+              ${leaveChip}
+            </div>
+            <div style="font-size:12px;color:var(--muted);margin-top:6px">尚未填寫日誌</div>
           </div>`;
         }).join('')}
         ${onFullLeave.map(p => `<div class="card" style="border-left:4px solid #ff9800;background:#fff8e1">
@@ -24107,19 +24112,21 @@ function renderJournal() {
             ${grouped[date].map(log => {
               const li = _getLeaveInfoForHist(log.user_id, date);
               const leaveTag = (li && !li.fullDay)
-                ? `<span style="display:inline-block;margin-left:6px;font-size:10px;background:#fff3e0;color:#e65100;padding:2px 7px;border-radius:10px;font-weight:600">🏖 請假 ${li.timeRange}</span>`
+                ? `<span style="font-size:11px;background:#ff9800;color:#fff;padding:2px 10px;border-radius:12px;font-weight:700;white-space:nowrap">🏖 請假 ${li.timeRange}</span>`
                 : '';
               return _jnlCard(log, {}, leaveTag);
             }).join('')}
             ${missing.map(p => {
               const li = p._leave;
-              const leaveTag = (li && !li.fullDay)
-                ? `<div style="font-size:11px;color:#e65100;background:#fff3e0;padding:3px 8px;border-radius:10px;display:inline-block;margin-top:4px;font-weight:600">🏖 請假 ${li.timeRange}</div>`
+              const leaveChip = (li && !li.fullDay)
+                ? `<span style="font-size:11px;background:#ff9800;color:#fff;padding:2px 10px;border-radius:12px;font-weight:700;white-space:nowrap">🏖 請假 ${li.timeRange}</span>`
                 : '';
               return `<div class="card" style="border-left:4px solid var(--border);opacity:.6;background:#fafafa">
-                <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
-                <div style="font-size:12px;color:#c62828;margin-top:4px">⚠ 未填寫日誌</div>
-                ${leaveTag}
+                <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                  <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
+                  ${leaveChip}
+                </div>
+                <div style="font-size:12px;color:#c62828;margin-top:6px">⚠ 未填寫日誌</div>
               </div>`;
             }).join('')}
             ${onLeave.map(p => `<div class="card" style="border-left:4px solid #ff9800;background:#fff8e1">
