@@ -29549,7 +29549,12 @@ window._calToggleSubtask = async function(evId, subIdx, checked) {
     || _idStr.startsWith('qc_')
     || !!_sub?.purchase_id;
   if (checked && _isPurchaseSub) {
-    showToast('請到「採購申請」系統填寫「實際入庫數」才能結案', 'error');
+    // 判斷是「採購 (pu_)」還是「QC 點收 (qc_)」→ 顯示對應引導
+    const isQcPhase = ev.event_type === 'qc' || _idStr.startsWith('qc_');
+    const msg = isQcPhase
+      ? '請到「採購申請」系統填寫「實際入庫數」才能結案'
+      : '請到「採購申請」系統填寫「實際採購數」才能結案';
+    showToast(msg, 'error');
     // 把 checkbox 復原
     const row = document.getElementById('cal-view-sub-'+subIdx);
     if (row) {
