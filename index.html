@@ -29552,7 +29552,7 @@ window._calToggleSubtask = async function(evId, subIdx, checked) {
     // 判斷是「採購 (pu_)」還是「QC 點收 (qc_)」→ 顯示對應引導
     const isQcPhase = ev.event_type === 'qc' || _idStr.startsWith('qc_');
     const msg = isQcPhase
-      ? '請到「採購申請」系統填寫「實際入庫數」才能結案'
+      ? '請到「採購申請」系統填入實際到貨、瑕疵,確認入庫數量並勾選「✓ 入庫」'
       : '請到「採購申請」系統填寫「實際採購數」才能結案';
     showToast(msg, 'error');
     // 把 checkbox 復原
@@ -34144,7 +34144,7 @@ window.openPurchaseModal = async function(id) {
       <input class="form-control" id="pu-vendor" value="${(r.vendor||'').replace(/"/g,'&quot;')}">
     </div>` : ''}
 
-    ${['已到貨','結案'].includes(r.status) || r.arrived_date || r.arrived_qty != null ? `
+    ${['已採購','已到貨','結案'].includes(r.status) || r.arrived_date || r.arrived_qty != null ? `
     <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:14px 0 6px">📦 到貨 QC</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
       <div class="form-group"><label>到貨日期</label>
@@ -34192,12 +34192,25 @@ window.openPurchaseModal = async function(id) {
     btns.push({ label:'💾 儲存', primary:true, onclick: async () => await window._puSave(r.id, r) });
     btns.push({ label:'✅ 標記已採購', onclick: async () => await window._puMoveStatus(r.id, r, '已採購') });
     btns.push({ label:'🚫 暫不採購', onclick: async () => await window._puMoveStatus(r.id, r, '暫不採購') });
-  } else if (r.status === '已採購') {
+  } else if (r.status === '已採購' || r.status === '已到貨') {
     btns.push({ label:'💾 儲存', primary:true, onclick: async () => await window._puSave(r.id, r) });
-    btns.push({ label:'📦 標記已到貨', onclick: async () => await window._puMoveStatus(r.id, r, '已到貨') });
-  } else if (r.status === '已到貨') {
-    btns.push({ label:'💾 儲存', primary:true, onclick: async () => await window._puSave(r.id, r) });
-    btns.push({ label:'✅ 結案', onclick: async () => await window._puMoveStatus(r.id, r, '結案') });
+    // 若已填實際到貨 → 顯示「✓ 確認入庫完成」(走結案流程);否則「標記已到貨」
+    const _hasArrived = r.arrived_qty != null;
+    if (_hasArrived) {
+      btns.push({ label:'✓ 確認入庫完成(結案)', onclick: async () => {
+        // 先存 modal 內的到貨/瑕疵/備註,再觸發結案流程
+        await window._puSave(r.id, r, { silent: true });
+        const latest = (state.data.purchases||[]).find(x => x.id === r.id) || r;
+        const arrived = parseFloat(latest.arrived_qty);
+        const defect = parseFloat(latest.defect_qty)||0;
+        if (isNaN(arrived)) { showToast('請先填「實際到貨」','error'); return; }
+        const qc = Math.max(0, arrived - defect);
+        closeModal();
+        await window._puInlineQcQty(r.id, String(qc));
+      }});
+    } else if (r.status === '已採購') {
+      btns.push({ label:'📦 標記已到貨', onclick: async () => await window._puMoveStatus(r.id, r, '已到貨') });
+    }
   } else {
     btns.push({ label:'💾 儲存', primary:true, onclick: async () => await window._puSave(r.id, r) });
     btns.push({ label:'↩ 重新開啟', onclick: async () => await window._puMoveStatus(r.id, r, '待採購') });
