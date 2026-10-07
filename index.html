@@ -34088,8 +34088,8 @@ window.openPurchaseModal = async function(id) {
     ${['已採購','已到貨','結案'].includes(r.status) || r.actual_qty || r.actual_amount ? `
     <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:14px 0 6px">💰 採購執行</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
-      <div class="form-group"><label>實際採購數量</label>
-        <input class="form-control" id="pu-actual-qty" value="${(r.actual_qty||'').replace(/"/g,'&quot;')}">
+      <div class="form-group"><label>採購數</label>
+        <input class="form-control" id="pu-actual-qty" value="${(r.actual_qty||'').replace(/"/g,'&quot;')}" placeholder="跟廠商訂了幾個">
       </div>
       <div class="form-group"><label>採購金額</label>
         <input type="number" class="form-control" id="pu-actual-amt" value="${r.actual_amount||''}">
@@ -34102,13 +34102,36 @@ window.openPurchaseModal = async function(id) {
       <input class="form-control" id="pu-vendor" value="${(r.vendor||'').replace(/"/g,'&quot;')}">
     </div>` : ''}
 
-    ${['已到貨','結案'].includes(r.status) || r.arrived_date ? `
-    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:14px 0 6px">📦 到貨資訊</div>
-    <div class="form-group"><label>到貨日期</label>
-      <input type="date" class="form-control" id="pu-arrived-date" value="${r.arrived_date||''}">
+    ${['已到貨','結案'].includes(r.status) || r.arrived_date || r.arrived_qty != null ? `
+    <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:14px 0 6px">📦 到貨 QC</div>
+    <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
+      <div class="form-group"><label>到貨日期</label>
+        <input type="date" class="form-control" id="pu-arrived-date" value="${r.arrived_date||''}">
+      </div>
+      <div class="form-group"><label>實際到貨 <span style="font-size:11px;color:var(--muted);font-weight:400">(廠商寄來多少)</span></label>
+        <input type="number" class="form-control" id="pu-arrived-qty" min="0" step="1" value="${r.arrived_qty??''}" oninput="window._puModalRecalcQc()">
+      </div>
+      <div class="form-group"><label>瑕疵數 <span style="font-size:11px;color:var(--muted);font-weight:400">(到了但不良)</span></label>
+        <input type="number" class="form-control" id="pu-defect-qty" min="0" step="1" value="${r.defect_qty??''}" placeholder="0" oninput="window._puModalRecalcQc()" style="border-color:#ffcdd2">
+      </div>
     </div>
-    <div class="form-group"><label>到貨備註</label>
-      <input class="form-control" id="pu-arrived-note" value="${(r.arrived_note||'').replace(/"/g,'&quot;')}">
+    <div id="pu-qc-summary" style="padding:10px 12px;background:#f5f5f5;border-radius:6px;margin-bottom:10px;font-size:13px">
+      ${(() => {
+        const purchased = parseFloat(r.actual_qty)||0;
+        const arrived = parseFloat(r.arrived_qty)||0;
+        const defect = parseFloat(r.defect_qty)||0;
+        const qc = arrived > 0 ? Math.max(0, arrived - defect) : 0;
+        const short = purchased > 0 && qc > 0 ? Math.max(0, purchased - qc) : 0;
+        if (!arrived) return '<span style="color:var(--muted)">填入「實際到貨」後會自動算入庫數</span>';
+        const parts = [`實際入庫 = ${arrived} − ${defect} = <b style="color:#2e7d32">${qc}</b>`];
+        if (defect > 0) parts.push(`<span style="color:#c62828;font-weight:700">⚠ 瑕疵 ${defect}</span>`);
+        if (short > 0) parts.push(`<span style="color:#e65100;font-weight:700">⚠ 短少 ${short}</span>`);
+        if (defect === 0 && short === 0) parts.push(`<span style="color:#2e7d32;font-weight:700">✅ 正常</span>`);
+        return parts.join(' · ');
+      })()}
+    </div>
+    <div class="form-group"><label>備註 / 異常說明 <span style="font-size:11px;color:var(--muted);font-weight:400">(例:抽拉卡住 A01-A05、短少已通知廠商補出)</span></label>
+      <textarea class="form-control" id="pu-defect-note" rows="2" placeholder="若有瑕疵或短少,請在此記錄,方便跟廠商對帳">${(r.defect_note||r.arrived_note||'')}</textarea>
     </div>` : ''}
   `;
 
@@ -34171,7 +34194,23 @@ window._puCollect = function(existing) {
     vendor: document.getElementById('pu-vendor')?.value.trim() || null,
     purchase_date: document.getElementById('pu-purchase-date')?.value || null,
     arrived_date: document.getElementById('pu-arrived-date')?.value || null,
-    arrived_note: document.getElementById('pu-arrived-note')?.value.trim() || null,
+    arrived_qty: (() => {
+      const v = document.getElementById('pu-arrived-qty')?.value;
+      return (v==null || v==='') ? (existing?.arrived_qty ?? null) : (parseFloat(v)||0);
+    })(),
+    defect_qty: (() => {
+      const v = document.getElementById('pu-defect-qty')?.value;
+      return (v==null || v==='') ? (existing?.defect_qty ?? 0) : (parseFloat(v)||0);
+    })(),
+    defect_note: document.getElementById('pu-defect-note')?.value.trim() ?? existing?.defect_note ?? null,
+    // 自動算 qc_qty = arrived - defect
+    qc_qty: (() => {
+      const a = parseFloat(document.getElementById('pu-arrived-qty')?.value);
+      const d = parseFloat(document.getElementById('pu-defect-qty')?.value)||0;
+      if (isNaN(a)) return existing?.qc_qty ?? null;
+      return Math.max(0, a - d);
+    })(),
+    arrived_note: document.getElementById('pu-arrived-note')?.value?.trim?.() ?? existing?.arrived_note ?? null,
     updated_at: new Date().toISOString(),
   };
 };
@@ -35307,6 +35346,26 @@ window.modalPartsToPurchase = async function(preFilteredIds = null) {
 };
 
 // 填實際入庫數(qc_qty)→ 結案 + 兩個子任務都打勾 + 自動填 QC 入庫日期 + 若有 part_id 自動加庫存
+// 編輯 modal 的「到貨 QC」區塊:實時重算摘要列
+window._puModalRecalcQc = function() {
+  const summary = document.getElementById('pu-qc-summary');
+  if (!summary) return;
+  const purchased = parseFloat(document.getElementById('pu-actual-qty')?.value)||0;
+  const arrived = parseFloat(document.getElementById('pu-arrived-qty')?.value)||0;
+  const defect = parseFloat(document.getElementById('pu-defect-qty')?.value)||0;
+  const qc = arrived > 0 ? Math.max(0, arrived - defect) : 0;
+  const short = purchased > 0 && qc > 0 ? Math.max(0, purchased - qc) : 0;
+  if (!arrived) {
+    summary.innerHTML = '<span style="color:var(--muted)">填入「實際到貨」後會自動算入庫數</span>';
+    return;
+  }
+  const parts = [`實際入庫 = ${arrived} − ${defect} = <b style="color:#2e7d32">${qc}</b>`];
+  if (defect > 0) parts.push(`<span style="color:#c62828;font-weight:700">⚠ 瑕疵 ${defect}</span>`);
+  if (short > 0) parts.push(`<span style="color:#e65100;font-weight:700">⚠ 短少 ${short}</span>`);
+  if (defect === 0 && short === 0) parts.push(`<span style="color:#2e7d32;font-weight:700">✅ 正常</span>`);
+  summary.innerHTML = parts.join(' · ');
+};
+
 // QC 新流程:填「實際到貨」或「瑕疵」→ 自動計算 qc_qty = 到貨 - 瑕疵
 // 並沿用原本 qc_qty 的所有副作用(結案、庫存、行事曆打勾…)
 window._puInlineQcCombo = async function(id, field, value) {
