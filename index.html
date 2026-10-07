@@ -23987,15 +23987,50 @@ function renderJournal() {
     _datesInRange.forEach(d => { if (!grouped[d]) grouped[d] = []; });
     // 需填日誌名單(受人員篩選影響)
     const _requiredPpl = profiles.filter(p => p.journal_required && (!filterPerson || p.id === filterPerson));
-    // 每日計算 missing(排除週末 — 週末本來就不用填;國定假日也排除)
-    const missingByDate = {};
+    // 歷史期間的請假資訊
+    const _historyLeave = jd.historyLeave || [];
+    // 給定(user, date)查請假狀態 → { fullDay, timeRange, title } 或 null
+    const _getLeaveInfoForHist = (userId, dateStr) => {
+      const evs = _historyLeave.filter(ev => {
+        const sd = ev.start_date || '';
+        const ed = ev.end_date || ev.start_date || '';
+        if (dateStr < sd || dateStr > ed) return false;
+        const ids = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
+        return ids.includes(userId);
+      });
+      if (!evs.length) return null;
+      let fullDay = false;
+      const ranges = [];
+      for (const ev of evs) {
+        const st = (ev.start_time||'').slice(0,5);
+        const et = (ev.end_time||'').slice(0,5);
+        if (!st) { fullDay = true; ranges.push('全天'); continue; }
+        const sh = parseInt(st.slice(0,2));
+        const eh = et ? parseInt(et.slice(0,2)) : null;
+        if (sh <= 9 && (eh==null || eh >= 18)) { fullDay = true; ranges.push('全天'); continue; }
+        ranges.push(`${sh}-${eh ?? ''}`);
+      }
+      return { fullDay, timeRange: ranges.join(','), title: evs.map(e=>e.title).filter(Boolean).join('·') || '請假' };
+    };
+    // 每日計算 missing / onLeave(排除週末 — 週末本來就不用填;國定假日也排除)
+    const missingByDate = {};   // 有填或未填(非全天休)
+    const onLeaveByDate = {};   // 全天休假 → 不算 missing
     Object.keys(grouped).forEach(d => {
       const dow = new Date(d + 'T00:00:00').getDay();
       const isWeekend = dow === 0 || dow === 6;
       const isNationalHoliday = typeof getTwHoliday === 'function' && !!getTwHoliday(d);
-      if (isWeekend || isNationalHoliday) { missingByDate[d] = []; return; }
+      if (isWeekend || isNationalHoliday) { missingByDate[d] = []; onLeaveByDate[d] = []; return; }
       const submittedIds = new Set(grouped[d].map(l => l.user_id));
-      missingByDate[d] = _requiredPpl.filter(p => !submittedIds.has(p.id));
+      const notSubmitted = _requiredPpl.filter(p => !submittedIds.has(p.id));
+      const _onLeave = [];
+      const _miss = [];
+      for (const p of notSubmitted) {
+        const li = _getLeaveInfoForHist(p.id, d);
+        if (li?.fullDay) _onLeave.push({ ...p, _leave: li });
+        else _miss.push({ ...p, _leave: li });
+      }
+      missingByDate[d] = _miss;
+      onLeaveByDate[d] = _onLeave;
     });
     const sortedDates = Object.keys(grouped).sort().reverse();
 
@@ -24056,20 +24091,43 @@ function renderJournal() {
           const isWeekend = dow === 0 || dow === 6;
           const natHoliday = typeof getTwHoliday === 'function' ? getTwHoliday(date) : '';
           const missing = missingByDate[date] || [];
+          const onLeave = onLeaveByDate[date] || [];
           const submittedCount = grouped[date].length;
+          // 需填 - 全天休假(全天休假不計入分母)
           const requiredCount = _requiredPpl.length;
+          const effectiveRequired = Math.max(0, requiredCount - onLeave.length);
           const summaryTag = (isWeekend || natHoliday)
             ? `<span style="font-size:11px;color:#c62828;background:#fce4ec;padding:2px 8px;border-radius:10px;font-weight:600;margin-left:8px">${natHoliday || '週末'} · 不需填寫</span>`
-            : requiredCount > 0
-              ? `<span style="font-size:11px;color:${missing.length>0?'#e65100':'#2e7d32'};background:${missing.length>0?'#fff3e0':'#e8f5e9'};padding:2px 8px;border-radius:10px;font-weight:600;margin-left:8px">填寫 ${submittedCount}/${requiredCount}${missing.length>0?` · 缺 ${missing.length}`:''}</span>`
-              : '';
+            : effectiveRequired > 0
+              ? `<span style="font-size:11px;color:${missing.length>0?'#e65100':'#2e7d32'};background:${missing.length>0?'#fff3e0':'#e8f5e9'};padding:2px 8px;border-radius:10px;font-weight:600;margin-left:8px">填寫 ${submittedCount}/${effectiveRequired}${missing.length>0?` · 缺 ${missing.length}`:''}${onLeave.length>0?` · 休假 ${onLeave.length}`:''}</span>`
+              : (onLeave.length > 0 ? `<span style="font-size:11px;color:#e65100;background:#fff3e0;padding:2px 8px;border-radius:10px;font-weight:600;margin-left:8px">全體休假 · 不需填寫</span>` : '');
           return `
           <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:18px 0 8px;display:flex;align-items:center;flex-wrap:wrap">📅 ${date} (${dowLabel}) ${summaryTag}</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:4px">
-            ${grouped[date].map(log => _jnlCard(log)).join('')}
-            ${missing.map(p => `<div class="card" style="border-left:4px solid var(--border);opacity:.6;background:#fafafa">
-              <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
-              <div style="font-size:12px;color:#c62828;margin-top:4px">⚠ 未填寫日誌</div>
+            ${grouped[date].map(log => {
+              const li = _getLeaveInfoForHist(log.user_id, date);
+              const leaveTag = (li && !li.fullDay)
+                ? `<span style="display:inline-block;margin-left:6px;font-size:10px;background:#fff3e0;color:#e65100;padding:2px 7px;border-radius:10px;font-weight:600">🏖 請假 ${li.timeRange}</span>`
+                : '';
+              return _jnlCard(log, {}, leaveTag);
+            }).join('')}
+            ${missing.map(p => {
+              const li = p._leave;
+              const leaveTag = (li && !li.fullDay)
+                ? `<div style="font-size:11px;color:#e65100;background:#fff3e0;padding:3px 8px;border-radius:10px;display:inline-block;margin-top:4px;font-weight:600">🏖 請假 ${li.timeRange}</div>`
+                : '';
+              return `<div class="card" style="border-left:4px solid var(--border);opacity:.6;background:#fafafa">
+                <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
+                <div style="font-size:12px;color:#c62828;margin-top:4px">⚠ 未填寫日誌</div>
+                ${leaveTag}
+              </div>`;
+            }).join('')}
+            ${onLeave.map(p => `<div class="card" style="border-left:4px solid #ff9800;background:#fff8e1">
+              <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+                <div style="font-size:14px;font-weight:700;color:#e65100">${p.name||'—'}</div>
+                <span style="font-size:11px;background:#ff9800;color:#fff;padding:2px 10px;border-radius:12px;font-weight:700">🏖 全天休假</span>
+              </div>
+              <div style="font-size:12px;color:#e65100;margin-top:6px">${p._leave?.title || '請假'} · 不需填寫</div>
             </div>`).join('')}
           </div>
         `;
@@ -24133,13 +24191,31 @@ window.loadJournalHistoryFilter = async function() {
   const start = state.data.journalHistStart;
   const end   = state.data.journalHistEnd;
   let q = db.from('work_journals').select('*').order('date', { ascending: false }).limit(500);
+  // 同時拉這段期間的「請假」事項,讓歷史列表也能標示休假
+  const rangeStart = (mode === 'date') ? date : start;
+  const rangeEnd   = (mode === 'date') ? date : end;
+  let leaveQ = null;
+  if (rangeStart && rangeEnd) {
+    leaveQ = db.from('calendar_events')
+      .select('id, title, start_date, end_date, start_time, end_time, event_type, assigned_to, assignee_ids')
+      .lte('start_date', rangeEnd)
+      .or(`end_date.gte.${rangeStart},end_date.is.null`)
+      .neq('is_template', true);
+  }
   if (mode === 'date' && date) {
     q = q.eq('date', date);
   } else if (mode === 'range' && start && end) {
     q = q.gte('date', start).lte('date', end);
   }
-  const { data } = await q;
-  if (data) state.data.journal.history = data;
+  const [histRes, leaveRes] = await Promise.all([q, leaveQ || Promise.resolve({ data: [] })]);
+  if (histRes.data) state.data.journal.history = histRes.data;
+  // 篩出請假分類的事項
+  const _calTypesH = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
+  state.data.journal.historyLeave = (leaveRes.data || []).filter(ev => {
+    const t = (ev?.event_type||'').toLowerCase();
+    if (t === 'leave') return true;
+    return (_calTypesH[ev?.event_type]?.label||'').includes('請假');
+  });
   renderApp(); // 資料回來後才重新渲染
 };
 
