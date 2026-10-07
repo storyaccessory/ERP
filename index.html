@@ -33484,7 +33484,7 @@ function renderPurchases() {
                   onchange="window._puInlineField('${r.id}','actual_qty',this.value)">
               </td>
               <td>
-                <input type="date" value="${r.arrival_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px"
+                <input type="date" value="${r.arrival_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:${r.arrival_date?'#e0f2f1':''}"
                   onchange="window._puInlineField('${r.id}','arrival_date',this.value)"
                   title="物品實際到達日期(集運/自取);填了自動變已到貨並提醒申請人 QC">
               </td>
@@ -33513,7 +33513,12 @@ function renderPurchases() {
                   const canConfirm = r.arrived_qty != null && !isNaN(parseFloat(r.arrived_qty));
                   const confirmed = r.status === '結案' && !!r.qc_qty;
                   if (!canConfirm) return '<span title="請先填實際到貨數" style="color:#ccc;font-size:11px">—</span>';
-                  return `<input type="checkbox" ${confirmed?'checked':''} onchange="window._puConfirmQc('${r.id}',this.checked)" style="width:18px;height:18px;cursor:pointer;accent-color:#2e7d32" title="${confirmed?'已入庫完成(勾掉撤回)':'打勾視為入庫完成,自動結案'}">`;
+                  if (confirmed) {
+                    return `<span onclick="window._puConfirmQc('${r.id}',false)" title="已入庫 · 點擊撤回"
+                      style="display:inline-block;cursor:pointer;color:#2e7d32;font-size:20px;font-weight:900;line-height:1">✓</span>`;
+                  }
+                  return `<span onclick="window._puConfirmQc('${r.id}',true)" title="點擊確認入庫完成,自動結案"
+                    style="display:inline-flex;align-items:center;justify-content:center;cursor:pointer;width:20px;height:20px;border:1.5px solid #c0c0c0;border-radius:3px;color:transparent"></span>`;
                 })()}
               </td>
               <td>
