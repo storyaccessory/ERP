@@ -23898,7 +23898,7 @@ function renderJournal() {
   // 日誌生效日(某人從哪天開始要填);早於此日的統計不列入
   const _journalStartFor = (p) => {
     if (!p) return null;
-    if (p.name === '蔡采玲' || p.email === 'cailing0516@gmail.com') return '2026-08-01';
+    if (p.name === '蔡采玲' || p.email === 'cailing0516@gmail.com') return '2026-09-01';
     return null;
   };
   // 綜合:此人在這天到底需不需要填
@@ -24812,7 +24812,7 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
     const allLogs = [...(jd.history||[]), ...(jd.today||[])];
     const userLogs = new Set(allLogs.filter(l => l.user_id === myId).map(l => l.date));
     // 生效日前不列
-    const _since = (myProfile?.name === '蔡采玲' || myProfile?.email === 'cailing0516@gmail.com') ? '2026-08-01' : null;
+    const _since = (myProfile?.name === '蔡采玲' || myProfile?.email === 'cailing0516@gmail.com') ? '2026-09-01' : null;
     const _calTypesLj = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
     const _isLeaveLj = ev => {
       const t = (ev?.event_type||'').toLowerCase();
