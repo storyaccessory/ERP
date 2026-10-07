@@ -33294,12 +33294,21 @@ function renderPurchases() {
 
   let filtered = list;
   if (activeStatus === '未結案') filtered = filtered.filter(r => r.status !== '結案' && r.status !== '暫不採購');
+  else if (activeStatus === '異常') filtered = filtered.filter(r => {
+    if (r.status === '結案' || r.status === '暫不採購') return false;
+    const purchased = parseFloat(r.actual_qty)||0;
+    const qc = parseFloat(r.qc_qty)||0;
+    const defect = parseFloat(r.defect_qty)||0;
+    const short = purchased > 0 && qc > 0 ? Math.max(0, purchased - qc) : 0;
+    return defect > 0 || short > 0;
+  });
   else if (activeStatus !== '全部') filtered = filtered.filter(r => r.status === activeStatus);
   if (searchQ) filtered = filtered.filter(r =>
     (r.item_name||'').toLowerCase().includes(searchQ) ||
     (r.requester_name||'').toLowerCase().includes(searchQ) ||
     (r.purchaser_name||'').toLowerCase().includes(searchQ) ||
-    (r.category||'').toLowerCase().includes(searchQ)
+    (r.category||'').toLowerCase().includes(searchQ) ||
+    (r.defect_note||'').toLowerCase().includes(searchQ)
   );
 
   // 排序:狀態 → 日期(新→舊) → 品項名(相近的放一起)
@@ -33327,18 +33336,42 @@ function renderPurchases() {
   const catText  = { '商品':'#ad1457','包材':'#0277bd','耗材':'#e65100','零件':'#2e7d32','辦公用品':'#6a1b9a','其他':'#616161' };
 
   return `
-    <div class="cards cards-5" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(5,1fr);gap:12px">
+    <div class="cards cards-6" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(6,1fr);gap:12px">
       <div class="card" style="border-left:4px solid #e53935"><div class="card-title">🔔 待指派</div><div class="card-value" style="color:#c62828">${stats.待指派}</div></div>
       <div class="card"><div class="card-title">⏳ 待採購</div><div class="card-value warning">${stats.待採購}</div></div>
       <div class="card"><div class="card-title">📮 已採購</div><div class="card-value accent">${stats.已採購}</div></div>
       <div class="card" style="border-left:4px solid #d84315"><div class="card-title">📦 待點收入庫</div><div class="card-value" style="color:#d84315">${list.filter(r => r.status === '已到貨' && !r.qc_qty).length}</div></div>
+      ${(() => {
+        const abn = (list||[]).filter(r => {
+          if (r.status === '結案' || r.status === '暫不採購') return false;
+          const purchased = parseFloat(r.actual_qty)||0;
+          const qc = parseFloat(r.qc_qty)||0;
+          const defect = parseFloat(r.defect_qty)||0;
+          const short = purchased > 0 && qc > 0 ? Math.max(0, purchased - qc) : 0;
+          return defect > 0 || short > 0;
+        }).length;
+        return `<div class="card" style="border-left:4px solid #c62828;cursor:pointer" onclick="state.data._purchaseStatus='異常';renderApp()" title="點擊只看異常"><div class="card-title">🚨 異常待處理</div><div class="card-value" style="color:#c62828">${abn}</div></div>`;
+      })()}
       <div class="card"><div class="card-title">✅ 結案</div><div class="card-value success">${stats.結案}</div></div>
     </div>
     <div class="tabs">
-      ${['未結案','全部','待指派','待採購','已採購','已到貨','結案','暫不採購'].map(s => {
+      ${['未結案','異常','全部','待指派','待採購','已採購','已到貨','結案','暫不採購'].map(s => {
         const openCount = list.filter(r => r.status !== '結案' && r.status !== '暫不採購').length;
-        const n = s === '未結案' ? openCount : (s === '全部' ? 0 : stats[s]);
-        return `<div class="tab ${activeStatus===s?'active':''}" data-purchase-status="${s}">${s}${n?` <span style="opacity:.6">(${n})</span>`:''}</div>`;
+        const abnCount = list.filter(r => {
+          if (r.status === '結案' || r.status === '暫不採購') return false;
+          const purchased = parseFloat(r.actual_qty)||0;
+          const qc = parseFloat(r.qc_qty)||0;
+          const defect = parseFloat(r.defect_qty)||0;
+          const short = purchased > 0 && qc > 0 ? Math.max(0, purchased - qc) : 0;
+          return defect > 0 || short > 0;
+        }).length;
+        let n;
+        if (s === '未結案') n = openCount;
+        else if (s === '異常') n = abnCount;
+        else if (s === '全部') n = 0;
+        else n = stats[s];
+        const extra = s === '異常' ? ';color:#c62828;font-weight:700' : '';
+        return `<div class="tab ${activeStatus===s?'active':''}" data-purchase-status="${s}" style="${extra}">${s}${n?` <span style="opacity:.6">(${n})</span>`:''}</div>`;
       }).join('')}
     </div>
     <div class="search-bar">
@@ -34786,12 +34819,21 @@ window._puToggleSelAll = function(checked) {
   const searchQ = (state.data._purchaseSearch || '').toLowerCase().trim();
   let filtered = list;
   if (activeStatus === '未結案') filtered = filtered.filter(r => r.status !== '結案' && r.status !== '暫不採購');
+  else if (activeStatus === '異常') filtered = filtered.filter(r => {
+    if (r.status === '結案' || r.status === '暫不採購') return false;
+    const purchased = parseFloat(r.actual_qty)||0;
+    const qc = parseFloat(r.qc_qty)||0;
+    const defect = parseFloat(r.defect_qty)||0;
+    const short = purchased > 0 && qc > 0 ? Math.max(0, purchased - qc) : 0;
+    return defect > 0 || short > 0;
+  });
   else if (activeStatus !== '全部') filtered = filtered.filter(r => r.status === activeStatus);
   if (searchQ) filtered = filtered.filter(r =>
     (r.item_name||'').toLowerCase().includes(searchQ) ||
     (r.requester_name||'').toLowerCase().includes(searchQ) ||
     (r.purchaser_name||'').toLowerCase().includes(searchQ) ||
-    (r.category||'').toLowerCase().includes(searchQ)
+    (r.category||'').toLowerCase().includes(searchQ) ||
+    (r.defect_note||'').toLowerCase().includes(searchQ)
   );
   filtered.forEach(r => state.data._puSel.add(r.id));
   renderApp();
