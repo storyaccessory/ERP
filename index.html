@@ -33372,15 +33372,18 @@ function renderPurchases() {
             <th style="width:90px">負責人</th>
             <th style="width:110px">採購狀態</th>
             <th style="width:90px">採購日期</th>
-            <th style="width:110px">實際採購數</th>
+            <th style="width:90px">採購數</th>
             <th style="width:100px">到貨日期</th>
-            <th style="width:110px">實際入庫數</th>
-            <th style="width:200px">QC 備註</th>
-            <th style="width:110px">QC 入庫日期</th>
+            <th style="width:90px">實際到貨</th>
+            <th style="width:80px">瑕疵</th>
+            <th style="width:90px">實際入庫</th>
+            <th style="width:110px">異常</th>
+            <th style="width:160px">QC / 異常備註</th>
+            <th style="width:100px">QC 入庫日期</th>
             <th style="width:40px"></th>
           </tr></thead>
           <tbody>
-          ${filtered.length===0 ? `<tr><td colspan="16"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
+          ${filtered.length===0 ? `<tr><td colspan="18"><div class="empty"><div class="empty-icon">🛒</div><p>沒有符合的採購申請</p></div></td></tr>` :
             filtered.map(r => `<tr style="${state.data._puSel?.has(r.id)?'background:#fff3e0':''}">
               <td style="text-align:center">
                 <input type="checkbox" ${state.data._puSel?.has(r.id)?'checked':''} onchange="window._puToggleSel('${r.id}',this.checked)">
@@ -33452,13 +33455,45 @@ function renderPurchases() {
                   title="物品實際到達日期(集運/自取);填了自動變已到貨並提醒申請人 QC">
               </td>
               <td>
-                <input type="number" min="0" step="1" value="${r.qc_qty||''}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px;background:${r.qc_qty?'#e8f5e9':''}"
-                  onchange="window._puInlineQcQty('${r.id}',this.value)"
-                  title="QC 點過的實收數量,填了自動結案">
+                <input type="number" min="0" step="1" value="${r.arrived_qty??''}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px;background:${r.arrived_qty?'#e0f2f1':''}"
+                  onchange="window._puInlineQcCombo('${r.id}','arrived_qty',this.value)"
+                  title="QC 填 · 廠商實際寄來多少">
               </td>
               <td>
-                <input type="text" value="${(r.arrived_note||'').toString().replace(/"/g,'&quot;')}" placeholder="備註(選填)" style="width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px"
-                  onchange="window._puInlineField('${r.id}','arrived_note',this.value)">
+                <input type="number" min="0" step="1" value="${r.defect_qty??''}" placeholder="0" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid #ffcdd2;border-radius:4px;background:${r.defect_qty>0?'#ffebee':''};color:${r.defect_qty>0?'#c62828':'inherit'};font-weight:${r.defect_qty>0?700:400}"
+                  onchange="window._puInlineQcCombo('${r.id}','defect_qty',this.value)"
+                  title="QC 填 · 到了但有問題的數量">
+              </td>
+              <td>
+                ${(() => {
+                  const arrived = parseFloat(r.arrived_qty)||0;
+                  const defect = parseFloat(r.defect_qty)||0;
+                  const auto = arrived > 0 ? Math.max(0, arrived - defect) : null;
+                  return auto !== null
+                    ? `<div style="padding:3px 6px;font-size:13px;text-align:center;color:#2e7d32;font-weight:700;background:#e8f5e9;border-radius:4px" title="自動 = 實際到貨 − 瑕疵">${auto}</div>`
+                    : `<div style="padding:3px 6px;font-size:12px;text-align:center;color:var(--muted)">—</div>`;
+                })()}
+              </td>
+              <td>
+                ${(() => {
+                  const purchased = parseFloat(r.actual_qty)||0;
+                  const arrived = parseFloat(r.arrived_qty)||0;
+                  const defect = parseFloat(r.defect_qty)||0;
+                  const qc = arrived > 0 ? Math.max(0, arrived - defect) : 0;
+                  const short = purchased > 0 && qc > 0 ? Math.max(0, purchased - qc) : 0;
+                  const hasDefect = defect > 0;
+                  const hasShort = short > 0;
+                  if (!arrived && !defect) return '<span style="color:var(--muted);font-size:11px">—</span>';
+                  if (!hasDefect && !hasShort) return '<span style="color:#2e7d32;font-size:11px;font-weight:600">✅ 正常</span>';
+                  const chips = [];
+                  if (hasDefect) chips.push(`<span style="display:inline-block;background:#ffebee;color:#c62828;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin:1px">⚠ 瑕疵 ${defect}</span>`);
+                  if (hasShort) chips.push(`<span style="display:inline-block;background:#fff3e0;color:#e65100;font-size:10px;font-weight:700;padding:2px 7px;border-radius:10px;margin:1px">⚠ 短少 ${short}</span>`);
+                  return chips.join('');
+                })()}
+              </td>
+              <td>
+                <input type="text" value="${(r.defect_note||r.arrived_note||'').toString().replace(/"/g,'&quot;')}" placeholder="備註 / 異常說明" style="width:100%;padding:3px 6px;font-size:12px;border:1px solid var(--border);border-radius:4px"
+                  onchange="window._puInlineField('${r.id}','defect_note',this.value)">
               </td>
               <td>
                 <input type="date" value="${r.arrived_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:${r.arrived_date?'#e8f5e9':''}"
@@ -35272,6 +35307,29 @@ window.modalPartsToPurchase = async function(preFilteredIds = null) {
 };
 
 // 填實際入庫數(qc_qty)→ 結案 + 兩個子任務都打勾 + 自動填 QC 入庫日期 + 若有 part_id 自動加庫存
+// QC 新流程:填「實際到貨」或「瑕疵」→ 自動計算 qc_qty = 到貨 - 瑕疵
+// 並沿用原本 qc_qty 的所有副作用(結案、庫存、行事曆打勾…)
+window._puInlineQcCombo = async function(id, field, value) {
+  const r = (state.data.purchases||[]).find(x=>x.id===id);
+  if (!r) return;
+  const num = value === '' ? null : parseFloat(value);
+  if (isNaN(num) && value !== '') { showToast('請輸入數字','error'); return; }
+  // 先把新值寫到 DB(不直接呼叫 _puInlineQcQty,因為 field 可能是 defect 不是 qc)
+  const upd = {};
+  upd[field] = num;
+  // 計算新的 qc_qty
+  const newArrived = field === 'arrived_qty' ? num : (r.arrived_qty != null ? parseFloat(r.arrived_qty) : null);
+  const newDefect  = field === 'defect_qty'  ? (num||0) : (r.defect_qty != null ? parseFloat(r.defect_qty) : 0);
+  const newQc = (newArrived != null && !isNaN(newArrived)) ? Math.max(0, newArrived - (newDefect||0)) : null;
+  upd.qc_qty = newQc;
+  const { error: upErr } = await db.from('purchase_requests').update(upd).eq('id', id);
+  if (upErr) { showToast('更新失敗:'+upErr.message,'error'); return; }
+  // 更新 state 讓後續 _puInlineQcQty 看到最新值
+  Object.assign(r, upd);
+  // 讓 qc_qty 路徑接手處理「結案 / 庫存 / 行事曆」
+  await window._puInlineQcQty(id, newQc == null ? '' : String(newQc));
+};
+
 window._puInlineQcQty = async function(id, value) {
   const r = (state.data.purchases||[]).find(x=>x.id===id);
   if (!r) return;
