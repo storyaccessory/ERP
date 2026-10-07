@@ -33488,14 +33488,21 @@ function renderPurchases() {
                   title="物品實際到達日期(集運/自取);填了自動變已到貨並提醒申請人 QC">
               </td>
               <td>
-                <input type="number" min="0" step="1" value="${r.arrived_qty??''}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px;background:${r.arrived_qty?'#e0f2f1':''}"
-                  onchange="window._puInlineQcCombo('${r.id}','arrived_qty',this.value)"
-                  title="QC 填 · 廠商實際寄來多少">
+                ${(() => {
+                  const v = r.arrived_qty;
+                  if (v == null || v === '') return `<button class="btn-table" style="padding:3px 8px;font-size:11px;background:#e0f2f1;color:#00695c;border:1px solid #80cbc4" onclick="window._puOpenQcModal('${r.id}')">📝 填入庫</button>`;
+                  return `<div style="padding:3px 6px;font-size:13px;text-align:center;color:#00695c;font-weight:700;background:#e0f2f1;border-radius:4px;cursor:pointer" onclick="window._puOpenQcModal('${r.id}')" title="點擊修改">${v}</div>`;
+                })()}
               </td>
               <td>
-                <input type="number" min="0" step="1" value="${r.defect_qty??''}" placeholder="0" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid #ffcdd2;border-radius:4px;background:${r.defect_qty>0?'#ffebee':''};color:${r.defect_qty>0?'#c62828':'inherit'};font-weight:${r.defect_qty>0?700:400}"
-                  onchange="window._puInlineQcCombo('${r.id}','defect_qty',this.value)"
-                  title="QC 填 · 到了但有問題的數量">
+                ${(() => {
+                  const v = r.defect_qty;
+                  if (r.arrived_qty == null) return '<div style="padding:3px 6px;font-size:12px;text-align:center;color:var(--muted)">—</div>';
+                  const d = parseFloat(v)||0;
+                  return d > 0
+                    ? `<div style="padding:3px 6px;font-size:13px;text-align:center;color:#c62828;font-weight:700;background:#ffebee;border-radius:4px;cursor:pointer" onclick="window._puOpenQcModal('${r.id}')">${d}</div>`
+                    : `<div style="padding:3px 6px;font-size:12px;text-align:center;color:#2e7d32;cursor:pointer" onclick="window._puOpenQcModal('${r.id}')" title="點擊修改">0</div>`;
+                })()}
               </td>
               <td>
                 ${(() => {
@@ -35388,6 +35395,79 @@ window.modalPartsToPurchase = async function(preFilteredIds = null) {
 };
 
 // 填實際入庫數(qc_qty)→ 結案 + 兩個子任務都打勾 + 自動填 QC 入庫日期 + 若有 part_id 自動加庫存
+// 列表上「📝 填入庫」按鈕 → 打開 QC 填寫小 modal
+window._puOpenQcModal = async function(id) {
+  const r = (state.data.purchases||[]).find(x => x.id === id);
+  if (!r) { showToast('找不到該筆','error'); return; }
+  const purchased = parseFloat(r.actual_qty)||0;
+  const curArr = r.arrived_qty ?? '';
+  const curDef = r.defect_qty ?? '';
+  const curNote = r.defect_note || r.arrived_note || '';
+  showModal(`📦 點收入庫 · ${r.item_name||''}`, `
+    <div style="font-size:12px;color:var(--muted);margin-bottom:12px">
+      採購數 ${purchased || '—'} ${r.vendor?' · 廠商 '+r.vendor:''}
+    </div>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:12px;margin-bottom:12px">
+      <div class="form-group">
+        <label>實際到貨 <span style="color:var(--danger)">*</span></label>
+        <input type="number" min="0" step="1" class="form-control" id="qcm-arrived" value="${curArr}" placeholder="廠商寄來多少" oninput="window._puQcModalRecalc()" autofocus>
+      </div>
+      <div class="form-group">
+        <label>瑕疵數</label>
+        <input type="number" min="0" step="1" class="form-control" id="qcm-defect" value="${curDef}" placeholder="到了但不良" oninput="window._puQcModalRecalc()" style="border-color:#ffcdd2">
+      </div>
+    </div>
+    <div id="qcm-summary" style="padding:12px;background:#f5f5f5;border-radius:6px;margin-bottom:12px;font-size:14px;text-align:center">
+      <span style="color:var(--muted)">填入到貨數後會算出入庫數</span>
+    </div>
+    <div class="form-group">
+      <label>備註 / 異常說明 <span style="font-size:11px;color:var(--muted);font-weight:400">(有瑕疵或短少時建議寫清楚,方便跟廠商對帳)</span></label>
+      <textarea class="form-control" id="qcm-note" rows="3" placeholder="例:抽拉卡住 A01-A05 已通知廠商補出">${curNote.replace(/</g,'&lt;')}</textarea>
+    </div>
+  `, [
+    { label: '✓ 確認入庫 / 結案', primary: true, onclick: async () => {
+      const a = parseFloat(document.getElementById('qcm-arrived').value);
+      const d = parseFloat(document.getElementById('qcm-defect').value)||0;
+      const note = document.getElementById('qcm-note').value.trim() || null;
+      if (isNaN(a) || a < 0) { showToast('請填實際到貨數','error'); return; }
+      const qc = Math.max(0, a - d);
+      // 先寫入到貨/瑕疵/備註,再呼叫 _puInlineQcQty 把 qc_qty 寫入並觸發結案流程
+      const { error } = await db.from('purchase_requests').update({
+        arrived_qty: a, defect_qty: d, defect_note: note
+      }).eq('id', id);
+      if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+      // 更新 state
+      Object.assign(r, { arrived_qty: a, defect_qty: d, defect_note: note });
+      closeModal();
+      // 用 qc_qty 流程進結案
+      await window._puInlineQcQty(id, String(qc));
+    }},
+    { label: '取消', onclick: closeModal },
+  ]);
+  setTimeout(() => window._puQcModalRecalc(), 0);
+};
+
+// QC modal 填入當下的即時摘要
+window._puQcModalRecalc = function() {
+  const summary = document.getElementById('qcm-summary');
+  if (!summary) return;
+  const a = parseFloat(document.getElementById('qcm-arrived')?.value);
+  const d = parseFloat(document.getElementById('qcm-defect')?.value)||0;
+  if (isNaN(a) || a < 0) {
+    summary.innerHTML = '<span style="color:var(--muted)">填入到貨數後會算出入庫數</span>';
+    return;
+  }
+  const qc = Math.max(0, a - d);
+  // purchased 從 modal 顯示文字拿不到,直接看 state
+  const purchased = parseFloat(summary.closest('.modal')?.querySelector('[data-pu-purchased]')?.textContent) || 0;
+  const short = purchased > 0 && qc > 0 ? Math.max(0, purchased - qc) : 0;
+  const parts = [`入庫數 = ${a} − ${d} = <b style="font-size:18px;color:#2e7d32">${qc}</b>`];
+  if (d > 0) parts.push(`<span style="color:#c62828;font-weight:700">⚠ 瑕疵 ${d}</span>`);
+  if (short > 0) parts.push(`<span style="color:#e65100;font-weight:700">⚠ 短少 ${short}</span>`);
+  if (d === 0 && short === 0) parts.push(`<span style="color:#2e7d32;font-weight:700">✅ 正常</span>`);
+  summary.innerHTML = parts.join(' · ');
+};
+
 // 編輯 modal 的「到貨 QC」區塊:實時重算摘要列
 window._puModalRecalcQc = function() {
   const summary = document.getElementById('pu-qc-summary');
