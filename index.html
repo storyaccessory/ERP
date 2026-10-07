@@ -24279,11 +24279,12 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
   const tpl = JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
   const existingFields = existing?.fields || {};
 
-  // 補填:可選今天起往前 2 個「工作天」(週六日不算);未來日期不允許
+  // 補填範圍上限工作天數 (⚠️ 暫時開放到 365 天,等 MIKI 通知再改回 2)
+  const JNL_BACKFILL_WORKDAYS = 365;
   const _jnlMinDate = (() => {
     const d = new Date(today+'T00:00:00');
     let workDaysBack = 0;
-    while (workDaysBack < 2) {
+    while (workDaysBack < JNL_BACKFILL_WORKDAYS) {
       d.setDate(d.getDate() - 1);
       const dow = d.getDay();
       if (dow !== 0 && dow !== 6) workDaysBack++;
@@ -24298,7 +24299,7 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
         ? `<span style="font-size:13px;color:var(--text);font-weight:600">${logDate}</span>`
         : `<input type="date" id="jnl-log-date" value="${today}" min="${_jnlMinDate}" max="${today}"
              style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;color:var(--text)">
-           <span style="font-size:11px;color:var(--muted)">(可補填近 2 個工作天內,週末不計入)</span>`}
+           <span style="font-size:11px;color:#e65100;background:#fff3e0;padding:2px 8px;border-radius:10px;font-weight:600">⚠ 暫時開放無限補填中</span>`}
       <span style="color:var(--muted)">·</span>
       <span>${myName}</span>
     </div>
@@ -24414,7 +24415,7 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
       const _picked = document.getElementById('jnl-log-date')?.value || '';
       const _dateToUse = existing ? logDate : (_picked || today);
       if (!existing && (_dateToUse > today || _dateToUse < _jnlMinDate)) {
-        showToast('只能補填今天起前 2 個工作天內的日誌(週末不計入)', 'error');
+        showToast(`只能補填今天起前 ${JNL_BACKFILL_WORKDAYS} 個工作天內的日誌(週末不計入)`, 'error');
         return;
       }
       // 若補填的那天已有 log → 改為更新那筆
