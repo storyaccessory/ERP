@@ -29539,6 +29539,19 @@ window._calToggleSubtask = async function(evId, subIdx, checked) {
   }
   if (!ev || !Array.isArray(ev.subtasks)) { showToast('找不到事項', 'error'); return; }
   const prevDone = ev.subtasks[subIdx].done;
+  // 若是「採購提醒」的子任務(id 以 pu_ 開頭)→ 禁止直接勾結案
+  // 必須到採購系統填「實際入庫數」才能結案;這裡阻擋 + 給出引導
+  const _sub = ev.subtasks[subIdx];
+  if (checked && typeof _sub?.id === 'string' && _sub.id.startsWith('pu_')) {
+    showToast('請到「採購申請」系統填寫「實際入庫數」才能結案', 'error');
+    // 把 checkbox 復原
+    const row = document.getElementById('cal-view-sub-'+subIdx);
+    if (row) {
+      const cb = row.querySelector('input[type=checkbox]');
+      if (cb) cb.checked = false;
+    }
+    return;
+  }
   ev.subtasks[subIdx].done = checked;
   // 更新 DOM 樣式(樂觀更新)
   const row = document.getElementById('cal-view-sub-'+subIdx);
@@ -34468,6 +34481,11 @@ window._puMoveStatus = async function(id, existing, newStatus) {
     return;
   }
   const fields = window._puCollect(existing);
+  // 結案前必須有實際入庫數 — 避免「沒點收就結案」
+  if (newStatus === '結案' && !fields.qc_qty && !existing.qc_qty) {
+    showToast('請先填「實際入庫數(QC 點收數量)」才能結案', 'error');
+    return;
+  }
   fields.status = newStatus;
   // 到貨自動填今天
   if (newStatus === '已到貨' && !fields.arrived_date) fields.arrived_date = _localToday();
