@@ -23825,22 +23825,53 @@ function renderJournal() {
   };
 
   // 計算 userId 本月統計:{ submitted, required, missed[], rate }
-  //  required = 本月開始到昨天的工作天(扣全天休假);submitted = 這些天有交的
+  //  required = 當月開始到結束(或今天 — 若是當月)的工作天(扣全天休假);submitted = 這些天有交的
+  //  targetYm 預設當月,老闆排行榜會傳入選到的月份
   const _statsYm = today.slice(0,7);
-  const _getMonthStats = (userId) => {
-    const allLogs = [...(jd.history||[]), ...(jd.today||[])];
+  const _getMonthStats = (userId, targetYm = _statsYm) => {
+    const isCurrentMonth = targetYm === _statsYm;
+    const monStart = `${targetYm}-01`;
+    // 當月結束日期 → 今天前一天;歷史月份 → 該月月底
+    const [ty, tm] = targetYm.split('-').map(Number);
+    const monEnd = isCurrentMonth ? _dateAdd(today, -1) : `${targetYm}-${String(new Date(ty, tm, 0).getDate()).padStart(2,'0')}`;
+    // 歷史月份:logs 可能需要從 bossMonthLogs 快取取;當月用 history+today
+    const bossCache = (jd.bossMonthCache && jd.bossMonthCache[targetYm]) || null;
+    const allLogs = bossCache ? bossCache.logs : [...(jd.history||[]), ...(jd.today||[])];
+    const leaveSrc = bossCache ? bossCache.leaves : (jd.leaveEvents||[]);
     const userLogs = new Set(
-      allLogs.filter(l => l.user_id === userId && l.date?.startsWith(_statsYm)).map(l => l.date)
+      allLogs.filter(l => l.user_id === userId && l.date?.startsWith(targetYm)).map(l => l.date)
     );
-    const monStart = `${_statsYm}-01`;
-    const yesterday = _dateAdd(today, -1);
+    // leave 查詢:臨時 helper(bossCache 時用 cache 的 leave)
+    const _calTypesS = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
+    const _getLeaveS = (uid, ds) => {
+      const evs = leaveSrc.filter(ev => {
+        const t = (ev?.event_type||'').toLowerCase();
+        const isLeave = t === 'leave' || (_calTypesS[ev?.event_type]?.label||'').includes('請假');
+        if (!isLeave) return false;
+        const sd = ev.start_date||'';
+        const ed = ev.end_date||ev.start_date||'';
+        if (ds < sd || ds > ed) return false;
+        const ids = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
+        return ids.includes(uid);
+      });
+      if (!evs.length) return null;
+      for (const ev of evs) {
+        const st = (ev.start_time||'').slice(0,5);
+        if (!st) return { fullDay: true };
+        const sh = parseInt(st.slice(0,2));
+        const et = (ev.end_time||'').slice(0,5);
+        const eh = et ? parseInt(et.slice(0,2)) : null;
+        if (sh <= 9 && (eh==null || eh >= 18)) return { fullDay: true };
+      }
+      return { fullDay: false };
+    };
     const missed = [];
     let required = 0;
     let submitted = 0;
     let cur = monStart;
-    while (cur <= yesterday) {
+    while (cur <= monEnd) {
       if (_isWorkday(cur)) {
-        const li = _getLeaveInfo(userId, cur);
+        const li = _getLeaveS(userId, cur);
         if (!li?.fullDay) {
           required++;
           if (userLogs.has(cur)) submitted++;
@@ -24263,23 +24294,52 @@ function renderJournal() {
       </div>`;
     })()}
     ${(() => {
-      // ── Layer 2b:主管/老闆專屬 — 全員本月漏填排行 ──
-      if (!isAdmin) return '';
+      // ── Layer 2b:老闆專屬 — 全員月漏填排行(只有 role=admin 或指定信箱) ──
+      const _isBoss = (myProfile?.role === 'admin') || (myProfile?.email === 'cailing0516@gmail.com');
+      if (!_isBoss) return '';
       const required = (profiles||[]).filter(p => p.journal_required);
       if (!required.length) return '';
+      const _targetYm = state.data.journalBossYm || today.slice(0,7);
+      const isCurrent = _targetYm === today.slice(0,7);
+      const bossCache = (jd.bossMonthCache && jd.bossMonthCache[_targetYm]) || null;
+      // 歷史月份 → 無 7 天指示條(避開跨月混淆);當月才顯示
       const rows = required.map(p => {
-        const s = _getMonthStats(p.id);
-        return { profile: p, ...s, strip: _render7DayStrip(p.id) };
+        const s = _getMonthStats(p.id, _targetYm);
+        return { profile: p, ...s, strip: isCurrent ? _render7DayStrip(p.id) : '' };
       }).sort((a,b) => (b.missed.length - a.missed.length) || (a.rate - b.rate) || a.profile.name.localeCompare(b.profile.name,'zh-TW'));
-      const _mon = parseInt(today.slice(5,7));
+      const _mon = parseInt(_targetYm.slice(5,7));
+      const _year = _targetYm.slice(0,4);
       const totalMissed = rows.reduce((s,r) => s + r.missed.length, 0);
+      // 月份快捷按鈕:當月 + 近 5 個月
+      const monthChips = (() => {
+        const list = [];
+        const d = new Date(today.slice(0,7)+'-01T00:00:00');
+        for (let i = 0; i < 6; i++) {
+          const ym = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+          list.push({ ym, label: `${d.getMonth()+1}月`, year: d.getFullYear() });
+          d.setMonth(d.getMonth() - 1);
+        }
+        return list;
+      })();
+      // 歷史月份未載入 → 顯示載入按鈕
+      const needsLoad = !isCurrent && !bossCache;
       return `<div class="card" style="margin-bottom:12px;padding:12px 14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
-          <div style="font-size:13px;font-weight:700;color:var(--accent-dark)">📊 全員本月漏填排行 · ${_mon} 月</div>
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
+          <div style="font-size:13px;font-weight:700;color:var(--accent-dark)">📊 全員月漏填排行 · ${_year} 年 ${_mon} 月</div>
           <span style="font-size:11px;color:${totalMissed>0?'#c62828':'#2e7d32'};background:${totalMissed>0?'#ffebee':'#e8f5e9'};padding:2px 10px;border-radius:10px;font-weight:600">
             總漏填 ${totalMissed} 次
           </span>
         </div>
+        <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
+          <span style="font-size:11px;color:var(--muted);margin-right:4px">月份:</span>
+          ${monthChips.map(m => `<button type="button" onclick="window.loadJournalBossMonth('${m.ym}')"
+            style="font-size:11px;padding:3px 10px;border-radius:12px;border:1px solid ${_targetYm===m.ym?'var(--accent)':'var(--border)'};background:${_targetYm===m.ym?'var(--accent)':'#fff'};color:${_targetYm===m.ym?'#fff':'var(--text)'};cursor:pointer;font-weight:${_targetYm===m.ym?700:400}">
+            ${m.year === parseInt(today.slice(0,4)) ? m.label : `${m.year}/${m.label}`}
+          </button>`).join('')}
+          <input type="month" value="${_targetYm}" onchange="window.loadJournalBossMonth(this.value)"
+            style="font-size:11px;padding:3px 6px;border:1px solid var(--border);border-radius:6px;margin-left:4px">
+        </div>
+        ${needsLoad ? `<div style="padding:14px;text-align:center;background:#fff8e1;border:1px dashed #ffb74d;border-radius:6px;color:#e65100;font-size:12px">⏳ 載入 ${_year} 年 ${_mon} 月資料中…</div>` : `
         <div style="overflow-x:auto">
           <table style="width:100%;border-collapse:collapse;font-size:12px">
             <thead>
@@ -24309,6 +24369,7 @@ function renderJournal() {
           </table>
         </div>
         <div style="font-size:10px;color:var(--muted);margin-top:6px">圖例:✓ 已填 · ✗ 漏填 · 休 全天休假 · 假 國定假日 · 今 今天尚未填 · 一~日 週末。點姓名跳到該人歷史。</div>
+        `}
       </div>`;
     })()}
     <div style="display:flex;align-items:center;gap:10px;padding:12px 0 14px;flex-wrap:wrap">
@@ -24355,6 +24416,36 @@ window.loadJournalForDate = async function(date) {
 };
 
 // 全員歷史記錄：依篩選條件重新從 DB 拉資料（避免 300 筆快取不足的情況）
+// 老闆排行榜:載入指定月份的日誌 + 請假事項 → 寫入 bossMonthCache,再 render
+window.loadJournalBossMonth = async function(ym) {
+  state.data.journalBossYm = ym;
+  const curYm = _localToday().slice(0,7);
+  if (ym === curYm) {
+    // 當月直接用 jd.history + jd.today + jd.leaveEvents,不需另撈
+    renderApp();
+    return;
+  }
+  // 查該月整段
+  const monStart = `${ym}-01`;
+  const [y, m] = ym.split('-').map(Number);
+  const monEnd = `${ym}-${String(new Date(y, m, 0).getDate()).padStart(2,'0')}`;
+  // 查詢
+  const [logRes, leaveRes] = await Promise.all([
+    db.from('work_journals').select('*').gte('date', monStart).lte('date', monEnd),
+    db.from('calendar_events')
+      .select('id, title, start_date, end_date, start_time, end_time, event_type, assigned_to, assignee_ids')
+      .lte('start_date', monEnd)
+      .or(`end_date.gte.${monStart},end_date.is.null`)
+      .neq('is_template', true),
+  ]);
+  if (!state.data.journal.bossMonthCache) state.data.journal.bossMonthCache = {};
+  state.data.journal.bossMonthCache[ym] = {
+    logs: logRes.data || [],
+    leaves: leaveRes.data || [],
+  };
+  renderApp();
+};
+
 window.loadJournalHistoryFilter = async function() {
   const mode  = state.data.journalHistMode  || 'date';
   const date  = state.data.journalHistDate;
