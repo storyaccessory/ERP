@@ -23776,6 +23776,19 @@ function renderJournal() {
     const d = new Date(ds+'T00:00:00'); d.setDate(d.getDate()+days);
     return _localDateStr(d);
   };
+  // 日誌生效日(某人從哪天開始要填);早於此日的統計不列入
+  const _journalStartFor = (p) => {
+    if (!p) return null;
+    if (p.name === '蔡采玲' || p.email === 'cailing0516@gmail.com') return '2026-08-01';
+    return null;
+  };
+  // 綜合:此人在這天到底需不需要填
+  const _needsJournalOn = (p, ds) => {
+    if (!p?.journal_required) return false;
+    const since = _journalStartFor(p);
+    if (since && ds < since) return false;
+    return true;
+  };
 
   // ── 判斷某員工當天的請假狀態 ──
   // 回傳 { fullDay: boolean, timeRange: '09-12' | '全天' | null, title: '請假 事由' }
@@ -23830,10 +23843,15 @@ function renderJournal() {
   const _statsYm = today.slice(0,7);
   const _getMonthStats = (userId, targetYm = _statsYm) => {
     const isCurrentMonth = targetYm === _statsYm;
-    const monStart = `${targetYm}-01`;
+    const _profile = (profiles||[]).find(p => p.id === userId);
+    const _since = _journalStartFor(_profile);
+    let monStart = `${targetYm}-01`;
+    if (_since && _since > monStart) monStart = _since;  // 生效日之後才算
     // 當月結束日期 → 今天前一天;歷史月份 → 該月月底
     const [ty, tm] = targetYm.split('-').map(Number);
     const monEnd = isCurrentMonth ? _dateAdd(today, -1) : `${targetYm}-${String(new Date(ty, tm, 0).getDate()).padStart(2,'0')}`;
+    // 整月都在生效日之前 → 直接 0/0
+    if (monStart > monEnd) return { submitted: 0, required: 0, missed: [], rate: 100 };
     // 歷史月份:logs 可能需要從 bossMonthLogs 快取取;當月用 history+today
     const bossCache = (jd.bossMonthCache && jd.bossMonthCache[targetYm]) || null;
     const allLogs = bossCache ? bossCache.logs : [...(jd.history||[]), ...(jd.today||[])];
@@ -23887,6 +23905,8 @@ function renderJournal() {
   // 近 7 天指示條(含今天)
   // 回傳 chip HTML
   const _render7DayStrip = (userId) => {
+    const _profile = (profiles||[]).find(p => p.id === userId);
+    const _since = _journalStartFor(_profile);
     const allLogs = [...(jd.history||[]), ...(jd.today||[])];
     const userLogs = new Set(allLogs.filter(l => l.user_id === userId).map(l => l.date));
     const chips = [];
@@ -23898,8 +23918,11 @@ function renderJournal() {
       const dow = new Date(ds+'T00:00:00').getDay();
       const isWeekend = dow === 0 || dow === 6;
       const isNat = typeof getTwHoliday === 'function' && !!getTwHoliday(ds);
+      // 生效日之前 → 灰色「—」
+      const beforeStart = _since && ds < _since;
       let bg = '#f5f5f5', color = '#bbb', mark = '·', tip = `${ds} (${dowZ}) 週末/假日`;
-      if (isWeekend) { bg='#f5f5f5'; color='#bbb'; mark=dowZ; tip=`${ds} 週末`; }
+      if (beforeStart) { bg='#eee'; color='#999'; mark='—'; tip=`${ds} 尚未開始需填寫`; }
+      else if (isWeekend) { bg='#f5f5f5'; color='#bbb'; mark=dowZ; tip=`${ds} 週末`; }
       else if (isNat) { bg='#fce4ec'; color='#c62828'; mark='假'; tip=`${ds} ${getTwHoliday(ds)}`; }
       else if (li?.fullDay) { bg='#fff3e0'; color='#e65100'; mark='休'; tip=`${ds} 全天休假`; }
       else if (isToday && !userLogs.has(ds)) { bg='#e3f2fd'; color='#1565c0'; mark='今'; tip=`${ds} 今天 · 尚未填`; }
@@ -23914,8 +23937,8 @@ function renderJournal() {
   const todayView = () => {
     const allLogs = jd.today || [];
     const submittedIds = new Set(allLogs.map(l=>l.user_id));
-    // 分類:要填但未填的
-    const rawMissing = profiles.filter(p => p.journal_required && !submittedIds.has(p.id));
+    // 分類:要填但未填的(扣掉生效日還沒到的人)
+    const rawMissing = profiles.filter(p => _needsJournalOn(p, today) && !submittedIds.has(p.id));
     // 全天請假 → 不列入 missing、改列為「休假中」卡片
     const onFullLeave = [];
     const missing = [];
@@ -24113,7 +24136,7 @@ function renderJournal() {
       }
     }
     _datesInRange.forEach(d => { if (!grouped[d]) grouped[d] = []; });
-    // 需填日誌名單(受人員篩選影響)
+    // 需填日誌名單(受人員篩選影響;生效日另在每日 loop 內判斷)
     const _requiredPpl = profiles.filter(p => p.journal_required && (!filterPerson || p.id === filterPerson));
     // 歷史期間的請假資訊
     const _historyLeave = jd.historyLeave || [];
@@ -24149,7 +24172,9 @@ function renderJournal() {
       const isNationalHoliday = typeof getTwHoliday === 'function' && !!getTwHoliday(d);
       if (isWeekend || isNationalHoliday) { missingByDate[d] = []; onLeaveByDate[d] = []; return; }
       const submittedIds = new Set(grouped[d].map(l => l.user_id));
-      const notSubmitted = _requiredPpl.filter(p => !submittedIds.has(p.id));
+      // 當天真的需填的人(扣掉生效日之前的)
+      const dailyRequired = _requiredPpl.filter(p => _needsJournalOn(p, d));
+      const notSubmitted = dailyRequired.filter(p => !submittedIds.has(p.id));
       const _onLeave = [];
       const _miss = [];
       for (const p of notSubmitted) {
@@ -24221,8 +24246,8 @@ function renderJournal() {
           const missing = missingByDate[date] || [];
           const onLeave = onLeaveByDate[date] || [];
           const submittedCount = grouped[date].length;
-          // 需填 - 全天休假(全天休假不計入分母)
-          const requiredCount = _requiredPpl.length;
+          // 需填 - 全天休假(全天休假不計入分母);此日真的要填的名單用生效日判斷
+          const requiredCount = _requiredPpl.filter(p => _needsJournalOn(p, date)).length;
           const effectiveRequired = Math.max(0, requiredCount - onLeave.length);
           const summaryTag = (isWeekend || natHoliday)
             ? `<span style="font-size:11px;color:#c62828;background:#fce4ec;padding:2px 8px;border-radius:10px;font-weight:600;margin-left:8px">${natHoliday || '週末'} · 不需填寫</span>`
@@ -24302,8 +24327,16 @@ function renderJournal() {
       const _targetYm = state.data.journalBossYm || today.slice(0,7);
       const isCurrent = _targetYm === today.slice(0,7);
       const bossCache = (jd.bossMonthCache && jd.bossMonthCache[_targetYm]) || null;
+      // 計算該月月底,用來比對生效日
+      const [_ty, _tm] = _targetYm.split('-').map(Number);
+      const _monEndStr = `${_targetYm}-${String(new Date(_ty, _tm, 0).getDate()).padStart(2,'0')}`;
       // 歷史月份 → 無 7 天指示條(避開跨月混淆);當月才顯示
-      const rows = required.map(p => {
+      // 生效日比該月月底還晚 → 整月不需填 → 不列入排行
+      const effective = required.filter(p => {
+        const since = _journalStartFor(p);
+        return !since || since <= _monEndStr;
+      });
+      const rows = effective.map(p => {
         const s = _getMonthStats(p.id, _targetYm);
         return { profile: p, ...s, strip: isCurrent ? _render7DayStrip(p.id) : '' };
       }).sort((a,b) => (b.missed.length - a.missed.length) || (a.rate - b.rate) || a.profile.name.localeCompare(b.profile.name,'zh-TW'));
@@ -24551,6 +24584,8 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
     if (existing) return [];
     const allLogs = [...(jd.history||[]), ...(jd.today||[])];
     const userLogs = new Set(allLogs.filter(l => l.user_id === myId).map(l => l.date));
+    // 生效日前不列
+    const _since = (myProfile?.name === '蔡采玲' || myProfile?.email === 'cailing0516@gmail.com') ? '2026-08-01' : null;
     const _calTypesLj = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
     const _isLeaveLj = ev => {
       const t = (ev?.event_type||'').toLowerCase();
@@ -24589,6 +24624,7 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
     while (seen < 3) {
       d.setDate(d.getDate()-1);
       const ds = _localDateStr(d);
+      if (_since && ds < _since) break;  // 生效日之前不列
       if (!_isWork(ds)) continue;
       const li = _getLeaveInfoLj(myId, ds);
       if (li?.fullDay) continue;
