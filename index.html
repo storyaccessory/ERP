@@ -24394,14 +24394,9 @@ function renderJournal() {
       }`;
   };
 
-  return `
-    <div class="tabs" style="margin-bottom:0">
-      <div class="tab ${tab==='今日總覽'?'active':''}" data-journal-tab="今日總覽">👥 今日總覽</div>
-      <div class="tab ${tab==='全員歷史記錄'?'active':''}" data-journal-tab="全員歷史記錄">📋 全員歷史記錄</div>
-    </div>
-    ${tab==='今日總覽' ? `
-    ${(() => {
-      // ── 全員工作日誌填寫狀況(全員可見) ──
+  // ── 全員工作日誌填寫狀況(全員可見);先產 HTML,擺在下方 ──
+  const _isMobileJnl = typeof window !== 'undefined' && window.innerWidth <= 700;
+  const _leaderboardHtml = (() => {
       const required = (profiles||[]).filter(p => p.journal_required);
       if (!required.length) return '';
       const _targetYm = state.data.journalBossYm || today.slice(0,7);
@@ -24436,13 +24431,21 @@ function renderJournal() {
       })();
       // 歷史月份未載入 → 顯示載入按鈕
       const needsLoad = !isCurrent && !bossCache;
-      return `<div class="card" style="margin-bottom:12px;padding:12px 14px">
-        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
-          <div style="font-size:13px;font-weight:700;color:var(--accent-dark)">📊 全員工作日誌填寫狀況 · ${_year} 年 ${_mon} 月</div>
+      // 手機預設收合;電腦預設展開
+      const _collapseKey = 'journal_lb_collapsed';
+      if (state.data[_collapseKey] === undefined) state.data[_collapseKey] = _isMobileJnl;
+      const _collapsed = !!state.data[_collapseKey];
+      return `<div class="card" style="margin-bottom:12px;padding:${_isMobileJnl?'10px 12px':'12px 14px'}">
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;${_collapsed?'':'margin-bottom:10px'}">
+          <div style="display:flex;align-items:center;gap:6px;cursor:pointer;flex:1" onclick="state.data.journal_lb_collapsed=${!_collapsed};renderApp()">
+            <span style="font-size:12px;color:var(--muted);width:14px;text-align:center">${_collapsed?'▸':'▾'}</span>
+            <div style="font-size:13px;font-weight:700;color:var(--accent-dark)">📊 全員工作日誌填寫狀況 · ${_year} 年 ${_mon} 月</div>
+          </div>
           <span style="font-size:11px;color:${totalMissed>0?'#c62828':'#2e7d32'};background:${totalMissed>0?'#ffebee':'#e8f5e9'};padding:2px 10px;border-radius:10px;font-weight:600">
             總漏填 ${totalMissed} 次
           </span>
         </div>
+        ${_collapsed ? '' : `
         <div style="display:flex;gap:4px;flex-wrap:wrap;margin-bottom:10px;align-items:center">
           <span style="font-size:11px;color:var(--muted);margin-right:4px">月份:</span>
           ${monthChips.map(m => `<button type="button" onclick="window.loadJournalBossMonth('${m.ym}')"
@@ -24461,7 +24464,7 @@ function renderJournal() {
                 <th style="padding:5px 6px;text-align:center;width:90px">已填/應填</th>
                 <th style="padding:5px 6px;text-align:center;width:60px">漏填</th>
                 <th style="padding:5px 6px;text-align:center;width:70px">填寫率</th>
-                <th style="padding:5px 6px;text-align:left;width:200px">近 7 天</th>
+                ${_isMobileJnl ? '' : '<th style="padding:5px 6px;text-align:left;width:200px">近 7 天</th>'}
               </tr>
             </thead>
             <tbody>
@@ -24475,16 +24478,25 @@ function renderJournal() {
                   <td style="padding:5px 6px;text-align:center;font-family:monospace;cursor:pointer" onclick="window._jnlJumpToUser('${r.profile.id}','${_targetYm}','submitted')" title="查看此人已填的日誌">${r.submitted}/${r.required}</td>
                   <td style="padding:5px 6px;text-align:center;color:${r.missed.length>0?'#c62828':'#999'};font-weight:${r.missed.length>0?700:400};cursor:${r.missed.length>0?'pointer':'default'};${r.missed.length>0?'text-decoration:underline dotted;':''}" ${r.missed.length>0?`onclick="window._jnlJumpToUser('${r.profile.id}','${_targetYm}','missed')" title="查看漏填的日期"`:''}>${r.missed.length||'—'}</td>
                   <td style="padding:5px 6px;text-align:center;color:${sc};font-weight:700">${r.rate}%</td>
-                  <td style="padding:5px 6px">${r.strip}</td>
+                  ${_isMobileJnl ? '' : `<td style="padding:5px 6px">${r.strip}</td>`}
                 </tr>`;
               }).join('')}
             </tbody>
           </table>
         </div>
-        <div style="font-size:10px;color:var(--muted);margin-top:6px">圖例:✓ 已填 · ✗ 漏填 · 休 全天休假 · 假 國定假日 · 今 今天尚未填 · 一~日 週末。點姓名跳到該人歷史。</div>
+        ${_isMobileJnl ? '' : '<div style="font-size:10px;color:var(--muted);margin-top:6px">圖例:✓ 已填 · ✗ 漏填 · 休 全天休假 · 假 國定假日 · 今 今天尚未填 · 一~日 週末。點姓名跳到該人歷史、點漏填次數看漏填日期。</div>'}
+        ${_isMobileJnl ? '<div style="font-size:10px;color:var(--muted);margin-top:6px">💡 點漏填次數看漏填日期</div>' : ''}
+        `}
         `}
       </div>`;
-    })()}
+  })();
+
+  return `
+    <div class="tabs" style="margin-bottom:0">
+      <div class="tab ${tab==='今日總覽'?'active':''}" data-journal-tab="今日總覽">👥 今日總覽</div>
+      <div class="tab ${tab==='全員歷史記錄'?'active':''}" data-journal-tab="全員歷史記錄">📋 全員歷史記錄</div>
+    </div>
+    ${tab==='今日總覽' ? `
     <div style="display:flex;align-items:center;gap:10px;padding:12px 0 14px;flex-wrap:wrap">
       <input type="date" class="form-control" style="width:160px" value="${jd.viewDate||today}" onchange="state.data.journal.viewDate=this.value;loadJournalForDate(this.value)">
       <button class="btn btn-outline btn-sm" onclick="state.data.journal.viewDate='${today}';loadJournalForDate('${today}')">今天</button>
@@ -24518,6 +24530,7 @@ function renderJournal() {
       <div style="font-size:13px;color:#2e7d32">✅ 今天日誌已完成</div>
       <button class="btn btn-outline btn-sm" style="white-space:nowrap;color:#2e7d32;border-color:#a5d6a7" onclick="window.modalEditJournal(null,true)">📝 補填舊日誌</button>
     </div>` : '')}
+    ${_leaderboardHtml}
     ${todayView()}` : historyView()}`;
 }
 
