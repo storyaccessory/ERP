@@ -35397,6 +35397,54 @@ window.modalPartsToPurchase = async function(preFilteredIds = null) {
 };
 
 // 填實際入庫數(qc_qty)→ 結案 + 兩個子任務都打勾 + 自動填 QC 入庫日期 + 若有 part_id 自動加庫存
+// 列表 inline 填「到貨 / 瑕疵」→ 只存值,不自動結案(避免中途被 commit)
+window._puSaveQcField = async function(id, field, value) {
+  const r = (state.data.purchases||[]).find(x=>x.id===id);
+  if (!r) return;
+  const num = value === '' ? null : parseFloat(value);
+  if (num != null && isNaN(num)) { showToast('請輸入數字','error'); return; }
+  const upd = { [field]: num };
+  // 若還沒結案,順便更新 qc_qty 讓顯示準確(但不觸發結案流程)
+  const arrived = field === 'arrived_qty' ? num : (r.arrived_qty != null ? parseFloat(r.arrived_qty) : null);
+  const defect  = field === 'defect_qty'  ? (num||0) : (r.defect_qty != null ? parseFloat(r.defect_qty) : 0);
+  upd.qc_qty = (arrived != null && !isNaN(arrived)) ? Math.max(0, arrived - (defect||0)) : null;
+  // 若原本已結案 → 把它退回「已到貨」(因為數字變了,需要重新確認)
+  if (r.status === '結案') {
+    upd.status = '已到貨';
+    if (r.qc_event_id && typeof _puUncheckSubtask === 'function') {
+      try { await _puUncheckSubtask(r.qc_event_id, r.id); } catch(e){}
+    }
+    // 退回庫存(避免重複加)
+    if (r.part_id && r.qc_qty) {
+      const prevQty = parseFloat(r.qc_qty);
+      const { data: partRow } = await db.from('parts').select('stock').eq('id', r.part_id).maybeSingle();
+      const newStock = Math.max(0, (partRow?.stock || 0) - prevQty);
+      await db.from('parts').update({ stock: newStock }).eq('id', r.part_id);
+    }
+  }
+  const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
+  if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  Object.assign(r, upd);
+  renderApp();
+};
+
+// 「入庫完成」勾選框 → 觸發結案流程(庫存、子任務打勾)
+window._puConfirmQc = async function(id, checked) {
+  const r = (state.data.purchases||[]).find(x=>x.id===id);
+  if (!r) return;
+  if (checked) {
+    const arrived = parseFloat(r.arrived_qty);
+    if (isNaN(arrived)) { showToast('請先填「實際到貨」','error'); return; }
+    const defect = parseFloat(r.defect_qty)||0;
+    const qc = Math.max(0, arrived - defect);
+    // 走 qc_qty 結案流程(含庫存、子任務打勾、qc 事件 etc.)
+    await window._puInlineQcQty(id, String(qc));
+  } else {
+    // 取消 → 清空 qc_qty 讓它退回已到貨
+    await window._puInlineQcQty(id, '');
+  }
+};
+
 // 列表上「📝 填入庫」按鈕 → 打開 QC 填寫小 modal
 window._puOpenQcModal = async function(id) {
   const r = (state.data.purchases||[]).find(x => x.id === id);
