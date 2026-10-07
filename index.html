@@ -11794,20 +11794,28 @@ function _devStdDaysChip(task, isCancelled) {
 // 建橫向階段卡片 HTML(獨立 helper,避免深層巢狀 template literal)
 function _buildDevStageCards(plMain, t, today) {
   if (!plMain || !plMain.length) return '';
-  const curTaskIdx = plMain.findIndex(x => x.status !== '完成' && x.status !== '取消');
+  // 「當前階段」= 第一個「尚未通過閘門」且「非取消」的任務
+  // (即使已勾完成,只要還沒按閘門,它仍是當前)
+  const curTaskIdx = plMain.findIndex(x => x.status !== '取消' && !x.gate_passed_at);
   const tplMap = {};
   (t.main||[]).forEach(s => { tplMap[s.key] = s; });
   const cards = plMain.map(function(task, idx) {
     const stdDays = tplMap[task.step_key] && tplMap[task.step_key].days;
+    const gatePassed = !!task.gate_passed_at;
     const isDone = task.status === '完成';
     const isCancelled = task.status === '取消';
     const isCurrent = idx === curTaskIdx;
-    const isOverdue = !isDone && !isCancelled && task.due_date && task.due_date < today;
+    const isOverdue = !gatePassed && !isCancelled && task.due_date && task.due_date < today;
     const isMile = task.is_milestone;
+    // 卡片視覺四種狀態:通過閘門(綠底✓)/ 取消 / 當前(高亮) / 待辦
     let bg='#fff', border=t.color+'33', numBg='#f5f5f5', numCol='#999', mark='';
-    if (isDone)       { bg=t.color+'15'; border=t.color; numBg=t.color; numCol='#fff'; mark='✓'; }
+    if (gatePassed)   { bg=t.color+'15'; border=t.color; numBg=t.color; numCol='#fff'; mark='✓'; }
     else if (isCancelled) { bg='#f5f5f5'; border='#ddd'; numBg='#eee'; numCol='#999'; mark='⊘'; }
-    else if (isCurrent) { bg=t.color+'22'; border=t.color; numBg=t.color; numCol='#fff'; mark='●'; }
+    else if (isCurrent) {
+      // 當前階段:若已完成等待閘門 → 用黃底提示 PM 可按閘門
+      if (isDone) { bg='#fff8e1'; border='#ff9800'; numBg='#ff9800'; numCol='#fff'; mark='⏳'; }
+      else { bg=t.color+'22'; border=t.color; numBg=t.color; numCol='#fff'; mark='●'; }
+    }
     else if (isOverdue)  { bg='#ffebee'; border='#c62828'; numBg='#c62828'; numCol='#fff'; mark='!'; }
     const daysBadge = stdDays
       ? '<div style="font-size:9px;color:var(--muted);margin-top:1px">'+stdDays+' 工作天</div>'
@@ -12027,13 +12035,32 @@ function _renderDevTaskRow(task, project) {
         style="width:100%;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1px solid var(--border);border-radius:3px" ${isCancelled?'disabled':''}>
     </td>
     <td style="padding:5px;text-align:center;font-size:11px">
-      <div style="display:flex;flex-direction:column;align-items:center;gap:2px">
-        ${isDone?'<span style="color:#2e7d32;font-weight:600">✅ 完成</span>':isCancelled?'<span style="color:#999">⊘ 略過</span>':isOverdue?'<span style="color:#c62828;font-weight:600">⚠ 逾期</span>':'<span style="color:var(--muted)">待辦</span>'}
-        ${isDone ? '' : (isCancelled
-          ? `<button onclick="window._devToggleTaskSkip('${task.id}',false)" title="恢復此任務"
-              style="font-size:10px;padding:1px 6px;border:1px solid #90caf9;background:#e3f2fd;color:#1565c0;border-radius:3px;cursor:pointer">↩ 恢復</button>`
-          : `<button onclick="window._devToggleTaskSkip('${task.id}',true)" title="此任務不需要,從流程略過(可恢復)"
-              style="font-size:10px;padding:1px 6px;border:1px solid #e0e0e0;background:#fafafa;color:#888;border-radius:3px;cursor:pointer">⊘ 略過</button>`)}
+      <div style="display:flex;flex-direction:column;align-items:center;gap:3px">
+        ${(() => {
+          const gatePassed = !!task.gate_passed_at;
+          if (gatePassed) return '<span style="color:#2e7d32;font-weight:700">🔓 已通過閘門</span>';
+          if (isCancelled) return '<span style="color:#999">⊘ 略過</span>';
+          if (isDone) return '<span style="color:#f57c00;font-weight:600">⏳ 完成,待通過閘門</span>';
+          if (isOverdue) return '<span style="color:#c62828;font-weight:600">⚠ 逾期</span>';
+          return '<span style="color:var(--muted)">待辦</span>';
+        })()}
+        ${(() => {
+          const gatePassed = !!task.gate_passed_at;
+          if (gatePassed) {
+            return `<button onclick="window._devUnpassGate('${task.id}')" title="撤銷閘門(回到待通過)"
+              style="font-size:10px;padding:1px 6px;border:1px solid #e0e0e0;background:#fafafa;color:#888;border-radius:3px;cursor:pointer">↩ 撤銷</button>`;
+          }
+          if (isCancelled) {
+            return `<button onclick="window._devToggleTaskSkip('${task.id}',false)" title="恢復此任務"
+              style="font-size:10px;padding:1px 6px;border:1px solid #90caf9;background:#e3f2fd;color:#1565c0;border-radius:3px;cursor:pointer">↩ 恢復</button>`;
+          }
+          if (isDone) {
+            return `<button onclick="window._devPassGate('${task.id}')" title="通過閘門,進入下一階段"
+              style="font-size:10px;padding:2px 10px;border:1px solid #2e7d32;background:#2e7d32;color:#fff;border-radius:3px;cursor:pointer;font-weight:700">✓ 通過閘門</button>`;
+          }
+          return `<button onclick="window._devToggleTaskSkip('${task.id}',true)" title="此任務不需要,從流程略過(可恢復)"
+              style="font-size:10px;padding:1px 6px;border:1px solid #e0e0e0;background:#fafafa;color:#888;border-radius:3px;cursor:pointer">⊘ 略過</button>`;
+        })()}
       </div>
     </td>
   </tr>`;
@@ -12576,6 +12603,39 @@ window._devSetTaskDate = async function(taskId, newDate) {
   showToast('日期已更新');
   await loadDev();
   try { await loadCalendarEvents?.(); } catch(e) {}
+  renderApp();
+};
+
+// 通過閘門:正式進入下一階段。寫入 gate_passed_at / by,並記決策紀錄
+window._devPassGate = async function(taskId) {
+  const p = (state.data.dev||[]).find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (!task) { showToast('找不到任務','error'); return; }
+  const note = prompt(`通過閘門「${task.step_name}」, 可留一句決議備註(選填):`, '') || null;
+  const payload = {
+    gate_passed_at: new Date().toISOString(),
+    gate_passed_by: state.user?.id || null,
+    gate_passed_note: note,
+  };
+  const { error } = await db.from('dev_tasks').update(payload).eq('id', taskId);
+  if (error) { showToast('通過閘門失敗:'+error.message,'error'); return; }
+  showToast(`✓ 已通過閘門「${task.step_name}」`);
+  await loadDev();
+  renderApp();
+};
+
+// 撤銷閘門(回到待通過狀態)
+window._devUnpassGate = async function(taskId) {
+  const p = (state.data.dev||[]).find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (!task) return;
+  if (!confirm(`確定撤銷「${task.step_name}」的閘門通過嗎?會回到「完成,待通過閘門」狀態。`)) return;
+  const { error } = await db.from('dev_tasks').update({
+    gate_passed_at: null, gate_passed_by: null, gate_passed_note: null
+  }).eq('id', taskId);
+  if (error) { showToast('撤銷失敗:'+error.message,'error'); return; }
+  showToast('已撤銷閘門');
+  await loadDev();
   renderApp();
 };
 
@@ -24733,8 +24793,8 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
   const tpl = JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
   const existingFields = existing?.fields || {};
 
-  // 補填範圍上限工作天數
-  const JNL_BACKFILL_WORKDAYS = 3;
+  // 補填範圍上限工作天數 (⚠️ 暫時開放到 30 天,等 MIKI 通知再改回 3)
+  const JNL_BACKFILL_WORKDAYS = 30;
   const _jnlMinDate = (() => {
     const d = new Date(today+'T00:00:00');
     let workDaysBack = 0;
@@ -24821,7 +24881,7 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
         ? `<span style="font-size:13px;color:var(--text);font-weight:600">${logDate}</span>`
         : `<input type="date" id="jnl-log-date" value="${today}" min="${_jnlMinDate}" max="${today}"
              style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;color:var(--text)">
-           <span style="font-size:11px;color:var(--muted)">(可補填近 3 個工作天內,週末不計入)</span>`}
+           <span style="font-size:11px;color:#e65100;background:#fff3e0;padding:2px 8px;border-radius:10px;font-weight:600">⚠ 暫時開放補填近 30 個工作天</span>`}
       <span style="color:var(--muted)">·</span>
       <span>${myName}</span>
     </div>
