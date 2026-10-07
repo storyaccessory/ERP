@@ -33515,10 +33515,10 @@ function renderPurchases() {
                   if (!canConfirm) return '<span title="請先填實際到貨數" style="color:#ccc;font-size:11px">—</span>';
                   if (confirmed) {
                     return `<span onclick="window._puConfirmQc('${r.id}',false)" title="已入庫 · 點擊撤回"
-                      style="display:inline-block;cursor:pointer;color:#2e7d32;font-size:20px;font-weight:900;line-height:1">✓</span>`;
+                      style="cursor:pointer;color:var(--text);font-size:14px">✓</span>`;
                   }
                   return `<span onclick="window._puConfirmQc('${r.id}',true)" title="點擊確認入庫完成,自動結案"
-                    style="display:inline-flex;align-items:center;justify-content:center;cursor:pointer;width:20px;height:20px;border:1.5px solid #c0c0c0;border-radius:3px;color:transparent"></span>`;
+                    style="display:inline-block;cursor:pointer;width:16px;height:16px;border:1px solid #c0c0c0;border-radius:3px"></span>`;
                 })()}
               </td>
               <td>
