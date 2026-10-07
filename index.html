@@ -22656,13 +22656,15 @@ async function loadJournal() {
       .not('subtasks', 'is', null))
       .order('start_date')
       .limit(300),
-    // 請假事項:涵蓋今天的日期範圍內(start_date <= today AND end_date >= today);不帶隱私篩選,請假應該全員可見
-    db.from('calendar_events')
-      .select('id, title, start_date, end_date, start_time, end_time, event_type, assigned_to, assignee_ids, created_by')
-      .lte('start_date', today)
-      .or(`end_date.gte.${today},end_date.is.null`)
-      .is('completed_at', null)
-      .neq('is_template', true),
+    // 請假事項:近 35 天範圍(用於今日提醒 + 近 3 天漏填判斷 + 本月統計);不帶隱私篩選
+    (() => {
+      const _back35 = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()-35); return _localDateStr(d); })();
+      return db.from('calendar_events')
+        .select('id, title, start_date, end_date, start_time, end_time, event_type, assigned_to, assignee_ids, created_by')
+        .lte('start_date', today)
+        .or(`end_date.gte.${_back35},end_date.is.null`)
+        .neq('is_template', true);
+    })(),
   ]);
   if (todayRes.error)   console.error('[journal] today query:', todayRes.error.message);
   if (histRes.error)    console.error('[journal] history query:', histRes.error.message);
@@ -23761,6 +23763,20 @@ function renderJournal() {
     </div>`;
   };
 
+  // ── 共用:算工作天 + 漏填 + 本月統計 + 近 7 天指示 ──
+  // 回傳 '2026-10-07' 的星期中文
+  const _dowZh = ds => ['日','一','二','三','四','五','六'][new Date(ds+'T00:00:00').getDay()];
+  const _isWorkday = ds => {
+    const dow = new Date(ds+'T00:00:00').getDay();
+    if (dow === 0 || dow === 6) return false;
+    if (typeof getTwHoliday === 'function' && getTwHoliday(ds)) return false;
+    return true;
+  };
+  const _dateAdd = (ds, days) => {
+    const d = new Date(ds+'T00:00:00'); d.setDate(d.getDate()+days);
+    return _localDateStr(d);
+  };
+
   // ── 判斷某員工當天的請假狀態 ──
   // 回傳 { fullDay: boolean, timeRange: '09-12' | '全天' | null, title: '請假 事由' }
   const _getLeaveInfo = (userId, dateStr) => {
@@ -23785,6 +23801,82 @@ function renderJournal() {
       ranges.push(`${sh}-${eh ?? ''}`);
     }
     return { fullDay, timeRange: ranges.join(','), title: evs.map(e=>e.title).filter(Boolean).join('·') || '請假' };
+  };
+
+  // 給 userId 回傳近 N 個工作天的漏填日期(不含今天 — 今天 23:59 前都還能填)
+  const _getRecentMissed = (userId, backWorkdays = 3) => {
+    const allLogs = [...(jd.history||[]), ...(jd.today||[])];
+    const userLogs = new Set(allLogs.filter(l => l.user_id === userId).map(l => l.date));
+    const missed = [];
+    let cursor = _dateAdd(today, -1);
+    let seen = 0;
+    while (seen < backWorkdays) {
+      if (_isWorkday(cursor)) {
+        const li = _getLeaveInfo(userId, cursor);
+        if (!li?.fullDay) {
+          if (!userLogs.has(cursor)) missed.push(cursor);
+          seen++;
+        }
+      }
+      cursor = _dateAdd(cursor, -1);
+      if (cursor < _dateAdd(today, -60)) break; // 安全閘
+    }
+    return missed;
+  };
+
+  // 計算 userId 本月統計:{ submitted, required, missed[], rate }
+  //  required = 本月開始到昨天的工作天(扣全天休假);submitted = 這些天有交的
+  const _ym = today.slice(0,7);
+  const _getMonthStats = (userId) => {
+    const allLogs = [...(jd.history||[]), ...(jd.today||[])];
+    const userLogs = new Set(
+      allLogs.filter(l => l.user_id === userId && l.date?.startsWith(_ym)).map(l => l.date)
+    );
+    const monStart = `${_ym}-01`;
+    const yesterday = _dateAdd(today, -1);
+    const missed = [];
+    let required = 0;
+    let submitted = 0;
+    let cur = monStart;
+    while (cur <= yesterday) {
+      if (_isWorkday(cur)) {
+        const li = _getLeaveInfo(userId, cur);
+        if (!li?.fullDay) {
+          required++;
+          if (userLogs.has(cur)) submitted++;
+          else missed.push(cur);
+        }
+      }
+      cur = _dateAdd(cur, 1);
+    }
+    const rate = required > 0 ? Math.round(submitted * 100 / required) : 100;
+    return { submitted, required, missed, rate };
+  };
+
+  // 近 7 天指示條(含今天)
+  // 回傳 chip HTML
+  const _render7DayStrip = (userId) => {
+    const allLogs = [...(jd.history||[]), ...(jd.today||[])];
+    const userLogs = new Set(allLogs.filter(l => l.user_id === userId).map(l => l.date));
+    const chips = [];
+    for (let i = 6; i >= 0; i--) {
+      const ds = _dateAdd(today, -i);
+      const dowZ = _dowZh(ds);
+      const isToday = ds === today;
+      const li = _getLeaveInfo(userId, ds);
+      const dow = new Date(ds+'T00:00:00').getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      const isNat = typeof getTwHoliday === 'function' && !!getTwHoliday(ds);
+      let bg = '#f5f5f5', color = '#bbb', mark = '·', tip = `${ds} (${dowZ}) 週末/假日`;
+      if (isWeekend) { bg='#f5f5f5'; color='#bbb'; mark=dowZ; tip=`${ds} 週末`; }
+      else if (isNat) { bg='#fce4ec'; color='#c62828'; mark='假'; tip=`${ds} ${getTwHoliday(ds)}`; }
+      else if (li?.fullDay) { bg='#fff3e0'; color='#e65100'; mark='休'; tip=`${ds} 全天休假`; }
+      else if (isToday && !userLogs.has(ds)) { bg='#e3f2fd'; color='#1565c0'; mark='今'; tip=`${ds} 今天 · 尚未填`; }
+      else if (userLogs.has(ds)) { bg='#e8f5e9'; color='#2e7d32'; mark='✓'; tip=`${ds} 已填`; }
+      else { bg='#ffebee'; color='#c62828'; mark='✗'; tip=`${ds} 漏填`; }
+      chips.push(`<span title="${tip}" style="display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;background:${bg};color:${color};border-radius:4px;font-size:11px;font-weight:700">${mark}</span>`);
+    }
+    return `<div style="display:flex;gap:3px">${chips.join('')}</div>`;
   };
 
   // ── 今日總覽（全員，無篩選） ──
@@ -24148,6 +24240,77 @@ function renderJournal() {
       <div class="tab ${tab==='全員歷史記錄'?'active':''}" data-journal-tab="全員歷史記錄">📋 全員歷史記錄</div>
     </div>
     ${tab==='今日總覽' ? `
+    ${(() => {
+      // ── Layer 2a:個人填寫狀況卡 ──
+      const myStats = _getMonthStats(myId);
+      const myStrip = _render7DayStrip(myId);
+      const _mon = parseInt(today.slice(5,7));
+      const statusColor = myStats.rate >= 95 ? '#2e7d32' : myStats.rate >= 80 ? '#f57c00' : '#c62828';
+      const statusBg    = myStats.rate >= 95 ? '#e8f5e9' : myStats.rate >= 80 ? '#fff3e0' : '#ffebee';
+      return `<div style="padding:12px 14px;background:${statusBg};border-left:4px solid ${statusColor};border-radius:8px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
+        <div style="flex:1;min-width:0">
+          <div style="font-size:13px;font-weight:700;color:${statusColor}">📝 你的填寫狀況 · ${_mon} 月</div>
+          <div style="font-size:11px;color:var(--muted);margin-top:3px">
+            ✅ 已填 <b style="color:#2e7d32">${myStats.submitted}</b> 次 ·
+            ${myStats.missed.length > 0 ? `⚠ 漏填 <b style="color:#c62828">${myStats.missed.length}</b> 次 · ` : ''}
+            填寫率 <b style="color:${statusColor}">${myStats.rate}%</b>
+          </div>
+        </div>
+        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
+          <span style="font-size:10px;color:var(--muted);white-space:nowrap">近 7 天</span>
+          ${myStrip}
+        </div>
+      </div>`;
+    })()}
+    ${(() => {
+      // ── Layer 2b:主管/老闆專屬 — 全員本月漏填排行 ──
+      if (!isAdmin) return '';
+      const required = (profiles||[]).filter(p => p.journal_required);
+      if (!required.length) return '';
+      const rows = required.map(p => {
+        const s = _getMonthStats(p.id);
+        return { profile: p, ...s, strip: _render7DayStrip(p.id) };
+      }).sort((a,b) => (b.missed.length - a.missed.length) || (a.rate - b.rate) || a.profile.name.localeCompare(b.profile.name,'zh-TW'));
+      const _mon = parseInt(today.slice(5,7));
+      const totalMissed = rows.reduce((s,r) => s + r.missed.length, 0);
+      return `<div class="card" style="margin-bottom:12px;padding:12px 14px">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="font-size:13px;font-weight:700;color:var(--accent-dark)">📊 全員本月漏填排行 · ${_mon} 月</div>
+          <span style="font-size:11px;color:${totalMissed>0?'#c62828':'#2e7d32'};background:${totalMissed>0?'#ffebee':'#e8f5e9'};padding:2px 10px;border-radius:10px;font-weight:600">
+            總漏填 ${totalMissed} 次
+          </span>
+        </div>
+        <div style="overflow-x:auto">
+          <table style="width:100%;border-collapse:collapse;font-size:12px">
+            <thead>
+              <tr style="background:#f5f5f5;color:var(--muted)">
+                <th style="padding:5px 6px;text-align:left">姓名</th>
+                <th style="padding:5px 6px;text-align:center;width:90px">已填/應填</th>
+                <th style="padding:5px 6px;text-align:center;width:60px">漏填</th>
+                <th style="padding:5px 6px;text-align:center;width:70px">填寫率</th>
+                <th style="padding:5px 6px;text-align:left;width:200px">近 7 天</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${rows.map((r,i) => {
+                const sc = r.rate >= 95 ? '#2e7d32' : r.rate >= 80 ? '#f57c00' : '#c62828';
+                const dot = r.rate >= 95 ? '🟢' : r.rate >= 80 ? '🟡' : '🔴';
+                return `<tr style="border-top:1px solid #eee" title="點擊查看此人紀錄">
+                  <td style="padding:5px 6px;cursor:pointer" onclick="state.data.journalHistUser='${r.profile.id}';state.data.journalTab='全員歷史記錄';renderApp()">
+                    <span style="margin-right:6px">${dot}</span><b>${r.profile.name||'—'}</b>
+                  </td>
+                  <td style="padding:5px 6px;text-align:center;font-family:monospace">${r.submitted}/${r.required}</td>
+                  <td style="padding:5px 6px;text-align:center;color:${r.missed.length>0?'#c62828':'#999'};font-weight:${r.missed.length>0?700:400}">${r.missed.length||'—'}</td>
+                  <td style="padding:5px 6px;text-align:center;color:${sc};font-weight:700">${r.rate}%</td>
+                  <td style="padding:5px 6px">${r.strip}</td>
+                </tr>`;
+              }).join('')}
+            </tbody>
+          </table>
+        </div>
+        <div style="font-size:10px;color:var(--muted);margin-top:6px">圖例:✓ 已填 · ✗ 漏填 · 休 全天休假 · 假 國定假日 · 今 今天尚未填 · 一~日 週末。點姓名跳到該人歷史。</div>
+      </div>`;
+    })()}
     <div style="display:flex;align-items:center;gap:10px;padding:12px 0 14px;flex-wrap:wrap">
       <input type="date" class="form-control" style="width:160px" value="${jd.viewDate||today}" onchange="state.data.journal.viewDate=this.value;loadJournalForDate(this.value)">
       <button class="btn btn-outline btn-sm" onclick="state.data.journal.viewDate='${today}';loadJournalForDate('${today}')">今天</button>
@@ -24279,8 +24442,8 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
   const tpl = JOURNAL_TEMPLATES[tplKey] || JOURNAL_TEMPLATES.general;
   const existingFields = existing?.fields || {};
 
-  // 補填範圍上限工作天數 (⚠️ 暫時開放到 365 天,等 MIKI 通知再改回 2)
-  const JNL_BACKFILL_WORKDAYS = 365;
+  // 補填範圍上限工作天數
+  const JNL_BACKFILL_WORKDAYS = 3;
   const _jnlMinDate = (() => {
     const d = new Date(today+'T00:00:00');
     let workDaysBack = 0;
@@ -24292,14 +24455,79 @@ window.modalEditJournal = async function(existingId = null, forceNew = false) {
     return _localDateStr(d);
   })();
 
+  // 近 3 個工作天漏填(給 Layer 1 modal 頂部警示用)
+  const _missedRecent = (() => {
+    if (existing) return [];
+    const allLogs = [...(jd.history||[]), ...(jd.today||[])];
+    const userLogs = new Set(allLogs.filter(l => l.user_id === myId).map(l => l.date));
+    const _calTypesLj = typeof getCalEventTypes === 'function' ? getCalEventTypes() : {};
+    const _isLeaveLj = ev => {
+      const t = (ev?.event_type||'').toLowerCase();
+      if (t === 'leave') return true;
+      return (_calTypesLj[ev?.event_type]?.label||'').includes('請假');
+    };
+    const _getLeaveInfoLj = (uid, ds) => {
+      const evs = (jd.leaveEvents||[]).filter(ev => {
+        if (!_isLeaveLj(ev)) return false;
+        const sd = ev.start_date||'';
+        const ed = ev.end_date||ev.start_date||'';
+        if (ds < sd || ds > ed) return false;
+        const ids = Array.isArray(ev.assignee_ids) ? ev.assignee_ids : (ev.assigned_to ? [ev.assigned_to] : []);
+        return ids.includes(uid);
+      });
+      if (!evs.length) return null;
+      for (const ev of evs) {
+        const st = (ev.start_time||'').slice(0,5);
+        if (!st) return { fullDay: true };
+        const sh = parseInt(st.slice(0,2));
+        const et = (ev.end_time||'').slice(0,5);
+        const eh = et ? parseInt(et.slice(0,2)) : null;
+        if (sh <= 9 && (eh==null || eh >= 18)) return { fullDay: true };
+      }
+      return { fullDay: false };
+    };
+    const _isWork = ds => {
+      const dow = new Date(ds+'T00:00:00').getDay();
+      if (dow === 0 || dow === 6) return false;
+      if (typeof getTwHoliday === 'function' && getTwHoliday(ds)) return false;
+      return true;
+    };
+    const result = [];
+    const d = new Date(today+'T00:00:00');
+    let seen = 0;
+    while (seen < 3) {
+      d.setDate(d.getDate()-1);
+      const ds = _localDateStr(d);
+      if (!_isWork(ds)) continue;
+      const li = _getLeaveInfoLj(myId, ds);
+      if (li?.fullDay) continue;
+      if (!userLogs.has(ds)) result.push(ds);
+      seen++;
+      if (seen > 10) break;
+    }
+    return result;
+  })();
+  const _DOW_ZH = ['日','一','二','三','四','五','六'];
+
   showModal(`${existing?'修改':'填寫'}工作日誌`, `
+    ${!existing && _missedRecent.length > 0 ? `
+    <div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;padding:10px 12px;margin-bottom:12px">
+      <div style="font-weight:700;color:#e65100;font-size:12px;margin-bottom:6px">⚠ 你近 3 個工作天有 ${_missedRecent.length} 天漏填 — 建議一併補上</div>
+      <div style="display:flex;gap:6px;flex-wrap:wrap">
+        ${_missedRecent.map(d => `<button type="button"
+          onclick="(function(){var el=document.getElementById('jnl-log-date');if(el){el.value='${d}';el.focus();}})()"
+          style="font-size:11px;padding:4px 10px;border:1px solid #ffb74d;background:#fff;color:#e65100;border-radius:6px;cursor:pointer;font-weight:600">
+          + 補填 ${d.slice(5)} (${_DOW_ZH[new Date(d+'T00:00:00').getDay()]})
+        </button>`).join('')}
+      </div>
+    </div>` : ''}
     <div style="font-size:13px;color:var(--muted);margin-bottom:14px;padding-bottom:10px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:8px;flex-wrap:wrap">
       📅
       ${existing
         ? `<span style="font-size:13px;color:var(--text);font-weight:600">${logDate}</span>`
         : `<input type="date" id="jnl-log-date" value="${today}" min="${_jnlMinDate}" max="${today}"
              style="padding:4px 8px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:#fff;color:var(--text)">
-           <span style="font-size:11px;color:#e65100;background:#fff3e0;padding:2px 8px;border-radius:10px;font-weight:600">⚠ 暫時開放無限補填中</span>`}
+           <span style="font-size:11px;color:var(--muted)">(可補填近 3 個工作天內,週末不計入)</span>`}
       <span style="color:var(--muted)">·</span>
       <span>${myName}</span>
     </div>
