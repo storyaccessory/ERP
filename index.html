@@ -23967,9 +23967,36 @@ function renderJournal() {
     }
     viewLogs.sort((a,b) => b.date > a.date ? 1 : b.date < a.date ? -1 : 0);
 
-    // 依日期分組
+    // 依日期分組 + 補齊「該寫但沒寫」的人
     const grouped = {};
     viewLogs.forEach(l => { if (!grouped[l.date]) grouped[l.date] = []; grouped[l.date].push(l); });
+    // 要出現的所有日期:有紀錄的 + 篩選範圍內的所有日期(確保一天沒半人填也會列出 missing)
+    const _datesInRange = [];
+    const _todayStr = _localToday();
+    if (filterMode === 'date') {
+      if (filterDate && filterDate <= _todayStr) _datesInRange.push(filterDate);
+    } else if (filterStart && filterEnd) {
+      let cur = new Date(filterStart + 'T00:00:00');
+      const endDt = new Date(filterEnd + 'T00:00:00');
+      while (cur <= endDt) {
+        const ds = _localDateStr(cur);
+        if (ds <= _todayStr) _datesInRange.push(ds);
+        cur.setDate(cur.getDate() + 1);
+      }
+    }
+    _datesInRange.forEach(d => { if (!grouped[d]) grouped[d] = []; });
+    // 需填日誌名單(受人員篩選影響)
+    const _requiredPpl = profiles.filter(p => p.journal_required && (!filterPerson || p.id === filterPerson));
+    // 每日計算 missing(排除週末 — 週末本來就不用填;國定假日也排除)
+    const missingByDate = {};
+    Object.keys(grouped).forEach(d => {
+      const dow = new Date(d + 'T00:00:00').getDay();
+      const isWeekend = dow === 0 || dow === 6;
+      const isNationalHoliday = typeof getTwHoliday === 'function' && !!getTwHoliday(d);
+      if (isWeekend || isNationalHoliday) { missingByDate[d] = []; return; }
+      const submittedIds = new Set(grouped[d].map(l => l.user_id));
+      missingByDate[d] = _requiredPpl.filter(p => !submittedIds.has(p.id));
+    });
     const sortedDates = Object.keys(grouped).sort().reverse();
 
     // 篩選列
@@ -24023,12 +24050,30 @@ function renderJournal() {
       </div>
       ${sortedDates.length === 0
         ? `<div class="card"><div class="empty"><div class="empty-icon">📋</div><p>這個條件沒有日誌記錄</p></div></div>`
-        : sortedDates.map(date => `
-          <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:18px 0 8px">📅 ${date}</div>
+        : sortedDates.map(date => {
+          const dow = new Date(date + 'T00:00:00').getDay();
+          const dowLabel = ['日','一','二','三','四','五','六'][dow];
+          const isWeekend = dow === 0 || dow === 6;
+          const natHoliday = typeof getTwHoliday === 'function' ? getTwHoliday(date) : '';
+          const missing = missingByDate[date] || [];
+          const submittedCount = grouped[date].length;
+          const requiredCount = _requiredPpl.length;
+          const summaryTag = (isWeekend || natHoliday)
+            ? `<span style="font-size:11px;color:#c62828;background:#fce4ec;padding:2px 8px;border-radius:10px;font-weight:600;margin-left:8px">${natHoliday || '週末'} · 不需填寫</span>`
+            : requiredCount > 0
+              ? `<span style="font-size:11px;color:${missing.length>0?'#e65100':'#2e7d32'};background:${missing.length>0?'#fff3e0':'#e8f5e9'};padding:2px 8px;border-radius:10px;font-weight:600;margin-left:8px">填寫 ${submittedCount}/${requiredCount}${missing.length>0?` · 缺 ${missing.length}`:''}</span>`
+              : '';
+          return `
+          <div style="font-size:13px;font-weight:600;color:var(--accent-dark);margin:18px 0 8px;display:flex;align-items:center;flex-wrap:wrap">📅 ${date} (${dowLabel}) ${summaryTag}</div>
           <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-bottom:4px">
             ${grouped[date].map(log => _jnlCard(log)).join('')}
+            ${missing.map(p => `<div class="card" style="border-left:4px solid var(--border);opacity:.6;background:#fafafa">
+              <div style="font-size:14px;font-weight:700;color:var(--muted)">${p.name||'—'}</div>
+              <div style="font-size:12px;color:#c62828;margin-top:4px">⚠ 未填寫日誌</div>
+            </div>`).join('')}
           </div>
-        `).join('')
+        `;
+        }).join('')
       }`;
   };
 
@@ -26727,19 +26772,12 @@ window.deleteFoundry = async function(id) {
 // ═══════════════════════════════════════════
 async function loadGoldsmith() {
   // 抓所有還在流程中的補貨單(不含已完成)
-  const [{ data }, { data: holidaySetting }] = await Promise.all([
-    db.from('restock_orders')
-      .select(`*, restock_order_items(*, products(name, sku, series(name)))`)
-      .in('status', ['待抓料','待製作','製作中','缺零件','缺鑄件','已交件','送鍍'])
-      .order('order_date', { ascending: false }),
-    db.from('settings').select('value').eq('key','goldsmith_holidays').maybeSingle(),
-  ]);
+  const { data } = await db.from('restock_orders')
+    .select(`*, restock_order_items(*, products(name, sku, series(name)))`)
+    .in('status', ['待抓料','待製作','製作中','缺零件','缺鑄件','已交件','送鍍'])
+    .order('order_date', { ascending: false });
   state.data.goldsmithOrders = data || [];
-  if (holidaySetting?.value) {
-    try { state.data.goldsmithHolidays = JSON.parse(holidaySetting.value); } catch(e) { state.data.goldsmithHolidays = {}; }
-  } else {
-    state.data.goldsmithHolidays = {};
-  }
+  // 假日資訊直接跟主行事曆走(TW_HOLIDAYS 國定假日 + 週末)
 }
 
 // 判斷是否有製作部主管權限(能拖曳排程)
@@ -26772,8 +26810,7 @@ function renderGoldsmith() {
   const daysInMonth = new Date(y, m+1, 0).getDate();
   const monthName = `${y}年 ${m+1} 月`;
 
-  // 假日(週六日 + 手動標記)
-  const holidays = state.data.goldsmithHolidays || {};
+  // 假日(週六日 + 國定假日),跟主行事曆同一份(TW_HOLIDAYS)
 
   // ── 渲染卡片 ──
   const _card = (o, isSmall = false) => {
@@ -26829,14 +26866,15 @@ function renderGoldsmith() {
     const dateStr = `${y}-${String(m+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
     const dow = new Date(y, m, d).getDay();
     const isWeekend = dow === 0 || dow === 6;
-    const isHoliday = holidays[dateStr] || false;
+    const holidayName = (typeof getTwHoliday === 'function') ? (getTwHoliday(dateStr) || '') : '';
+    const isHoliday = !!holidayName;  // 國定假日
     const dayOrders = scheduled.filter(o => o.scheduled_date === dateStr);
     const totalQty = dayOrders.reduce((s,o) => {
       const items = o.restock_order_items || [];
       return s + items.reduce((ss,i)=>ss+((i.confirmed_qty??i.qty)||0), 0);
     }, 0);
     monthGrid.push({
-      date: dateStr, day: d, dow, isWeekend, isHoliday,
+      date: dateStr, day: d, dow, isWeekend, isHoliday, holidayName,
       orders: dayOrders, totalQty,
     });
   }
@@ -26845,17 +26883,16 @@ function renderGoldsmith() {
     if (c.empty) return `<div style="border:1px solid transparent;background:transparent"></div>`;
     const bgCol = c.isHoliday ? '#ffebee' : c.isWeekend ? '#fafafa' : '#fff';
     const dayCol = c.dow === 0 ? '#c62828' : c.dow === 6 ? '#1565c0' : 'var(--text)';
-    const canDrop = canManage && !c.isHoliday;
+    // 國定假日 / 週末:不給排單
+    const canDrop = canManage && !c.isHoliday && !c.isWeekend;
     return `<div class="gs-day-cell"
       data-date="${c.date}"
       ${canDrop ? `ondragover="_gsDragOver(event,this)" ondragleave="_gsDragLeave(this)" ondrop="_gsDrop(event,'${c.date}')"` : ''}
       style="border:1px solid #d0e2df;background:${bgCol};min-height:120px;padding:4px 5px;border-radius:5px;overflow:hidden;transition:background .15s">
       <div style="display:flex;align-items:center;gap:4px;margin-bottom:4px;font-size:11px">
         <span style="font-weight:${c.day===new Date().getDate() && m===new Date().getMonth() && y===new Date().getFullYear()?800:600};color:${dayCol}">${c.day}</span>
-        ${c.isHoliday ? '<span style="font-size:9px;color:#c62828;background:#fce4ec;padding:1px 4px;border-radius:3px">假日</span>' : ''}
+        ${c.isHoliday ? `<span style="font-size:9px;color:#c62828;background:#fce4ec;padding:1px 4px;border-radius:3px" title="國定假日">🏖 ${c.holidayName}</span>` : ''}
         <span style="margin-left:auto;font-size:9px;color:var(--muted)">${c.totalQty > 0 ? `${c.totalQty}件` : ''}</span>
-        ${canManage && !c.isHoliday ? `<button onclick="_gsToggleHoliday('${c.date}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:11px" title="標假日">🏖</button>` : ''}
-        ${canManage && c.isHoliday ? `<button onclick="_gsToggleHoliday('${c.date}')" style="background:none;border:none;cursor:pointer;color:var(--muted);font-size:11px" title="取消假日">↩</button>` : ''}
       </div>
       ${c.orders.map(o => _card(o, true)).join('')}
     </div>`;
@@ -27121,15 +27158,7 @@ window._gsGoToday = function() {
   renderApp();
 };
 
-// 假日標記(存本地)
-window._gsToggleHoliday = function(date) {
-  if (!state.data.goldsmithHolidays) state.data.goldsmithHolidays = {};
-  if (state.data.goldsmithHolidays[date]) delete state.data.goldsmithHolidays[date];
-  else state.data.goldsmithHolidays[date] = true;
-  // 持久化到 settings
-  db.from('settings').upsert({ key:'goldsmith_holidays', value: JSON.stringify(state.data.goldsmithHolidays) });
-  renderApp();
-};
+// 假日已改為跟著主行事曆(TW_HOLIDAYS)走,不再手動設定
 
 window.modalAddGoldsmithJob = function(existing=null) {
   const id = existing?.id;
