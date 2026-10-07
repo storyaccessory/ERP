@@ -33410,7 +33410,7 @@ function renderPurchases() {
             <th style="width:85px">實際到貨</th>
             <th style="width:70px">瑕疵</th>
             <th style="width:80px">實際入庫</th>
-            <th style="width:70px" title="打勾才算入庫完成/結案">✓ 入庫</th>
+            <th style="width:70px" title="打勾才算入庫完成/結案">入庫</th>
             <th style="width:110px">異常</th>
             <th style="width:160px">備註 / 異常</th>
             <th style="width:100px">QC 入庫日期</th>
@@ -33484,19 +33484,19 @@ function renderPurchases() {
                   onchange="window._puInlineField('${r.id}','actual_qty',this.value)">
               </td>
               <td>
-                <input type="date" value="${r.arrival_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:${r.arrival_date?'#e0f2f1':''}"
+                <input type="date" value="${r.arrival_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px"
                   onchange="window._puInlineField('${r.id}','arrival_date',this.value)"
                   title="物品實際到達日期(集運/自取);填了自動變已到貨並提醒申請人 QC">
               </td>
               <td>
-                <input type="number" min="0" step="1" value="${r.arrived_qty??''}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px;background:${r.arrived_qty!=null?'#e0f2f1':''}"
+                <input type="number" min="0" step="1" value="${r.arrived_qty??''}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px"
                   onchange="window._puSaveQcField('${r.id}','arrived_qty',this.value)"
-                  title="QC 填 · 廠商實際寄來多少;打勾「入庫完成」才會結案">
+                  title="QC 填 · 廠商實際寄來多少;打勾「入庫」才會結案">
               </td>
               <td>
-                <input type="number" min="0" step="1" value="${r.defect_qty??''}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid #ffcdd2;border-radius:4px;background:${r.defect_qty>0?'#ffebee':''};color:${r.defect_qty>0?'#c62828':'inherit'};font-weight:${r.defect_qty>0?700:400}"
+                <input type="number" min="0" step="1" value="${r.defect_qty??''}" placeholder="—" style="width:100%;padding:3px 6px;font-size:12px;text-align:center;border:1px solid var(--border);border-radius:4px;color:${r.defect_qty>0?'#c62828':'inherit'};font-weight:${r.defect_qty>0?700:400}"
                   onchange="window._puSaveQcField('${r.id}','defect_qty',this.value)"
-                  title="QC 填 · 到了但有問題的數量;打勾「入庫完成」才會結案">
+                  title="QC 填 · 到了但有問題的數量;打勾「入庫」才會結案">
               </td>
               <td>
                 ${(() => {
@@ -33504,7 +33504,7 @@ function renderPurchases() {
                   const defect = parseFloat(r.defect_qty)||0;
                   const auto = r.arrived_qty != null ? Math.max(0, arrived - defect) : null;
                   return auto !== null
-                    ? `<div style="padding:3px 6px;font-size:13px;text-align:center;color:#2e7d32;font-weight:700;background:#e8f5e9;border-radius:4px" title="自動 = 實際到貨 − 瑕疵">${auto}</div>`
+                    ? `<div style="padding:3px 6px;font-size:13px;text-align:center;font-weight:700" title="自動 = 實際到貨 − 瑕疵">${auto}</div>`
                     : `<div style="padding:3px 6px;font-size:12px;text-align:center;color:var(--muted)">—</div>`;
                 })()}
               </td>
@@ -33538,7 +33538,7 @@ function renderPurchases() {
                   onchange="window._puInlineField('${r.id}','defect_note',this.value)">
               </td>
               <td>
-                <input type="date" value="${r.arrived_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px;background:${r.arrived_date?'#e8f5e9':''}"
+                <input type="date" value="${r.arrived_date||''}" style="width:100%;padding:3px 6px;font-size:11px;border:1px solid var(--border);border-radius:4px"
                   onchange="window._puInlineField('${r.id}','arrived_date',this.value)">
               </td>
               <td style="text-align:center">
