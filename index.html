@@ -24297,31 +24297,7 @@ function renderJournal() {
     </div>
     ${tab==='今日總覽' ? `
     ${(() => {
-      // ── Layer 2a:個人填寫狀況卡 ──
-      const myStats = _getMonthStats(myId);
-      const myStrip = _render7DayStrip(myId);
-      const _mon = parseInt(today.slice(5,7));
-      const statusColor = myStats.rate >= 95 ? '#2e7d32' : myStats.rate >= 80 ? '#f57c00' : '#c62828';
-      const statusBg    = myStats.rate >= 95 ? '#e8f5e9' : myStats.rate >= 80 ? '#fff3e0' : '#ffebee';
-      return `<div style="padding:12px 14px;background:${statusBg};border-left:4px solid ${statusColor};border-radius:8px;margin-bottom:12px;display:flex;justify-content:space-between;align-items:center;gap:12px;flex-wrap:wrap">
-        <div style="flex:1;min-width:0">
-          <div style="font-size:13px;font-weight:700;color:${statusColor}">📝 你的填寫狀況 · ${_mon} 月</div>
-          <div style="font-size:11px;color:var(--muted);margin-top:3px">
-            ✅ 已填 <b style="color:#2e7d32">${myStats.submitted}</b> 次 ·
-            ${myStats.missed.length > 0 ? `⚠ 漏填 <b style="color:#c62828">${myStats.missed.length}</b> 次 · ` : ''}
-            填寫率 <b style="color:${statusColor}">${myStats.rate}%</b>
-          </div>
-        </div>
-        <div style="display:flex;align-items:center;gap:6px;flex-wrap:wrap">
-          <span style="font-size:10px;color:var(--muted);white-space:nowrap">近 7 天</span>
-          ${myStrip}
-        </div>
-      </div>`;
-    })()}
-    ${(() => {
-      // ── Layer 2b:老闆專屬 — 全員月漏填排行(只有 role=admin 或指定信箱) ──
-      const _isBoss = (myProfile?.role === 'admin') || (myProfile?.email === 'cailing0516@gmail.com');
-      if (!_isBoss) return '';
+      // ── 全員工作日誌填寫狀況(全員可見) ──
       const required = (profiles||[]).filter(p => p.journal_required);
       if (!required.length) return '';
       const _targetYm = state.data.journalBossYm || today.slice(0,7);
@@ -24358,7 +24334,7 @@ function renderJournal() {
       const needsLoad = !isCurrent && !bossCache;
       return `<div class="card" style="margin-bottom:12px;padding:12px 14px">
         <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;gap:8px;flex-wrap:wrap">
-          <div style="font-size:13px;font-weight:700;color:var(--accent-dark)">📊 全員月漏填排行 · ${_year} 年 ${_mon} 月</div>
+          <div style="font-size:13px;font-weight:700;color:var(--accent-dark)">📊 全員工作日誌填寫狀況 · ${_year} 年 ${_mon} 月</div>
           <span style="font-size:11px;color:${totalMissed>0?'#c62828':'#2e7d32'};background:${totalMissed>0?'#ffebee':'#e8f5e9'};padding:2px 10px;border-radius:10px;font-weight:600">
             總漏填 ${totalMissed} 次
           </span>
