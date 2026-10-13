@@ -35118,14 +35118,22 @@ window._puInlinePurchaser = async function(id, sel) {
 window._puInlineStatus = async function(id, newStatus) {
   const r = (state.data.purchases||[]).find(x=>x.id===id);
   if (!r) return;
-  // 只允許切換到「暫不採購」或從「暫不採購」恢復為「待採購」
+  // 從「暫不採購」恢復時,依既有資料判斷「應該回到哪個狀態」
+  if (r.status === '暫不採購' && newStatus === '待採購') {
+    if (r.qc_qty) newStatus = '結案';
+    else if (r.arrived_date || r.arrived_qty != null) newStatus = '已到貨';
+    else if (r.actual_qty || r.purchase_date) newStatus = '已採購';
+    else if (!r.purchaser_id) newStatus = '待指派';
+    // else 維持 '待採購'
+  }
+  // 只允許切換到「暫不採購」或從「暫不採購」恢復
   const allowedTransitions = {
     '待指派': ['暫不採購'],
     '待採購': ['暫不採購'],
     '已採購': ['暫不採購'],
     '已到貨': ['暫不採購'],
     '結案':   ['暫不採購'],
-    '暫不採購': ['待採購'],
+    '暫不採購': ['待指派','待採購','已採購','已到貨','結案'],
   };
   const allowed = allowedTransitions[r.status] || [];
   if (newStatus === r.status) return;  // 同狀態不動
@@ -35172,11 +35180,20 @@ window._puInlineStatus = async function(id, newStatus) {
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
-  // 暫不採購 → 待採購 恢復時,自動重建行事曆提醒
-  if (r.status === '暫不採購' && newStatus === '待採購' && r.purchaser_id) {
+  // 從「暫不採購」恢復 → 依新狀態重建對應的行事曆提醒
+  if (r.status === '暫不採購' && newStatus !== '暫不採購') {
     const merged = { ...r, ...upd };
-    const calId = await _puSyncCalendar(merged);
-    if (calId) await db.from('purchase_requests').update({ calendar_event_id: calId }).eq('id', id);
+    // 待採購 → 重建採購子任務
+    if (newStatus === '待採購' && merged.purchaser_id) {
+      const calId = await _puSyncCalendar(merged);
+      if (calId) await db.from('purchase_requests').update({ calendar_event_id: calId }).eq('id', id);
+    }
+    // 已到貨 → 重建 QC 子任務(採購已完成,只缺 QC)
+    if (newStatus === '已到貨' && merged.requester_id && !merged.qc_qty) {
+      const qcId = await _puCreateQcReminder(merged);
+      if (qcId) await db.from('purchase_requests').update({ qc_event_id: qcId }).eq('id', id);
+    }
+    // 已採購 / 結案 → 不需要行事曆提醒(已採購 = 待廠商出貨,結案 = 完成)
   }
   showToast(newStatus === '已到貨' ? `已改為到貨 · 已建 QC 提醒給 ${r.requester_name}` : `已改為 ${newStatus}`);
   await loadPurchases(); renderApp();
