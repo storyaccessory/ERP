@@ -34644,8 +34644,21 @@ window._puMoveStatus = async function(id, existing, newStatus) {
   if (newStatus === '結案' && existing.qc_event_id) {
     await _puMarkSubtaskDone(existing.qc_event_id, existing.id);
   }
+  // 暫不採購 → 從行事曆事件移除此筆子任務(事件若為空會一起刪除)
+  if (newStatus === '暫不採購') {
+    if (existing.calendar_event_id) await _puRemoveSubtaskFromEvent(existing.calendar_event_id, existing.id);
+    if (existing.qc_event_id) await _puRemoveSubtaskFromEvent(existing.qc_event_id, existing.id);
+    fields.calendar_event_id = null;
+    fields.qc_event_id = null;
+  }
   const { error } = await db.from('purchase_requests').update(fields).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  // 暫不採購 → 待採購 恢復時,自動重建行事曆提醒
+  if (existing.status === '暫不採購' && newStatus === '待採購' && fields.purchaser_id) {
+    const merged = { ...existing, ...fields };
+    const calId = await _puSyncCalendar(merged);
+    if (calId) await db.from('purchase_requests').update({ calendar_event_id: calId }).eq('id', id);
+  }
   showToast(`已標記為 ${newStatus} ✅`);
   closeModal(); await loadPurchases(); renderApp();
 };
@@ -35150,8 +35163,21 @@ window._puInlineStatus = async function(id, newStatus) {
   if (newStatus === '結案' && r.qc_event_id) {
     await _puMarkSubtaskDone(r.qc_event_id, r.id);
   }
+  // 暫不採購 → 從行事曆事件移除此筆子任務
+  if (newStatus === '暫不採購') {
+    if (r.calendar_event_id) await _puRemoveSubtaskFromEvent(r.calendar_event_id, r.id);
+    if (r.qc_event_id) await _puRemoveSubtaskFromEvent(r.qc_event_id, r.id);
+    upd.calendar_event_id = null;
+    upd.qc_event_id = null;
+  }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
+  // 暫不採購 → 待採購 恢復時,自動重建行事曆提醒
+  if (r.status === '暫不採購' && newStatus === '待採購' && r.purchaser_id) {
+    const merged = { ...r, ...upd };
+    const calId = await _puSyncCalendar(merged);
+    if (calId) await db.from('purchase_requests').update({ calendar_event_id: calId }).eq('id', id);
+  }
   showToast(newStatus === '已到貨' ? `已改為到貨 · 已建 QC 提醒給 ${r.requester_name}` : `已改為 ${newStatus}`);
   await loadPurchases(); renderApp();
 };
