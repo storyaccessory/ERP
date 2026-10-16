@@ -12926,6 +12926,7 @@ function _renderDevDetail(id) {
               <tbody>${plCustom.map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
             </table>` : ''}
             <div style="text-align:center;margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+              ${plCustom.length ? `<button class="btn btn-sm" onclick="window._devOpenCustomEditor('${p.id}','${pl}')" style="background:#fff8e1;color:#e65100;border:1px solid #ffb74d;font-size:11px">✏ 批次編輯自訂任務 (${plCustom.length})</button>` : ''}
               <button class="btn btn-sm btn-outline" onclick="window._devAddDetailCustomTask('${p.id}','${pl}')" style="background:#fff;color:#e65100;border-color:#ffb74d;font-size:11px">⭐ + 加自訂任務</button>
               <button class="btn btn-sm btn-outline" onclick="window._devAddSamplingGroup('${p.id}','${pl}','包裝打樣')" style="background:#fce4ec;color:#c2185b;border-color:#f8bbd0;font-size:11px" title="打樣階段新增分組(可指派不同負責人)">+ 包裝打樣</button>
               <button class="btn btn-sm btn-outline" onclick="window._devAddSamplingGroup('${p.id}','${pl}','禮盒打樣')" style="background:#fce4ec;color:#c2185b;border-color:#f8bbd0;font-size:11px">+ 禮盒打樣</button>
@@ -12982,8 +12983,7 @@ function _renderDevTaskRow(task, project) {
     </td>
     <td style="padding:5px">
       ${task.step_group === 'custom'
-        ? `<input class="form-control" value="${(task.step_name||'').replace(/"/g,'&quot;')}" style="font-size:12px;padding:2px 6px;border:1px dashed #ffb74d;background:#fff;width:calc(100% - 24px)" oninput="window._devEditCustomTaskName('${task.id}',this.value)" placeholder="任務名稱">
-           <button onclick="window._devDeleteCustomTask('${task.id}')" title="刪除此自訂任務" style="margin-left:4px;background:none;border:none;cursor:pointer;color:#c62828;font-size:14px;vertical-align:middle">✕</button>`
+        ? `<span style="color:#e65100">⭐ ${task.step_name||'(未命名)'}</span>`
         : task.step_name}
       ${isMilestone?'<span style="color:#c62828;margin-left:4px">🎯</span>':''}
       ${(() => {
@@ -13759,6 +13759,103 @@ window._devDeleteCustomTask = async function(taskId) {
   showToast('已刪除');
   await loadDev();
   renderApp();
+};
+
+// 自訂任務批次編輯 modal
+window._devOpenCustomEditor = function(projectId, pipeline) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const tasks = (p.dev_tasks||[])
+    .filter(t => t.pipeline === pipeline && t.step_group === 'custom')
+    .sort((a,b)=>(a.order_num||0)-(b.order_num||0));
+  const activeUsers = (state.data.users||[]).filter(u => u.is_active !== false);
+  const plLabel = (PIPELINE_TEMPLATES[pipeline]?.label||pipeline);
+
+  const rowsHtml = tasks.map(t => `
+    <tr data-task-id="${t.id}" style="border-bottom:1px solid #eee">
+      <td style="padding:6px 4px;text-align:center">
+        <button onclick="this.closest('tr').dataset.deleted=this.closest('tr').dataset.deleted==='1'?'0':'1';this.closest('tr').style.opacity=this.closest('tr').dataset.deleted==='1'?'.3':'1';this.closest('tr').style.textDecoration=this.closest('tr').dataset.deleted==='1'?'line-through':'none';this.textContent=this.closest('tr').dataset.deleted==='1'?'↩':'✕'" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:16px">✕</button>
+      </td>
+      <td style="padding:6px 4px">
+        <input class="form-control cst-name" value="${(t.step_name||'').replace(/"/g,'&quot;')}" style="font-size:12px;padding:4px 6px;width:100%" placeholder="任務名稱">
+      </td>
+      <td style="padding:6px 4px">
+        <select class="cst-assignee" style="width:100%;padding:4px;font-size:12px;border:1px solid var(--border);border-radius:3px">
+          <option value="">(未指定)</option>
+          ${activeUsers.map(u => `<option value="${u.id}" ${t.assignee_id===u.id?'selected':''}>${u.name}</option>`).join('')}
+        </select>
+      </td>
+      <td style="padding:6px 4px;text-align:center">
+        <input type="date" class="cst-date" value="${t.due_date||''}" style="font-size:12px;padding:3px;border:1px solid var(--border);border-radius:3px">
+      </td>
+    </tr>
+  `).join('');
+
+  const html = `
+    <div style="padding:4px 2px 10px 2px;font-size:12px;color:var(--muted)">${plLabel} · 共 ${tasks.length} 筆自訂任務</div>
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:#fff8e1;color:var(--muted)">
+        <tr>
+          <th style="padding:6px 4px;width:32px"></th>
+          <th style="padding:6px 4px;text-align:left">任務名稱</th>
+          <th style="padding:6px 4px;text-align:left;width:160px">負責人</th>
+          <th style="padding:6px 4px;text-align:center;width:140px">預定完成</th>
+        </tr>
+      </thead>
+      <tbody id="cstEditorBody">${rowsHtml}</tbody>
+    </table>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)">✕ = 標記刪除(存檔時才真的刪);改完按下方「儲存全部」</div>
+  `;
+
+  openModal({
+    title: `✏ 批次編輯自訂任務 (${tasks.length})`,
+    body: html,
+    width: '820px',
+    actions: [
+      { label: '取消', onClick: closeModal },
+      { label: '💾 儲存全部', primary: true, onClick: async () => {
+        const rows = document.querySelectorAll('#cstEditorBody tr');
+        const updates = [];
+        const deletes = [];
+        rows.forEach(tr => {
+          const id = tr.dataset.taskId;
+          if (tr.dataset.deleted === '1') { deletes.push(id); return; }
+          const name = tr.querySelector('.cst-name').value.trim() || '(未命名)';
+          const assignee = tr.querySelector('.cst-assignee').value || null;
+          const date = tr.querySelector('.cst-date').value || null;
+          const assigneeName = assignee ? (activeUsers.find(u=>u.id===assignee)?.name || null) : null;
+          updates.push({ id, step_name: name, assignee_id: assignee, assignee_name: assigneeName, due_date: date });
+        });
+        try {
+          // 刪除
+          for (const id of deletes) {
+            const t = tasks.find(x => x.id === id);
+            if (t?.calendar_event_id) {
+              try {
+                const { data: ev } = await db.from('calendar_events').select('subtasks').eq('id', t.calendar_event_id).maybeSingle();
+                if (ev?.subtasks) {
+                  const subs = ev.subtasks.filter(s => s.dev_task_id !== id);
+                  await db.from('calendar_events').update({ subtasks: subs }).eq('id', t.calendar_event_id);
+                }
+              } catch(e) {}
+            }
+            await db.from('dev_tasks').delete().eq('id', id);
+          }
+          // 更新
+          for (const u of updates) {
+            const { id, ...payload } = u;
+            await db.from('dev_tasks').update(payload).eq('id', id);
+          }
+          showToast(`✓ 已更新 ${updates.length} 筆, 刪除 ${deletes.length} 筆`);
+          closeModal();
+          await loadDev();
+          renderApp();
+        } catch (e) {
+          showToast('儲存失敗:' + (e.message||e), 'error');
+        }
+      } }
+    ]
+  });
 };
 
 // 通過閘門:正式進入下一階段。寫入 gate_passed_at / by,並記決策紀錄
