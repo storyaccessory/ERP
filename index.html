@@ -12619,8 +12619,10 @@ function _buildDevSkippedStepsPicker(d) {
   if (!d.pipelines || !d.pipelines.length) return '';
   const skippedSteps = d.skippedSteps || [];
   const skippedStages = d.skippedStages || [];
+  const skippedSides = d.skippedSides || [];
+  const totalSkipped = skippedSteps.length + skippedSides.length;
   const header = '🔧 進階:細選步驟(預設全跑;取消勾的步驟建案時直接略過)'
-    + (skippedSteps.length ? ' · <span style="color:#e65100">已跳過 ' + skippedSteps.length + ' 步</span>' : '');
+    + (totalSkipped ? ' · <span style="color:#e65100">已跳過 ' + totalSkipped + ' 步</span>' : '');
   let body = '';
   d.pipelines.forEach(pl => {
     const tpl = PIPELINE_TEMPLATES[pl];
@@ -12633,6 +12635,7 @@ function _buildDevSkippedStepsPicker(d) {
     });
     let plBody = '<div style="padding:8px 10px;border-left:3px solid '+tpl.color+';background:'+tpl.color+'0d;border-radius:4px">';
     plBody += '<div style="font-size:12px;font-weight:700;color:'+tpl.color+';margin-bottom:6px">'+plLabel+'</div>';
+    // 主線步驟(按階段分組)
     for (const st of DEV_STAGES) {
       const steps = byStage[st.key] || [];
       if (!steps.length) continue;
@@ -12656,10 +12659,30 @@ function _buildDevSkippedStepsPicker(d) {
       }
       plBody += '</div></div>';
     }
+    // 副線任務(獨立區塊)
+    const sides = tpl.side || [];
+    if (sides.length) {
+      plBody += '<div style="margin-top:6px;padding-top:6px;border-top:1px dashed '+tpl.color+'33">';
+      plBody += '<div style="font-size:10px;color:#6a1b9a;margin-bottom:3px">· 副線任務(樣品審過後觸發)</div>';
+      plBody += '<div style="display:flex;gap:4px;flex-wrap:wrap;padding-left:10px">';
+      for (const s of sides) {
+        const skipKey = pl + ':' + s.key;
+        const skipped = skippedSides.includes(skipKey);
+        const borderCol = skipped ? '#ddd' : '#ce93d8';
+        const bg = skipped ? '#fafafa' : '#f3e5f5';
+        const txtCol = skipped ? '#999' : '#6a1b9a';
+        plBody += '<label style="display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;border:1px solid '+borderCol+';background:'+bg+';font-size:11px;color:'+txtCol+'">';
+        plBody += '<input type="checkbox" '+(skipped?'':'checked')
+                + ' onchange="window._devToggleSkippedSide(\''+skipKey+'\')" style="margin:0">';
+        plBody += '<span style="'+(skipped?'text-decoration:line-through':'')+'">'+(s.name||'')+'</span>';
+        plBody += '</label>';
+      }
+      plBody += '</div></div>';
+    }
     plBody += '</div>';
     body += plBody;
   });
-  return '<details style="margin-top:8px;padding:8px 12px;background:#fff;border-radius:6px"'+(skippedSteps.length?' open':'')+'>'
+  return '<details style="margin-top:8px;padding:8px 12px;background:#fff;border-radius:6px"'+(totalSkipped?' open':'')+'>'
     + '<summary style="cursor:pointer;font-size:12px;color:var(--muted);font-weight:600">'+header+'</summary>'
     + '<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">'+body+'</div>'
     + '</details>';
@@ -14636,7 +14659,8 @@ function _renderDevModalBody() {
           Object.entries(overrides).forEach(([k, ov]) => {
             if (ov.due_date) effectiveStepMap[k] = ov.due_date;
           });
-          const sideSteps = _calcSideDates(pl, effectiveStepMap);
+          const _skipSides = d.skippedSides || [];
+          const sideSteps = _calcSideDates(pl, effectiveStepMap).filter(s => !_skipSides.includes(pl + ':' + s.key));
           // 套用使用者覆寫
           const applyOv = (step) => {
             const ov = overrides[step.key] || {};
@@ -14789,6 +14813,16 @@ window._devToggleSkippedStep = function(skipKey) {
   const i = d.skippedSteps.indexOf(skipKey);
   if (i >= 0) d.skippedSteps.splice(i, 1);
   else d.skippedSteps.push(skipKey);
+  window._devRerender();
+};
+
+// 副線任務跳過切換
+window._devToggleSkippedSide = function(skipKey) {
+  const d = state.data._devDraft;
+  if (!d.skippedSides) d.skippedSides = [];
+  const i = d.skippedSides.indexOf(skipKey);
+  if (i >= 0) d.skippedSides.splice(i, 1);
+  else d.skippedSides.push(skipKey);
   window._devRerender();
 };
 
@@ -15038,7 +15072,8 @@ async function _saveDevProject() {
     Object.entries(overrides).forEach(([k, ov]) => {
       if (ov.due_date) effectiveStepMap[k] = ov.due_date;
     });
-    const sideSteps = _calcSideDates(pl, effectiveStepMap);
+    const _skipSidesSave = d.skippedSides || [];
+    const sideSteps = _calcSideDates(pl, effectiveStepMap).filter(s => !_skipSidesSave.includes(pl + ':' + s.key));
     sideSteps.forEach(step => {
       const ov = overrides[step.key] || {};
       const u = ov.assignee_id ? null : findUser(step.assignee_name);
