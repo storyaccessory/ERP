@@ -14640,11 +14640,18 @@ function _renderDevModalBody() {
               assignee_name: ov.assignee_name || (step.assignee_key === 'factory_owner' ? d.factory_owner_name : step.assignee_name),
             };
           };
-          const finalDates = dates.map(applyOv);
+          // 過濾被跳過的步驟/階段(不預覽)
+          const _skippedStages = d.skippedStages || [];
+          const _skippedSteps = d.skippedSteps || [];
+          const _notSkipped = step =>
+            !_skippedStages.includes(step.stage) &&
+            !_skippedSteps.includes(pl + ':' + step.key);
+          const finalDates = dates.map(applyOv).filter(_notSkipped);
           const finalSides = sideSteps.map(applyOv);
+          const skippedMainCount = dates.length - finalDates.length;
           return `
             <div style="padding:6px 14px;background:${t.color}15;border-top:1px solid var(--border);font-size:12px;font-weight:700;color:${t.color}">
-              ${t.label} · ${finalDates.length} 主線 + ${finalSides.length} 副線
+              ${t.label} · ${finalDates.length} 主線 + ${finalSides.length} 副線${skippedMainCount?` <span style="color:#e65100;font-weight:400">(已跳過 ${skippedMainCount} 步)</span>`:''}
             </div>
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               <thead style="background:#fafafa;color:var(--muted);font-size:11px">
