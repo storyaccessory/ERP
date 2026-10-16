@@ -12912,9 +12912,9 @@ function _renderDevDetail(id) {
             const plCustom = (p.dev_tasks||[]).filter(t => t.pipeline === pl && t.step_group === 'custom').sort((a,b)=>(a.order_num||0)-(b.order_num||0));
             return `
             ${plCustom.length ? `
-            <div style="font-size:11px;color:#e65100;font-weight:600;margin:12px 0 4px">自訂任務 ⭐ <span style="font-weight:400;color:var(--muted)">(含打樣分組 — 包裝/禮盒等)</span></div>
+            <div style="font-size:11px;color:var(--muted);font-weight:600;margin:12px 0 4px">自訂任務 <span style="font-weight:400">(含打樣分組 — 包裝/禮盒等)</span></div>
             <table style="width:100%;font-size:12px;border-collapse:collapse">
-              <thead style="background:#fff8e1;font-size:11px;color:var(--muted)">
+              <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
                 <tr>
                   <th style="padding:5px;text-align:center;width:34px">☐</th>
                   <th style="padding:5px;text-align:left">步驟</th>
@@ -12982,9 +12982,7 @@ function _renderDevTaskRow(task, project) {
       <input type="checkbox" ${isDone?'checked':''} onchange="window._devToggleTaskDone('${task.id}',this.checked)" style="cursor:pointer;width:16px;height:16px" ${isCancelled?'disabled':''}>
     </td>
     <td style="padding:5px">
-      ${task.step_group === 'custom'
-        ? `<span style="color:#e65100">⭐ ${task.step_name||'(未命名)'}</span>`
-        : task.step_name}
+      ${task.step_group === 'custom' ? (task.step_name||'(未命名)') : task.step_name}
       ${isMilestone?'<span style="color:#c62828;margin-left:4px">🎯</span>':''}
       ${(() => {
         if (!project?.shared_review) return '';
