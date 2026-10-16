@@ -11790,6 +11790,7 @@ function _renderDevDashboard(activeProjects, allProjects) {
         <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
           <tr>
             <th style="padding:6px 10px;text-align:left">專案</th>
+            <th style="padding:6px;text-align:center;width:90px">狀態</th>
             <th style="padding:6px;text-align:center;width:70px">品項</th>
             <th style="padding:6px;text-align:center;width:80px">PM</th>
             <th style="padding:6px;text-align:center;width:100px">Pipeline</th>
@@ -11820,8 +11821,12 @@ function _renderDevDashboard(activeProjects, allProjects) {
             const launchOverdue = p.launch_date && p.launch_date < today && !allDone;
             const vActive = (p.dev_variants||[]).filter(v => !v.cancelled_at).length;
             const vCancelled = (p.dev_variants||[]).filter(v => v.cancelled_at).length;
+            const health = _computeDevHealth(p, mainOnly);
             return `<tr style="cursor:pointer;border-top:1px solid #eee" onclick="openDevProject('${p.id}')">
               <td style="padding:8px 10px"><b style="color:var(--accent-dark)">${p.name}</b></td>
+              <td style="padding:8px;text-align:center">
+                <span style="display:inline-block;background:${health.bg};color:${health.color};padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap">${health.emoji} ${health.label}</span>
+              </td>
               <td style="padding:8px;text-align:center">
                 <span style="font-weight:700;color:var(--accent-dark)">${vActive}</span>${vCancelled?`<span style="font-size:10px;color:var(--muted)"> +${vCancelled}取消</span>`:''}
               </td>
@@ -11878,6 +11883,7 @@ function _renderDevDashboardMatrixStage(projects) {
         <thead style="background:#f5f5f5">
           <tr>
             <th style="padding:10px;text-align:left;position:sticky;left:0;background:#f5f5f5;z-index:1;min-width:180px;border-right:1px solid var(--border)">專案</th>
+            <th style="padding:10px;text-align:center;min-width:80px">狀態</th>
             <th style="padding:10px;text-align:center;min-width:70px">品項</th>
             <th style="padding:10px;text-align:center;min-width:90px">Pipeline</th>
             <th style="padding:10px;text-align:center;min-width:80px">PM</th>
@@ -11891,10 +11897,17 @@ function _renderDevDashboardMatrixStage(projects) {
             const notYet = p.start_date && p.start_date > today;
             const vActive = (p.dev_variants||[]).filter(v => !v.cancelled_at).length;
             const vCancelled = (p.dev_variants||[]).filter(v => v.cancelled_at).length;
+            const mainTasksForHealth = (p.dev_tasks||[]).filter(t => t.step_group === 'main');
+            const health = _computeDevHealth(p, mainTasksForHealth);
             return `<tr style="cursor:pointer;border-top:1px solid #eee;${allDone?'opacity:.6':''}" onclick="openDevProject('${p.id}')">
               <td style="padding:10px;position:sticky;left:0;background:#fff;border-right:1px solid var(--border)">
                 <div style="font-weight:700;color:var(--accent-dark)">${p.name}</div>
                 <div style="font-size:11px;color:var(--muted);margin-top:2px">起始 ${p.start_date||'—'}${allDone?' · 🚀 已上市':''}${notYet?' · ⏸ 待啟動':''}</div>
+              </td>
+              <td style="padding:10px;text-align:center">
+                <span style="display:inline-block;background:${health.bg};color:${health.color};padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;white-space:nowrap">${health.emoji} ${health.label}</span>
+                ${health.overdueCount?`<div style="font-size:10px;color:#c62828;margin-top:2px">${health.overdueCount} 筆逾期</div>`:''}
+                ${health.dueCount?`<div style="font-size:10px;color:#e65100;margin-top:2px">${health.dueCount} 筆今日</div>`:''}
               </td>
               <td style="padding:10px;text-align:center">
                 <span style="font-weight:700;color:var(--accent-dark)">${vActive}</span>${vCancelled?`<span style="font-size:10px;color:var(--muted)"> +${vCancelled}取消</span>`:''}
@@ -12026,8 +12039,12 @@ function _renderDevKanban(enriched) {
       return step?.milestone && t.status !== '完成' && t.status !== '取消';
     });
     const launchOv = p.launch_date && p.launch_date < today;
-    return `<div style="background:#fff;border:1px solid var(--border);border-left:3px solid ${curStage?curStage.color:'#2e7d32'};border-radius:6px;padding:10px 12px;margin-bottom:8px;cursor:pointer" onclick="openDevProject('${p.id}')">
-      <div style="font-size:13px;font-weight:700;color:var(--accent-dark);margin-bottom:4px">${p.name}</div>
+    const health = _computeDevHealth(p, mainOnly);
+    return `<div style="background:#fff;border:1px solid var(--border);border-left:3px solid ${health.color};border-radius:6px;padding:10px 12px;margin-bottom:8px;cursor:pointer" onclick="openDevProject('${p.id}')">
+      <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:6px;margin-bottom:4px">
+        <div style="font-size:13px;font-weight:700;color:var(--accent-dark)">${p.name}</div>
+        <span style="font-size:9px;background:${health.bg};color:${health.color};padding:2px 6px;border-radius:8px;font-weight:700;white-space:nowrap">${health.emoji} ${health.label}</span>
+      </div>
       <div style="font-size:11px;color:var(--muted);margin-bottom:6px">${plLabels} · ${p.pm_name||'—'}</div>
       <div style="height:5px;background:#eee;border-radius:3px;overflow:hidden;margin-bottom:5px"><div style="height:100%;background:${curStage?curStage.color:'#2e7d32'};width:${pct}%"></div></div>
       <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px">
@@ -12275,6 +12292,10 @@ function _renderDevProjectCard(p) {
       : curStage
         ? `<span style="background:${curStage.color}22;color:${curStage.color};padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">● ${curStage.label}中 · ${curStage.progress}%</span>`
         : '';
+  const _healthForCard = _computeDevHealth(p, mainOnly);
+  const _healthBadge = (!allPassed && !_notYetStarted)
+    ? `<span style="background:${_healthForCard.bg};color:${_healthForCard.color};padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700;margin-left:4px">${_healthForCard.emoji} ${_healthForCard.label}</span>`
+    : '';
   // 階段迷你進度:4 格小圓點顯示大階段通過狀態
   const stageMiniDots = stageInfo.map(s => {
     const c = s.gatePassed ? s.color : (s.isCurrent ? s.color + 'aa' : '#e0e0e0');
@@ -12289,6 +12310,7 @@ function _renderDevProjectCard(p) {
         <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
           <div style="font-size:16px;font-weight:700;color:var(--accent-dark)">${p.name}</div>
           ${stageBadge}
+          ${_healthBadge}
         </div>
         <div style="font-size:12px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
           <span>${stageMiniDots}</span>
@@ -12374,13 +12396,21 @@ function _computeDevProjectStages(project, mainTasks, pipelines) {
       const step = (tpl?.main||[]).find(s => s.key === t.step_key);
       return step?.is_stage_gate;
     });
-    // 跳過的階段 → 自動視為通過(無閘門可按)
+    // 閘門通過判定:
+    //  · 整個階段都略過(無任何任務) → 自動視為通過
+    //  · 階段內的閘門步驟被略過(gateTasks.length === 0 但 nonCancel 還有任務)
+    //    → 用「剩餘任務是否全完成」判定(避免卡死在這階段)
+    //  · 有閘門步驟 → 所有閘門都 gate_passed_at 才算通過
     const gatePassed = effectivelySkipped
       ? true
-      : (gateTasks.length > 0 && gateTasks.every(t => !!t.gate_passed_at));
+      : (gateTasks.length === 0
+          ? nonCancel.every(t => t.status === '完成')
+          : gateTasks.every(t => !!t.gate_passed_at));
     const gateReady = effectivelySkipped
       ? true
-      : (gateTasks.length > 0 && gateTasks.every(t => t.status === '完成'));
+      : (gateTasks.length === 0
+          ? nonCancel.every(t => t.status === '完成')
+          : gateTasks.every(t => t.status === '完成'));
     return {
       stageKey: st.key, label: st.label, gate: st.gate, color: st.color,
       taskCount: total, doneCount: done,
@@ -12493,6 +12523,26 @@ window._devToggleStageSkip = async function(projectId, stageKey, skip) {
   try { await loadCalendarEvents?.(); } catch(e) {}
   renderApp();
 };
+
+// 判斷專案健康度:準時 / 需注意 / 延遲 / 已完成 / 待啟動
+function _computeDevHealth(project, mainTasks) {
+  const today = _localToday();
+  const notYet = project.start_date && project.start_date > today;
+  if (notYet) return { label: '待啟動', color: '#888', bg:'#f5f5f5', emoji: '⏸' };
+  const nonFinal = mainTasks.filter(t => t.status !== '完成' && t.status !== '取消');
+  // 已全部完成/取消
+  if (nonFinal.length === 0) return { label: '已完成', color: '#2e7d32', bg:'#e8f5e9', emoji: '✓' };
+  // 逾期判定
+  const overdue = nonFinal.filter(t => t.due_date && t.due_date < today);
+  if (overdue.length > 0) {
+    const maxDelay = Math.max(...overdue.map(t => _daysDiff(t.due_date, today)));
+    return { label: `延遲 ${maxDelay} 天`, color: '#c62828', bg:'#ffebee', emoji: '🔴', overdueCount: overdue.length };
+  }
+  // 今日到期
+  const dueToday = nonFinal.filter(t => t.due_date === today);
+  if (dueToday.length > 0) return { label: '今日到期', color: '#f57c00', bg:'#fff3e0', emoji: '🟡', dueCount: dueToday.length };
+  return { label: '準時', color: '#2e7d32', bg:'#e8f5e9', emoji: '🟢' };
+}
 
 // 捲到需要注意區塊(KPI 點擊)
 window._devScrollToPending = function() {
@@ -12653,11 +12703,13 @@ function _renderDevDetail(id) {
   const pct = total ? Math.round(done/total*100) : 0;
   const overdue = tasks.filter(t => t.due_date && t.due_date < today && t.status !== '完成' && t.status !== '取消').length;
 
+  const _devHealthTop = _computeDevHealth(p, mainTasks);
   return `
-    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px">
+    <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
       <button class="btn btn-outline btn-sm" onclick="closeDevProject()">← 返回列表</button>
       <div style="font-size:18px;font-weight:700;color:var(--accent-dark)">🛠 ${p.name}</div>
       <span class="tag tag-blue">${p.status||'進行中'}</span>
+      <span style="background:${_devHealthTop.bg};color:${_devHealthTop.color};padding:3px 12px;border-radius:12px;font-size:12px;font-weight:700">${_devHealthTop.emoji} ${_devHealthTop.label}</span>
     </div>
 
     <div class="cards cards-4" style="margin-bottom:14px">
@@ -13174,6 +13226,19 @@ function _devOpenReviewModal(project, task) {
     _devFinalizeTaskComplete(project.id, task.id, []);
     return;
   }
+  // 找出本階段內「可以重跑」的任務(order < 當前審查任務 · 同 stage · 同 pipeline · status=完成)
+  const curStepDef = _findStepDef(task.pipeline, task.step_key);
+  const curStage = curStepDef?.stage;
+  const rerunCandidates = (project.dev_tasks||[]).filter(t => {
+    if (t.id === task.id) return false;
+    if (t.pipeline !== task.pipeline) return false;
+    if (t.step_group !== 'main') return false;
+    if ((t.order_num||0) >= (task.order_num||0)) return false;
+    if (t.status === '取消') return false;
+    const step = _findStepDef(t.pipeline, t.step_key);
+    return step?.stage === curStage;
+  }).sort((a,b) => (a.order_num||0) - (b.order_num||0));
+
   showModal(`📋 ${task.step_name} · 品項審查`, `
     <div style="font-size:12px;color:var(--muted);margin-bottom:12px;line-height:1.6">
       逐個勾選品項審查結果 · 未通過的會 revision +1,系統記錄校正歷程<br>
@@ -13202,6 +13267,21 @@ function _devOpenReviewModal(project, task) {
         </div>
       </div>`).join('')}
     </div>
+    ${rerunCandidates.length ? `
+    <div style="margin-top:14px;padding:12px 14px;background:#fff8e1;border:1px solid #ffd54f;border-radius:8px">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#e65100">
+        <input type="checkbox" id="dev-rerun-stage" checked style="width:16px;height:16px">
+        🔄 若有需校正 → 把此階段任務重設為「未開始」(退回重做)
+      </label>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px;padding-left:24px">
+        重跑清單:${rerunCandidates.map(t => `<code style="background:#fff;padding:1px 6px;border-radius:3px;margin:1px">${t.step_name}</code>`).join('')}
+      </div>
+      <div style="margin-top:8px;padding-left:24px;display:flex;align-items:center;gap:6px;font-size:11px">
+        <span>重跑預計延後:</span>
+        <input type="number" id="dev-rerun-days" value="5" min="1" style="width:60px;padding:2px 6px;font-size:11px;border:1px solid var(--border);border-radius:3px">
+        <span>個工作天(從今天起算)</span>
+      </div>
+    </div>` : ''}
   `, [
     { label:'✅ 確認並完成本步驟', primary:true, onclick: async () => {
       const results = activeVariants.map(v => {
@@ -13213,7 +13293,13 @@ function _devOpenReviewModal(project, task) {
       const rejected = results.filter(r => r.decision === 'reject');
       const missing = rejected.filter(r => !r.reason);
       if (missing.length) { showToast('未通過的品項必須填校正原因','error'); return; }
-      await _devFinalizeTaskComplete(project.id, task.id, results);
+      // 退回重做參數
+      const doRerun = rejected.length > 0 && !!document.getElementById('dev-rerun-stage')?.checked;
+      const rerunDays = parseInt(document.getElementById('dev-rerun-days')?.value) || 5;
+      await _devFinalizeTaskComplete(project.id, task.id, results, {
+        rerunTasks: doRerun ? rerunCandidates : [],
+        rerunDays,
+      });
       closeModal();
     }},
     { label:'取消', onclick: closeModal },
@@ -13226,7 +13312,8 @@ window._devToggleReviewReason = function(vid, show) {
 };
 
 // 完成任務(送審後或普通任務)+ 寫入品項審查結果 + 校正歷程
-async function _devFinalizeTaskComplete(projectId, taskId, reviewResults) {
+// opts: { rerunTasks:[], rerunDays:number } — 退回重做
+async function _devFinalizeTaskComplete(projectId, taskId, reviewResults, opts = {}) {
   const p = state.data.dev.find(x => x.id === projectId);
   const task = p?.dev_tasks?.find(t => t.id === taskId);
   if (!p || !task) return;
@@ -13274,13 +13361,52 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults) {
   // 副線已在建案時生成(系列級),樣品審過只處理校正結果
   // 量產完成不再自動彈建商品(手工由陳秋惠處理)
 
+
+  // 退回重做:把本階段的任務重設為「未開始」,due_date 從今天 +N 工作天
+  let rerunCount = 0;
+  if (opts.rerunTasks && opts.rerunTasks.length && rejectedCount > 0) {
+    const rerunDays = Math.max(1, parseInt(opts.rerunDays)||5);
+    for (const rt of opts.rerunTasks) {
+      // 計算新的 due_date:以今天為基礎 + rerunDays 工作天
+      const d0 = new Date(today + 'T00:00:00');
+      const newDueD = addWorkdays(d0, rerunDays);
+      const newDue = `${newDueD.getFullYear()}-${String(newDueD.getMonth()+1).padStart(2,'0')}-${String(newDueD.getDate()).padStart(2,'0')}`;
+      await db.from('dev_tasks').update({
+        status: '未開始',
+        completed_at: null,
+        completed_by: null,
+        due_date: newDue,
+        expected_date: newDue,
+        gate_passed_at: null,
+        gate_passed_by: null,
+        gate_passed_note: null,
+      }).eq('id', rt.id);
+      // 同步行事曆子任務:取消打勾 + 更新日期
+      try {
+        await _devSyncCalendarSubtask({ ...rt, status: '未開始', calendar_event_id: rt.calendar_event_id }, false);
+        await _devSyncCalendarSubtaskDate({ ...rt, calendar_event_id: rt.calendar_event_id }, newDue);
+      } catch(e) {}
+      rerunCount++;
+    }
+    // 本次審查任務也要重置 → 下次重審再勾(因為退回了,等打樣完成後要再送審)
+    await db.from('dev_tasks').update({
+      status: '未開始',
+      completed_at: null,
+      completed_by: null,
+      gate_passed_at: null,
+      gate_passed_by: null,
+      gate_passed_note: null,
+    }).eq('id', taskId);
+  }
+
   // 更新專案行事曆事件的 event_date = 下一個未完成任務日
   await _devUpdateEventDateToNextTask(projectId);
 
-  const msg = rejectedCount > 0
-    ? `✓ 已完成 · ⚠ ${rejectedCount} 個品項需校正`
-    : `✓ 已完成 · 所有品項通過`;
-  showToast(msg, rejectedCount ? 'warn' : 'success');
+  const parts = [];
+  if (rejectedCount > 0) parts.push(`⚠ ${rejectedCount} 個品項需校正`);
+  if (rerunCount > 0) parts.push(`🔄 已退回重做 ${rerunCount} 個任務`);
+  const msg = parts.length ? `✓ 已處理 · ${parts.join(' · ')}` : '✓ 已完成 · 所有品項通過';
+  showToast(msg, (rejectedCount||rerunCount) ? 'warn' : 'success');
   await loadDev();
   try { await loadCalendarEvents?.(); } catch(e) {}
   renderApp();
