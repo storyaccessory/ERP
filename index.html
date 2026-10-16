@@ -12149,20 +12149,28 @@ function _renderDevMatrixStage(projects) {
                   const notYet = p.start_date && p.start_date > today;
                   return stages.map(s => {
                     let cellBg = '#fff', cellCol = '#999', content = '—';
-                    if (s.gatePassed) {
+                    if (s.isSkipped) {
+                      // 用戶主動略過(有任務但全被標取消)
+                      cellBg = '#fafafa'; cellCol = '#aaa';
+                      content = `<div style="font-weight:700">⊘ 已略過</div>`;
+                    } else if (s.noTasks) {
+                      // pipeline 根本沒配此階段
+                      content = '<span style="color:#ccc">—</span>';
+                    } else if (s.gatePassed) {
                       cellBg = s.color + '18'; cellCol = s.color;
                       content = `<div style="font-weight:700">✓ 已通過</div><div style="font-size:10px;color:var(--muted);margin-top:2px">${s.doneCount}/${s.taskCount}</div>`;
                     } else if (s.isCurrent) {
                       if (notYet) {
-                        // 專案尚未開始 → 顯示「待啟動」而非「進行中」
                         cellBg = '#fafafa'; cellCol = '#888';
                         content = `<div style="font-weight:700">⏸ 待啟動</div><div style="font-size:10px;margin-top:2px">${p.start_date} 起</div>`;
+                      } else if (s.gateReady) {
+                        // 任務完成但閘門沒按 → 突顯要去按
+                        cellBg = '#fff8e1'; cellCol = '#f57c00';
+                        content = `<div style="font-weight:700">⏳ 待按閘門</div><div style="font-size:10px;margin-top:2px">${s.doneCount}/${s.taskCount} · 進詳情按</div>`;
                       } else {
                         cellBg = s.color + '30'; cellCol = s.color;
                         content = `<div style="font-weight:700">● 進行中</div><div style="font-size:10px;margin-top:2px">${s.doneCount}/${s.taskCount} · ${s.progress}%</div>`;
                       }
-                    } else if (s.taskCount === 0) {
-                      content = '<span style="color:#ccc">—</span>';
                     } else {
                       content = `<span style="color:#bbb">待入階</span>`;
                     }
