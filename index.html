@@ -12349,7 +12349,12 @@ function _computeDevProjectStages(project, mainTasks, pipelines) {
       const step = (tpl?.main||[]).find(s => s.key === t.step_key);
       return step?.stage === st.key;
     });
+    const cancelled = stageTasks.filter(t => t.status === '取消');
     const nonCancel = stageTasks.filter(t => t.status !== '取消');
+    // 階段視為「跳過」:有任務但全被略過(手動 → 階段不需要),或根本沒任務(pipeline 沒配置該階段)
+    const isSkipped = stageTasks.length > 0 && nonCancel.length === 0;
+    const noTasks = stageTasks.length === 0;
+    const effectivelySkipped = isSkipped || noTasks;
     const done = nonCancel.filter(t => t.status === '完成').length;
     const total = nonCancel.length;
     // 閘門狀態:階段裡 is_stage_gate 的任務們,全部 gate_passed_at 都有值才算通過
@@ -12358,14 +12363,21 @@ function _computeDevProjectStages(project, mainTasks, pipelines) {
       const step = (tpl?.main||[]).find(s => s.key === t.step_key);
       return step?.is_stage_gate;
     });
-    const gatePassed = gateTasks.length > 0 && gateTasks.every(t => !!t.gate_passed_at);
-    const gateReady = gateTasks.length > 0 && gateTasks.every(t => t.status === '完成');
+    // 跳過的階段 → 自動視為通過(無閘門可按)
+    const gatePassed = effectivelySkipped
+      ? true
+      : (gateTasks.length > 0 && gateTasks.every(t => !!t.gate_passed_at));
+    const gateReady = effectivelySkipped
+      ? true
+      : (gateTasks.length > 0 && gateTasks.every(t => t.status === '完成'));
     return {
       stageKey: st.key, label: st.label, gate: st.gate, color: st.color,
       taskCount: total, doneCount: done,
       progress: total > 0 ? Math.round(done/total*100) : 0,
       pipelineKeys: pipelines,
       gateTasks, gatePassed, gateReady,
+      isSkipped, noTasks,
+      stageTaskCount: stageTasks.length,  // 含被略過的總數,用於判斷「全被略」
     };
   });
   // 當前階段 = 第一個閘門未通過的階段
@@ -12380,23 +12392,43 @@ function _buildDevProjectStageBar(project, mainTasks, pipelines) {
   if (!stages.length) return '';
   const chips = stages.map((s, idx) => {
     let bg = '#fff', border = '#e0e0e0', numBg = '#f5f5f5', numCol = '#999', mark = String(idx+1);
-    if (s.gatePassed) { bg = s.color + '18'; border = s.color; numBg = s.color; numCol = '#fff'; mark = '✓'; }
+    const isUserSkipped = s.isSkipped;  // 全被略過
+    if (isUserSkipped) { bg = '#fafafa'; border = '#ddd'; numBg = '#bbb'; numCol = '#fff'; mark = '✗'; }
+    else if (s.gatePassed && !s.noTasks) { bg = s.color + '18'; border = s.color; numBg = s.color; numCol = '#fff'; mark = '✓'; }
+    else if (s.gatePassed && s.noTasks) { bg = '#fafafa'; border = '#ddd'; numBg = '#bbb'; numCol = '#fff'; mark = '—'; }
     else if (s.isCurrent) { bg = s.color + '22'; border = s.color; numBg = s.color; numCol = '#fff'; mark = '●'; }
     const gateBtn = (s.isCurrent && s.gateReady && !s.gatePassed)
       ? `<button onclick="window._devPassStage('${project.id}','${s.stageKey}')"
           style="margin-top:8px;padding:4px 12px;font-size:11px;background:#2e7d32;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:700">✓ 通過閘門</button>`
-      : (s.gatePassed
+      : (s.gatePassed && !s.noTasks && !isUserSkipped
         ? `<button onclick="window._devUnpassStage('${project.id}','${s.stageKey}')"
             style="margin-top:8px;padding:3px 8px;font-size:10px;background:#fafafa;color:#888;border:1px solid #ddd;border-radius:4px;cursor:pointer">↩ 撤銷</button>`
         : '');
+    // 「不需要 / 恢復」切換(只在未進入 or 當前階段顯示;已通過就不給改,避免破壞歷史)
+    const skipBtn = (() => {
+      if (s.noTasks) return '';  // 根本沒配置此階段,免談
+      if (s.gatePassed && !isUserSkipped) return '';  // 已正常通過的不給切跳過
+      if (isUserSkipped) {
+        return `<button onclick="window._devToggleStageSkip('${project.id}','${s.stageKey}',false)"
+          style="margin-top:4px;padding:2px 8px;font-size:10px;background:#fff;color:#1565c0;border:1px solid #90caf9;border-radius:4px;cursor:pointer">↩ 恢復此階段</button>`;
+      }
+      // 未跳過 → 顯示小按鈕可切為不需要
+      return `<button onclick="window._devToggleStageSkip('${project.id}','${s.stageKey}',true)"
+        style="margin-top:4px;padding:2px 8px;font-size:10px;background:#fff;color:#888;border:1px dashed #ccc;border-radius:4px;cursor:pointer" title="此專案不需要此階段">✗ 不需要</button>`;
+    })();
+    const subLine = isUserSkipped
+      ? `<div style="font-size:11px;color:#888;font-weight:600">✗ 已略過</div>`
+      : s.noTasks
+        ? `<div style="font-size:11px;color:#ccc">—</div>`
+        : `<div style="font-size:11px;color:var(--muted);margin-bottom:4px">${s.doneCount}/${s.taskCount} · ${s.progress}%</div><div style="font-size:10px;color:#999">🔐 ${s.gate}</div>`;
     return `<div style="flex:1;min-width:140px;border:1.5px solid ${border};background:${bg};border-radius:8px;padding:10px 12px;text-align:center">
       <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:4px">
         <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:${numBg};color:${numCol};border-radius:50%;font-size:11px;font-weight:700">${mark}</span>
-        <span style="font-size:13px;font-weight:700;color:${s.color}">${s.label}</span>
+        <span style="font-size:13px;font-weight:700;color:${isUserSkipped?'#888':s.color}">${s.label}</span>
       </div>
-      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${s.doneCount}/${s.taskCount} · ${s.progress}%</div>
-      <div style="font-size:10px;color:#999">🔐 ${s.gate}</div>
+      ${subLine}
       ${gateBtn}
+      ${skipBtn}
     </div>`;
   }).join('<div style="color:#ddd;font-size:14px;align-self:center">→</div>');
   return `<div class="card" style="margin-bottom:14px;padding:12px">
@@ -12404,6 +12436,52 @@ function _buildDevProjectStageBar(project, mainTasks, pipelines) {
     <div style="display:flex;gap:6px;align-items:stretch;overflow-x:auto">${chips}</div>
   </div>`;
 }
+
+// 整個階段「不需要 / 恢復」:把該階段所有未完成任務標為取消 / 恢復未開始
+window._devToggleStageSkip = async function(projectId, stageKey, skip) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const stageInfo = DEV_STAGES.find(s => s.key === stageKey);
+  if (!stageInfo) return;
+  const stageTasks = (p.dev_tasks||[]).filter(t => {
+    const tpl = PIPELINE_TEMPLATES[t.pipeline];
+    const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+    return step?.stage === stageKey;
+  });
+  if (!stageTasks.length) { showToast('此階段沒有任務','info'); return; }
+  if (skip) {
+    const anyDone = stageTasks.some(t => t.status === '完成');
+    const msg = anyDone
+      ? `「${stageInfo.label}」階段裡有已完成的任務,確定全部標為「取消」?(可隨時恢復)`
+      : `將「${stageInfo.label}」階段的 ${stageTasks.length} 個任務全部標為「不需要」?`;
+    if (!confirm(msg)) return;
+    const reason = '階段略過';
+    for (const t of stageTasks) {
+      if (t.status === '取消') continue;
+      await db.from('dev_tasks').update({
+        status: '取消',
+        cancelled_at: new Date().toISOString(),
+        cancel_reason: reason,
+      }).eq('id', t.id);
+    }
+    showToast(`✗ 已略過「${stageInfo.label}」階段`);
+  } else {
+    // 恢復:把被「階段略過」原因取消的任務改回未開始
+    for (const t of stageTasks) {
+      if (t.status === '取消' && (t.cancel_reason === '階段略過' || !t.cancel_reason)) {
+        await db.from('dev_tasks').update({
+          status: '未開始',
+          cancelled_at: null,
+          cancel_reason: null,
+        }).eq('id', t.id);
+      }
+    }
+    showToast(`↩ 已恢復「${stageInfo.label}」階段`);
+  }
+  await loadDev();
+  try { await loadCalendarEvents?.(); } catch(e) {}
+  renderApp();
+};
 
 // 捲到需要注意區塊(KPI 點擊)
 window._devScrollToPending = function() {
@@ -13877,7 +13955,16 @@ window._devEditProject = async function(projectId) {
       <div class="form-group"><label>上市日</label><input type="date" class="form-control" id="ep-launch" value="${p.launch_date||''}"></div>
     </div>
     <div class="form-group"><label>備註</label><textarea class="form-control" rows="2" id="ep-notes">${p.notes||''}</textarea></div>
-    <div style="font-size:11px;color:var(--muted);padding:8px 12px;background:#f5f5f5;border-radius:6px">💡 改了起始日或上市日 → 系統會自動重建行事曆以同步新日期</div>
+    <div class="form-group" style="padding:10px 12px;background:#e3f2fd;border-radius:6px;border-left:3px solid #1565c0">
+      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;font-weight:600;color:#1565c0">
+        <input type="checkbox" id="ep-shift-tasks" checked style="width:16px;height:16px">
+        改起始日時 → <b>所有未完成任務一起順移</b>相同天數
+      </label>
+      <div style="font-size:11px;color:var(--muted);margin-top:4px;padding-left:24px">
+        · 已完成/已取消的任務不會動(保留歷史)<br>
+        · 行事曆子任務日期一併同步
+      </div>
+    </div>
   `, [
     { label:'儲存', primary:true, onclick: async () => {
       const upd = {
@@ -13888,9 +13975,35 @@ window._devEditProject = async function(projectId) {
       };
       const startChanged = upd.start_date !== p.start_date;
       const launchChanged = upd.launch_date !== p.launch_date;
+      const shiftTasks = document.getElementById('ep-shift-tasks')?.checked;
+
+      // 計算起始日位移天數
+      let deltaDays = 0;
+      if (startChanged && p.start_date && upd.start_date) {
+        deltaDays = _daysDiff(p.start_date, upd.start_date);
+      }
+
+      // 若有勾選 + 起始日有變 + 有位移 → 順移所有未完成/未取消任務
+      let shiftedCount = 0;
+      if (shiftTasks && deltaDays !== 0) {
+        const movableTasks = (p.dev_tasks||[]).filter(t =>
+          t.status !== '完成' && t.status !== '取消' && t.due_date
+        );
+        if (movableTasks.length) {
+          const msg = `${deltaDays > 0 ? '順延' : '提前'} ${Math.abs(deltaDays)} 天 — 影響 ${movableTasks.length} 個未完成任務。確定?`;
+          if (!confirm(msg)) return;
+          for (const t of movableTasks) {
+            const newDate = _shiftDate(t.due_date, deltaDays);
+            await db.from('dev_tasks').update({ due_date: newDate }).eq('id', t.id);
+            shiftedCount++;
+          }
+        }
+      }
 
       // 從現有任務重算「最快可上市日」(拿最後里程碑或最後 due_date)
-      const tasks = p.dev_tasks || [];
+      await loadDev();  // 載入最新 tasks(含順移後的)
+      const p2 = (state.data.dev||[]).find(x => x.id === projectId);
+      const tasks = p2.dev_tasks || [];
       const launchTask = tasks.find(t => t.is_milestone && (t.step_name?.includes('量產') || t.step_name?.includes('到貨驗收')));
       upd.earliest_launch = launchTask?.due_date
         || tasks.map(t => t.due_date).filter(Boolean).sort().pop()
@@ -13898,16 +14011,18 @@ window._devEditProject = async function(projectId) {
 
       await db.from('dev_projects').update(upd).eq('id', projectId);
 
-      // 日期有變 → 自動重建行事曆事件(重算 event_date / description / 分類)
-      if (startChanged || launchChanged) {
-        await loadDev();
-        const p2 = (state.data.dev||[]).find(x => x.id === projectId);
+      // 日期有變 → 自動重建行事曆事件
+      if (startChanged || launchChanged || shiftedCount > 0) {
         const oldEventIds = [...new Set((p2.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
         if (oldEventIds.length) {
           await db.from('calendar_events').delete().in('id', oldEventIds);
         }
-        await _buildDevCalendarEvents(p2, p2.dev_tasks||[], p2.name);
-        showToast('已更新 · 行事曆自動重建');
+        await loadDev();
+        const p3 = (state.data.dev||[]).find(x => x.id === projectId);
+        await _buildDevCalendarEvents(p3, p3.dev_tasks||[], p3.name);
+        showToast(shiftedCount > 0
+          ? `✓ 已順移 ${shiftedCount} 個任務 · 行事曆重建`
+          : '已更新 · 行事曆自動重建');
       } else {
         showToast('已更新');
       }
@@ -14113,6 +14228,22 @@ function _renderDevModalBody() {
           ${activeUsers.map(u=>`<option value="${u.id}" data-name="${u.name}" ${d.factory_owner_id===u.id?'selected':''}>${u.name}</option>`).join('')}
         </select>
       </div>` : ''}
+
+      ${d.pipelines.length ? `
+      <div style="margin-top:10px;padding:10px 12px;background:#fff;border-radius:6px">
+        <div style="font-size:12px;color:var(--muted);margin-bottom:6px">🎯 選要跑的階段(預設全選,不勾的階段建案時會直接略過)</div>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          ${DEV_STAGES.map(st => {
+            const skipped = (d.skippedStages||[]).includes(st.key);
+            const on = !skipped;
+            return `<label style="display:flex;align-items:center;gap:5px;padding:5px 12px;border-radius:16px;border:1.5px solid ${on?st.color:'#ddd'};background:${on?st.color+'15':'#fafafa'};cursor:pointer;font-size:12px;font-weight:600;color:${on?st.color:'#999'}">
+              <input type="checkbox" ${on?'checked':''} onchange="window._devToggleSkippedStage('${st.key}')" style="margin:0">
+              ${st.label}
+            </label>`;
+          }).join('')}
+        </div>
+        ${(d.skippedStages||[]).length ? `<div style="margin-top:6px;font-size:11px;color:#e65100">⚠ 跳過的階段:${(d.skippedStages).map(k => DEV_STAGES.find(s=>s.key===k)?.label).join('、')}</div>` : ''}
+      </div>` : ''}
     </div>
 
     <!-- 品項說明(改在初稿完成後才加) -->
@@ -14288,6 +14419,15 @@ function _renderDevModalBody() {
     </div>
   `;
 }
+
+window._devToggleSkippedStage = function(stageKey) {
+  const d = state.data._devDraft;
+  if (!d.skippedStages) d.skippedStages = [];
+  const i = d.skippedStages.indexOf(stageKey);
+  if (i >= 0) d.skippedStages.splice(i, 1);
+  else d.skippedStages.push(stageKey);
+  window._devRerender();
+};
 
 window._devTogglePipeline = function(key) {
   const d = state.data._devDraft;
@@ -14481,6 +14621,7 @@ async function _saveDevProject() {
     const { dates, stepMap } = pipelineDates[pl];
     const overrides = d.overrides?.[pl] || {};
     // 主線
+    const skippedStages = d.skippedStages || [];
     dates.forEach(step => {
       const ov = overrides[step.key] || {};
       let assignee_name = step.assignee_name;
@@ -14496,6 +14637,7 @@ async function _saveDevProject() {
         if (u) assignee_id = u.id;
       }
       const dueDate = ov.due_date || step.expected_date;
+      const isSkip = skippedStages.includes(step.stage);
       taskInserts.push({
         project_id: projectId,
         variant_id: null,
@@ -14509,7 +14651,9 @@ async function _saveDevProject() {
         assignee_name,
         expected_date: step.expected_date,
         due_date: dueDate,
-        status: '未開始',
+        status: isSkip ? '取消' : '未開始',
+        cancelled_at: isSkip ? new Date().toISOString() : null,
+        cancel_reason: isSkip ? '階段略過' : null,
       });
     });
     // 副線(改為系列級 · 建案時一併生 · variant_id=null)
