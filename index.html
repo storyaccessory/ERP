@@ -13555,43 +13555,100 @@ window._devHandleTimingChange = function(projectId, taskId, deltaDays) {
   if (!p || !task) return;
 
   // 找所有後續未完成的任務
-  const laterTasks = (p.dev_tasks||[]).filter(t => (t.order_num||0) > (task.order_num||0) && t.status !== '完成' && t.status !== '取消');
+  const laterTasks = (p.dev_tasks||[]).filter(t => (t.order_num||0) > (task.order_num||0) && t.status !== '完成' && t.status !== '取消')
+    .sort((a,b) => (a.order_num||0) - (b.order_num||0));
   const isLate = deltaDays > 0;
   const emoji = isLate ? '⚠' : '✨';
   const word = isLate ? '延遲' : '提早';
+  const shiftWord = isLate ? '順延' : '提前';
+  const shiftArrow = isLate ? '⏩' : '⏪';
+
+  // 分組:同 pipeline / 同 stage(方便 PM 一次勾)
+  const tplStageMap = {};
+  laterTasks.forEach(t => {
+    const tpl = PIPELINE_TEMPLATES[t.pipeline];
+    const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+    t._stage = step?.stage || 'custom';
+  });
+
+  const rowsHtml = laterTasks.map((t, i) => {
+    const newDate = _shiftDate(t.due_date, deltaDays);
+    return `<tr style="border-top:1px solid #eee">
+      <td style="padding:5px 6px;text-align:center">
+        <input type="checkbox" id="dt-shift-${t.id}" checked style="width:16px;height:16px;cursor:pointer;accent-color:${isLate?'#e65100':'#2e7d32'}">
+      </td>
+      <td style="padding:5px 6px;font-size:11px;color:var(--muted)">${t._stage}</td>
+      <td style="padding:5px 6px;font-size:12px">${t.step_name}</td>
+      <td style="padding:5px 6px;font-size:11px;color:var(--muted)">${t.assignee_name||'—'}</td>
+      <td style="padding:5px 6px;text-align:center;font-size:11px;font-family:monospace;color:var(--muted)">${t.due_date||'—'}</td>
+      <td style="padding:5px 6px;text-align:center;font-size:11px;font-family:monospace;color:${isLate?'#e65100':'#2e7d32'};font-weight:700">${newDate}</td>
+    </tr>`;
+  }).join('');
 
   showModal(`${emoji} ${task.step_name} ${word} ${Math.abs(deltaDays)} 天`, `
-    <div style="font-size:13px;line-height:1.7">
-      <div><b>負責人:</b> ${task.assignee_name||'—'}</div>
-      <div><b>原定:</b> ${task.due_date} · <b>實際:</b> ${_localToday()}</div>
-      <div style="margin-top:10px;padding:10px;background:#f5f5f5;border-radius:6px">
-        後續 <b>${laterTasks.length}</b> 個未完成任務可能受影響
-      </div>
-      <div style="margin-top:14px;font-weight:600;color:var(--accent-dark)">怎麼處理?</div>
+    <div style="font-size:13px;line-height:1.7;margin-bottom:12px">
+      <div><b>負責人:</b> ${task.assignee_name||'—'} · <b>原定:</b> ${task.due_date} · <b>實際:</b> ${_localToday()}</div>
     </div>
+    ${laterTasks.length ? `
+    <div style="padding:8px 10px;background:#f5f5f5;border-radius:6px;margin-bottom:10px;font-size:12px">
+      勾選要連動 ${shiftArrow} ${shiftWord} ${Math.abs(deltaDays)} 天的任務(預設全選,可只勾前幾個)
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:8px;flex-wrap:wrap">
+      <button type="button" onclick="document.querySelectorAll('#dt-shift-table input[type=checkbox]').forEach(c=>c.checked=true)" class="btn btn-sm btn-outline" style="font-size:11px">✓ 全選</button>
+      <button type="button" onclick="document.querySelectorAll('#dt-shift-table input[type=checkbox]').forEach(c=>c.checked=false)" class="btn btn-sm btn-outline" style="font-size:11px">✕ 全不選</button>
+      <button type="button" onclick="document.querySelectorAll('#dt-shift-table input[type=checkbox]').forEach((c,i)=>c.checked=i<3)" class="btn btn-sm btn-outline" style="font-size:11px">只前 3 個</button>
+      <button type="button" onclick="(function(){document.querySelectorAll('#dt-shift-table tr[data-stage]').forEach(tr=>{const stage=tr.dataset.stage;const curStage='${task._stage||''}';const cb=tr.querySelector('input[type=checkbox]');if(cb) cb.checked = stage===curStage;})})()" class="btn btn-sm btn-outline" style="font-size:11px" title="只動同階段剩下的任務">只同階段</button>
+    </div>
+    <div style="max-height:40vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px" id="dt-shift-table">
+        <thead style="background:#fafafa;position:sticky;top:0">
+          <tr>
+            <th style="padding:5px 6px;width:30px"></th>
+            <th style="padding:5px 6px;text-align:left;width:60px">階段</th>
+            <th style="padding:5px 6px;text-align:left">任務</th>
+            <th style="padding:5px 6px;text-align:left;width:70px">負責</th>
+            <th style="padding:5px 6px;text-align:center;width:85px">原日期</th>
+            <th style="padding:5px 6px;text-align:center;width:85px">新日期</th>
+          </tr>
+        </thead>
+        <tbody>${laterTasks.map((t,i) => {
+          const newDate = _shiftDate(t.due_date, deltaDays);
+          return `<tr data-stage="${t._stage}" style="border-top:1px solid #eee">
+            <td style="padding:5px 6px;text-align:center"><input type="checkbox" id="dt-shift-${t.id}" checked style="width:16px;height:16px;cursor:pointer;accent-color:${isLate?'#e65100':'#2e7d32'}"></td>
+            <td style="padding:5px 6px;font-size:11px;color:var(--muted)">${t._stage}</td>
+            <td style="padding:5px 6px;font-size:12px">${t.step_name}</td>
+            <td style="padding:5px 6px;font-size:11px;color:var(--muted)">${t.assignee_name||'—'}</td>
+            <td style="padding:5px 6px;text-align:center;font-size:11px;font-family:monospace;color:var(--muted)">${t.due_date||'—'}</td>
+            <td style="padding:5px 6px;text-align:center;font-size:11px;font-family:monospace;color:${isLate?'#e65100':'#2e7d32'};font-weight:700">${newDate}</td>
+          </tr>`;
+        }).join('')}</tbody>
+      </table>
+    </div>` : '<div style="padding:16px;text-align:center;color:var(--muted)">沒有後續任務可連動</div>'}
   `, [
-    { label:`${isLate?'⏩':'⏪'} 全部${isLate?'順延':'提前'} ${Math.abs(deltaDays)} 天`, primary:true, onclick: async () => {
-      for (const t of laterTasks) {
+    { label:`${shiftArrow} 套用到勾選的`, primary:true, onclick: async () => {
+      const toShift = laterTasks.filter(t => document.getElementById(`dt-shift-${t.id}`)?.checked);
+      if (!toShift.length && laterTasks.length) {
+        if (!confirm('沒勾任何任務,要只標記完成不順延嗎?')) return;
+      }
+      for (const t of toShift) {
         const newDate = _shiftDate(t.due_date, deltaDays);
         await db.from('dev_tasks').update({ due_date: newDate }).eq('id', t.id);
         await _devSyncCalendarSubtaskDate(t, newDate);
       }
-      // 清除該任務的 pending note
       await db.from('dev_tasks').update({ notes: null }).eq('id', taskId);
-      showToast(`已${isLate?'順延':'提前'} ${laterTasks.length} 個任務`);
+      showToast(toShift.length ? `已${shiftWord} ${toShift.length} 個任務` : '已記錄,未順延後續');
       closeModal();
       await loadDev();
       try { await loadCalendarEvents?.(); } catch(e) {}
       renderApp();
     }},
     { label:'維持原計畫', onclick: async () => {
-      // 清除 pending note
       await db.from('dev_tasks').update({ notes: null }).eq('id', taskId);
       closeModal();
       await loadDev();
       renderApp();
     }},
-  ]);
+  ], { wide: true });
 };
 
 // 加品項(支援單筆 or 批次貼上多行)
