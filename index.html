@@ -11649,6 +11649,8 @@ function _renderDevDashboard(activeProjects, allProjects) {
   const gateWaiting = [];
   const upcomingMilestones = [];
   enriched.forEach(({p, mainOnly, stages, curStage}) => {
+    const notYet = p.start_date && p.start_date > today;
+    if (notYet) return;  // 尚未啟動的專案不列入需注意清單
     mainOnly.forEach(t => {
       if (t.status === '取消' || t.status === '完成') return;
       if (t.due_date && t.due_date < today) overdueTasks.push({ project: p, task: t });
@@ -11778,9 +11780,13 @@ function _renderDevDashboard(activeProjects, allProjects) {
               <td style="padding:8px;text-align:center">${p.pm_name||'—'}</td>
               <td style="padding:8px;text-align:center;font-size:11px;color:var(--muted)">${plLabels}</td>
               <td style="padding:8px;text-align:center">
-                ${allDone
-                  ? '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">🚀 已上市</span>'
-                  : curStage ? `<span style="color:${curStage.color};font-weight:700">● ${curStage.label}</span>` : '—'}
+                ${(() => {
+                  const notYet = p.start_date && p.start_date > today;
+                  if (allDone) return '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">🚀 已上市</span>';
+                  if (notYet) return `<span style="background:#f5f5f5;color:#888;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">⏸ 待啟動</span>`;
+                  if (curStage) return `<span style="color:${curStage.color};font-weight:700">● ${curStage.label}</span>`;
+                  return '—';
+                })()}
                 <div style="margin-top:3px">${dot}</div>
               </td>
               <td style="padding:8px;text-align:center">
@@ -11802,14 +11808,17 @@ function _renderDevDashboard(activeProjects, allProjects) {
 
 // 看板視圖:4 欄 = 4 大階段,每欄顯示該階段的專案卡
 function _renderDevKanban(enriched) {
+  const today = _localToday();
   const byStage = { design: [], modeling: [], sampling: [], production: [] };
   const launched = [];
+  const notStarted = [];
   enriched.forEach(e => {
     const allDone = e.stages.every(s => s.gatePassed);
-    if (allDone) launched.push(e);
+    const notYet = e.p.start_date && e.p.start_date > today;
+    if (notYet) notStarted.push(e);
+    else if (allDone) launched.push(e);
     else if (e.curStage) byStage[e.curStage.stageKey].push(e);
   });
-  const today = _localToday();
   const _card = (e) => {
     const {p, curStage, stages} = e;
     const plLabels = (p.pipelines||[]).map(pl => (PIPELINE_TEMPLATES[pl]?.label||pl).replace(/^[🥈🥇🎁]\s*/,'')).join('·');
@@ -11835,6 +11844,13 @@ function _renderDevKanban(enriched) {
     </div>`;
   };
   return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+    ${notStarted.length ? `<div style="background:#fafafa;border:1px solid #e0e0e0;border-radius:8px;padding:10px">
+      <div style="font-size:13px;font-weight:700;color:#888;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #e0e0e0;display:flex;justify-content:space-between;align-items:center">
+        <span>⏸ 待啟動</span>
+        <span style="font-size:11px;background:#888;color:#fff;padding:2px 8px;border-radius:10px">${notStarted.length}</span>
+      </div>
+      ${notStarted.map(_card).join('')}
+    </div>` : ''}
     ${DEV_STAGES.map(st => {
       const list = byStage[st.key] || [];
       return `<div style="background:${st.color}0d;border:1px solid ${st.color}44;border-radius:8px;padding:10px">
@@ -11905,21 +11921,30 @@ function _renderDevMatrixStage(projects) {
                 </td>
                 <td style="padding:10px;text-align:center;font-size:11px;color:var(--muted)">${plLabels}</td>
                 <td style="padding:10px;text-align:center;font-size:12px">${p.pm_name||'—'}</td>
-                ${stages.map(s => {
-                  let cellBg = '#fff', cellCol = '#999', content = '—';
-                  if (s.gatePassed) {
-                    cellBg = s.color + '18'; cellCol = s.color;
-                    content = `<div style="font-weight:700">✓ 已通過</div><div style="font-size:10px;color:var(--muted);margin-top:2px">${s.doneCount}/${s.taskCount}</div>`;
-                  } else if (s.isCurrent) {
-                    cellBg = s.color + '30'; cellCol = s.color;
-                    content = `<div style="font-weight:700">● 進行中</div><div style="font-size:10px;margin-top:2px">${s.doneCount}/${s.taskCount} · ${s.progress}%</div>`;
-                  } else if (s.taskCount === 0) {
-                    content = '<span style="color:#ccc">—</span>';
-                  } else {
-                    content = `<span style="color:#bbb">待入階</span>`;
-                  }
-                  return `<td style="padding:10px;text-align:center;background:${cellBg};color:${cellCol};border-right:1px solid #f5f5f5">${content}</td>`;
-                }).join('')}
+                ${(() => {
+                  const notYet = p.start_date && p.start_date > today;
+                  return stages.map(s => {
+                    let cellBg = '#fff', cellCol = '#999', content = '—';
+                    if (s.gatePassed) {
+                      cellBg = s.color + '18'; cellCol = s.color;
+                      content = `<div style="font-weight:700">✓ 已通過</div><div style="font-size:10px;color:var(--muted);margin-top:2px">${s.doneCount}/${s.taskCount}</div>`;
+                    } else if (s.isCurrent) {
+                      if (notYet) {
+                        // 專案尚未開始 → 顯示「待啟動」而非「進行中」
+                        cellBg = '#fafafa'; cellCol = '#888';
+                        content = `<div style="font-weight:700">⏸ 待啟動</div><div style="font-size:10px;margin-top:2px">${p.start_date} 起</div>`;
+                      } else {
+                        cellBg = s.color + '30'; cellCol = s.color;
+                        content = `<div style="font-weight:700">● 進行中</div><div style="font-size:10px;margin-top:2px">${s.doneCount}/${s.taskCount} · ${s.progress}%</div>`;
+                      }
+                    } else if (s.taskCount === 0) {
+                      content = '<span style="color:#ccc">—</span>';
+                    } else {
+                      content = `<span style="color:#bbb">待入階</span>`;
+                    }
+                    return `<td style="padding:10px;text-align:center;background:${cellBg};color:${cellCol};border-right:1px solid #f5f5f5">${content}</td>`;
+                  }).join('');
+                })()}
                 <td style="padding:10px;text-align:center;font-size:12px;color:${p.launch_date&&p.launch_date<today?'#c62828':'var(--text)'}">${p.launch_date||'—'}</td>
               </tr>`;
             }).join('')}
@@ -12048,11 +12073,14 @@ function _renderDevProjectCard(p) {
   const stageInfo = _computeDevProjectStages(p, mainOnly, pipelines);
   const curStage = stageInfo.find(s => s.isCurrent);
   const allPassed = stageInfo.every(s => s.gatePassed);
+  const _notYetStarted = p.start_date && p.start_date > today;
   const stageBadge = allPassed
     ? '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">🚀 已上市</span>'
-    : curStage
-      ? `<span style="background:${curStage.color}22;color:${curStage.color};padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">● ${curStage.label}中 · ${curStage.progress}%</span>`
-      : '';
+    : _notYetStarted
+      ? `<span style="background:#f5f5f5;color:#888;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">⏸ 待啟動 (${p.start_date})</span>`
+      : curStage
+        ? `<span style="background:${curStage.color}22;color:${curStage.color};padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">● ${curStage.label}中 · ${curStage.progress}%</span>`
+        : '';
   // 階段迷你進度:4 格小圓點顯示大階段通過狀態
   const stageMiniDots = stageInfo.map(s => {
     const c = s.gatePassed ? s.color : (s.isCurrent ? s.color + 'aa' : '#e0e0e0');
