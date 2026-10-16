@@ -11341,7 +11341,7 @@ const PIPELINE_TEMPLATES = {
 };
 
 // 計算主線每步的預定日期(工作天累加)
-function _calcMainDates(pipelineKey, startDate) {
+function _calcMainDates(pipelineKey, startDate, skipFilter) {
   const tpl = PIPELINE_TEMPLATES[pipelineKey];
   if (!tpl) return [];
   const start = new Date(startDate + 'T00:00:00');
@@ -11350,8 +11350,10 @@ function _calcMainDates(pipelineKey, startDate) {
   const stepMap = {}; // key -> date
 
   for (const step of tpl.main) {
+    // skipFilter(step) === true → 跳過(不計工作天 · 不列入 dates)
+    if (skipFilter && skipFilter(step)) continue;
     let stepStart;
-    if (step.after) {
+    if (step.after && stepMap[step.after]) {
       // 並行分支:從 after 的日期開始加
       stepStart = new Date(stepMap[step.after] + 'T00:00:00');
     } else {
@@ -14622,7 +14624,12 @@ function _renderDevModalBody() {
       <div style="max-height:400px;overflow-y:auto">
         ${d.pipelines.map(pl => {
           const t = PIPELINE_TEMPLATES[pl];
-          const { dates, stepMap } = _calcMainDates(pl, d.start_date);
+          const _skipStages = d.skippedStages || [];
+          const _skipSteps = d.skippedSteps || [];
+          const _skipFilter = step =>
+            _skipStages.includes(step.stage) ||
+            _skipSteps.includes(pl + ':' + step.key);
+          const { dates, stepMap } = _calcMainDates(pl, d.start_date, _skipFilter);
           const overrides = d.overrides?.[pl] || {};
           // ⭐ 把 overrides 的日期套進 stepMap,讓副線觸發計算用「使用者改過的」樣品審過日
           const effectiveStepMap = { ...stepMap };
@@ -14640,18 +14647,14 @@ function _renderDevModalBody() {
               assignee_name: ov.assignee_name || (step.assignee_key === 'factory_owner' ? d.factory_owner_name : step.assignee_name),
             };
           };
-          // 過濾被跳過的步驟/階段(不預覽)
-          const _skippedStages = d.skippedStages || [];
-          const _skippedSteps = d.skippedSteps || [];
-          const _notSkipped = step =>
-            !_skippedStages.includes(step.stage) &&
-            !_skippedSteps.includes(pl + ':' + step.key);
-          const finalDates = dates.map(applyOv).filter(_notSkipped);
+          const finalDates = dates.map(applyOv);
           const finalSides = sideSteps.map(applyOv);
-          const skippedMainCount = dates.length - finalDates.length;
+          // 計算跳過數(從模板原始步驟數對比)
+          const _totalMain = (t.main||[]).length;
+          const skippedMainCount = _totalMain - finalDates.length;
           return `
             <div style="padding:6px 14px;background:${t.color}15;border-top:1px solid var(--border);font-size:12px;font-weight:700;color:${t.color}">
-              ${t.label} · ${finalDates.length} 主線 + ${finalSides.length} 副線${skippedMainCount?` <span style="color:#e65100;font-weight:400">(已跳過 ${skippedMainCount} 步)</span>`:''}
+              ${t.label} · ${finalDates.length} 主線 + ${finalSides.length} 副線${skippedMainCount?` <span style="color:#e65100;font-weight:400">(已跳過 ${skippedMainCount} 步 · 日期已順推)</span>`:''}
             </div>
             <table style="width:100%;border-collapse:collapse;font-size:12px">
               <thead style="background:#fafafa;color:var(--muted);font-size:11px">
@@ -14941,8 +14944,13 @@ async function _saveDevProject() {
   // 檢查上市日
   let earliestOverall = null;
   const pipelineDates = {};
+  const _skipStagesSave = d.skippedStages || [];
+  const _skipStepsSave = d.skippedSteps || [];
   d.pipelines.forEach(pl => {
-    const r = _calcMainDates(pl, d.start_date);
+    const skipFilter = step =>
+      _skipStagesSave.includes(step.stage) ||
+      _skipStepsSave.includes(pl + ':' + step.key);
+    const r = _calcMainDates(pl, d.start_date, skipFilter);
     pipelineDates[pl] = r;
     const last = r.dates[r.dates.length - 1];
     if (last && (!earliestOverall || last.expected_date > earliestOverall)) earliestOverall = last.expected_date;
@@ -14981,10 +14989,15 @@ async function _saveDevProject() {
   d.pipelines.forEach(pl => {
     const { dates, stepMap } = pipelineDates[pl];
     const overrides = d.overrides?.[pl] || {};
-    // 主線
+    // 主線:dates 已經是未略過的步驟 + 跳過步驟時間已順推
+    // 另外補被略過的步驟 → 建成「取消」狀態(以便詳情頁顯示 ✗ 已略過)
     const skippedStages = d.skippedStages || [];
     const skippedSteps = d.skippedSteps || [];
-    dates.forEach(step => {
+    const tpl = PIPELINE_TEMPLATES[pl];
+    const activeDateMap = {};
+    dates.forEach(s => { activeDateMap[s.key] = s; });
+    (tpl?.main||[]).forEach(step => {
+      const isSkip = skippedStages.includes(step.stage) || skippedSteps.includes(pl + ':' + step.key);
       const ov = overrides[step.key] || {};
       let assignee_name = step.assignee_name;
       let assignee_id = null;
@@ -14998,8 +15011,9 @@ async function _saveDevProject() {
         const u = findUser(step.assignee_name);
         if (u) assignee_id = u.id;
       }
-      const dueDate = ov.due_date || step.expected_date;
-      const isSkip = skippedStages.includes(step.stage) || skippedSteps.includes(pl + ':' + step.key);
+      // 略過步驟 → due_date 設為 null;未略過 → 用計算出的日期
+      const stepDate = activeDateMap[step.key]?.expected_date || null;
+      const dueDate = isSkip ? null : (ov.due_date || stepDate);
       taskInserts.push({
         project_id: projectId,
         variant_id: null,
@@ -15011,7 +15025,7 @@ async function _saveDevProject() {
         order_num: ++orderCounter,
         assignee_id,
         assignee_name,
-        expected_date: step.expected_date,
+        expected_date: stepDate,
         due_date: dueDate,
         status: isSkip ? '取消' : '未開始',
         cancelled_at: isSkip ? new Date().toISOString() : null,
