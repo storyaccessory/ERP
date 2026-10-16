@@ -12698,6 +12698,23 @@ function _renderDevDetail(id) {
   const activeVariants = variants.filter(v => !v.cancelled_at);
   const cancelledVariants = variants.filter(v => v.cancelled_at);
 
+  // 共用送審:若 shared_review=true,重複的 stage_gate 任務只在第一個 pipeline 顯示
+  const hiddenTaskIds = new Set();
+  if (p.shared_review && pipelines.length >= 2) {
+    const seenKeys = new Set();
+    for (const pl of pipelines) {
+      const tpl = PIPELINE_TEMPLATES[pl];
+      const plT = mainTasks.filter(x => x.pipeline === pl).sort((a,b) => (a.order_num||0) - (b.order_num||0));
+      for (const t of plT) {
+        const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+        if (step?.is_stage_gate) {
+          if (seenKeys.has(t.step_key)) hiddenTaskIds.add(t.id);
+          else seenKeys.add(t.step_key);
+        }
+      }
+    }
+  }
+
   const done = tasks.filter(t => t.status === '完成').length;
   const total = tasks.filter(t => t.status !== '取消').length;
   const pct = total ? Math.round(done/total*100) : 0;
@@ -12741,7 +12758,7 @@ function _renderDevDetail(id) {
     <!-- 每條 pipeline 的主線 + 副線 -->
     ${pipelines.map(pl => {
       const t = PIPELINE_TEMPLATES[pl];
-      const plMain = mainTasks.filter(x => x.pipeline === pl);
+      const plMain = mainTasks.filter(x => x.pipeline === pl && !hiddenTaskIds.has(x.id));
       const plSide = sideTasks.filter(x => x.pipeline === pl);
       const mDone = plMain.filter(x => x.status === '完成').length;
       const sDone = plSide.filter(x => x.status === '完成').length;
@@ -12863,6 +12880,12 @@ function _renderDevTaskRow(task, project) {
     <td style="padding:5px">
       ${task.step_name}
       ${isMilestone?'<span style="color:#c62828;margin-left:4px">🎯</span>':''}
+      ${(() => {
+        if (!project?.shared_review) return '';
+        const stepDef = _findStepDef(task.pipeline, task.step_key);
+        if (!stepDef?.is_stage_gate) return '';
+        return `<span style="background:#e3f2fd;color:#1565c0;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;margin-left:6px" title="共用送審:勾完成會同時更新所有 pipeline">🤝 共用</span>`;
+      })()}
       ${_devStdDaysChip(task, isCancelled)}
       ${task.completed_at ? `
         <span style="font-size:10px;color:#2e7d32;margin-left:6px">
@@ -13343,6 +13366,19 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults, opts =
   Object.assign(task, upd);
   await _devSyncCalendarSubtask(task, true);
 
+  // 共用送審:同步到其他 pipeline 的同 step_key 任務
+  const _stepDefRev = _findStepDef(task.pipeline, task.step_key);
+  if (p.shared_review && _stepDefRev?.is_stage_gate) {
+    const siblings = (p.dev_tasks||[]).filter(x =>
+      x.id !== taskId && x.step_key === task.step_key && x.step_group === 'main' && x.status !== '取消'
+    );
+    for (const sib of siblings) {
+      await db.from('dev_tasks').update(upd).eq('id', sib.id);
+      Object.assign(sib, upd);
+      await _devSyncCalendarSubtask(sib, true);
+    }
+  }
+
   // 處理審查結果
   let rejectedCount = 0;
   for (const r of reviewResults) {
@@ -13488,6 +13524,18 @@ window._devToggleTaskDone = async function(taskId, checked) {
     // 同步行事曆子任務打勾
     await _devSyncCalendarSubtask(task, true);
 
+    // 共用送審:若此任務是 stage_gate 且專案勾了 shared_review → 其他 pipeline 的同 step_key 任務也一併完成
+    if (p.shared_review && stepDef?.is_stage_gate) {
+      const siblings = (p.dev_tasks||[]).filter(x =>
+        x.id !== taskId && x.step_key === task.step_key && x.step_group === 'main' && x.status !== '取消'
+      );
+      for (const sib of siblings) {
+        await db.from('dev_tasks').update(upd).eq('id', sib.id);
+        Object.assign(sib, upd);
+        await _devSyncCalendarSubtask(sib, true);
+      }
+    }
+
     // 里程碑觸發
     if (task.step_key === 'design_lock' || task.step_key === 'design_confirm') {
       // 設計定稿完成 → 為每個品項發設計圖號
@@ -13527,6 +13575,18 @@ window._devToggleTaskDone = async function(taskId, checked) {
     await db.from('dev_tasks').update(upd).eq('id', taskId);
     Object.assign(task, upd);
     await _devSyncCalendarSubtask(task, false);
+    // 共用送審:連 sibling 一起取消
+    const stepDefU = _findStepDef(task.pipeline, task.step_key);
+    if (p.shared_review && stepDefU?.is_stage_gate) {
+      const siblings = (p.dev_tasks||[]).filter(x =>
+        x.id !== taskId && x.step_key === task.step_key && x.step_group === 'main' && x.status !== '取消'
+      );
+      for (const sib of siblings) {
+        await db.from('dev_tasks').update(upd).eq('id', sib.id);
+        Object.assign(sib, upd);
+        await _devSyncCalendarSubtask(sib, false);
+      }
+    }
   }
 
   showToast(checked ? '✓ 已完成' : '↩ 已取消完成');
@@ -14435,6 +14495,18 @@ function _renderDevModalBody() {
         </select>
       </div>` : ''}
 
+      ${d.pipelines.length >= 2 ? `
+      <div style="margin-top:10px;padding:10px 12px;background:#e3f2fd;border-radius:6px;border-left:3px solid #1565c0">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;font-weight:600;color:#1565c0">
+          <input type="checkbox" id="dev-shared-review" ${d.shared_review?'checked':''} onchange="state.data._devDraft.shared_review=this.checked" style="width:16px;height:16px">
+          🤝 跨 pipeline 共用送審(送審類任務全系列只跑一次)
+        </label>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px;padding-left:24px">
+          · 影響:設計圖審過 / 建模審過 / 樣品審過 / 到貨驗收<br>
+          · 其他步驟(設計圖、建模、打樣)仍每條 pipeline 獨立<br>
+          · 適合「周邊 + 合金」或「純銀 + 合金」一起送審的情境
+        </div>
+      </div>` : ''}
       ${d.pipelines.length ? `
       <div style="margin-top:10px;padding:10px 12px;background:#fff;border-radius:6px">
         <div style="font-size:12px;color:var(--muted);margin-bottom:6px">🎯 選要跑的階段(預設全選,不勾的階段建案時會直接略過)</div>
@@ -14812,6 +14884,7 @@ async function _saveDevProject() {
     factory_owner_name: d.factory_owner_name,
     notes: d.notes?.trim() || null,
     status: '進行中',
+    shared_review: !!d.shared_review,
     created_by: state.user?.id,
   }).select('id').single();
   if (pErr) { showToast('建專案失敗:'+pErr.message,'error'); return; }
