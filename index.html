@@ -12965,7 +12965,10 @@ function _renderDevTaskRow(task, project) {
       <input type="checkbox" ${isDone?'checked':''} onchange="window._devToggleTaskDone('${task.id}',this.checked)" style="cursor:pointer;width:16px;height:16px" ${isCancelled?'disabled':''}>
     </td>
     <td style="padding:5px">
-      ${task.step_name}
+      ${task.step_group === 'custom'
+        ? `<input class="form-control" value="${(task.step_name||'').replace(/"/g,'&quot;')}" style="font-size:12px;padding:2px 6px;border:1px dashed #ffb74d;background:#fff;width:calc(100% - 24px)" oninput="window._devEditCustomTaskName('${task.id}',this.value)" placeholder="任務名稱">
+           <button onclick="window._devDeleteCustomTask('${task.id}')" title="刪除此自訂任務" style="margin-left:4px;background:none;border:none;cursor:pointer;color:#c62828;font-size:14px;vertical-align:middle">✕</button>`
+        : task.step_name}
       ${isMilestone?'<span style="color:#c62828;margin-left:4px">🎯</span>':''}
       ${(() => {
         if (!project?.shared_review) return '';
@@ -13695,6 +13698,50 @@ window._devSetTaskDate = async function(taskId, newDate) {
   showToast('日期已更新');
   await loadDev();
   try { await loadCalendarEvents?.(); } catch(e) {}
+  renderApp();
+};
+
+// 編輯自訂任務名稱(debounce 存檔避免每次 keystroke 都打 DB)
+window._devEditCustomTaskName = function(taskId, name) {
+  const p = (state.data.dev||[]).find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (task) task.step_name = name;  // 樂觀更新,不 rerender(避免 input 失焦)
+  if (window._devCustomNameTimer) clearTimeout(window._devCustomNameTimer);
+  window._devCustomNameTimer = setTimeout(async () => {
+    await db.from('dev_tasks').update({ step_name: name.trim() || '(未命名)' }).eq('id', taskId);
+    // 同步行事曆子任務文字
+    if (task?.calendar_event_id) {
+      try {
+        const { data: ev } = await db.from('calendar_events').select('subtasks').eq('id', task.calendar_event_id).maybeSingle();
+        if (ev?.subtasks) {
+          const subs = ev.subtasks.map(s => s.dev_task_id === task.id ? { ...s, text: name.trim() || '(未命名)' } : s);
+          await db.from('calendar_events').update({ subtasks: subs }).eq('id', task.calendar_event_id);
+        }
+      } catch(e) {}
+    }
+  }, 500);
+};
+
+// 刪除自訂任務
+window._devDeleteCustomTask = async function(taskId) {
+  const p = (state.data.dev||[]).find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (!task) return;
+  if (!confirm(`刪除自訂任務「${task.step_name}」?此動作無法復原。`)) return;
+  // 同時從行事曆事件移除對應子任務
+  if (task.calendar_event_id) {
+    try {
+      const { data: ev } = await db.from('calendar_events').select('subtasks').eq('id', task.calendar_event_id).maybeSingle();
+      if (ev?.subtasks) {
+        const subs = ev.subtasks.filter(s => s.dev_task_id !== task.id);
+        await db.from('calendar_events').update({ subtasks: subs }).eq('id', task.calendar_event_id);
+      }
+    } catch(e) {}
+  }
+  const { error } = await db.from('dev_tasks').delete().eq('id', taskId);
+  if (error) { showToast('刪除失敗:'+error.message,'error'); return; }
+  showToast('已刪除');
+  await loadDev();
   renderApp();
 };
 
@@ -14727,7 +14774,12 @@ function _renderDevModalBody() {
                 ${(d.customSteps[pl]||[]).map(step => `<tr style="border-bottom:1px solid #f5f5f5;background:#fffde7">
                   <td style="padding:4px 8px;color:var(--muted);text-align:center;width:30px">⭐</td>
                   <td style="padding:4px 8px">
-                    <input value="${(step.name||'').replace(/"/g,'&quot;')}" oninput="window._devUpdateCustomStep('${pl}','${step.key}','name',this.value)" style="width:100%;padding:2px 6px;font-size:11px;border:1px solid #ffcc80;border-radius:3px;background:#fff">
+                    <div style="display:flex;gap:4px;align-items:center">
+                      <select onchange="window._devUpdateCustomStep('${pl}','${step.key}','stage',this.value)" style="padding:2px 4px;font-size:10px;border:1px solid #ffcc80;border-radius:3px;background:#fff;max-width:80px" title="屬於哪個階段">
+                        ${DEV_STAGES.map(st => `<option value="${st.key}" ${(step.stage||'sampling')===st.key?'selected':''}>${st.label}</option>`).join('')}
+                      </select>
+                      <input value="${(step.name||'').replace(/"/g,'&quot;')}" oninput="window._devUpdateCustomStep('${pl}','${step.key}','name',this.value)" style="flex:1;padding:2px 6px;font-size:11px;border:1px solid #ffcc80;border-radius:3px;background:#fff" placeholder="任務名稱">
+                    </div>
                   </td>
                   <td style="padding:4px 8px;text-align:center;width:60px"><input type="number" min="0" value="${step.days||1}" onchange="window._devUpdateCustomStep('${pl}','${step.key}','days',this.value)" style="width:40px;padding:2px;font-size:11px;text-align:center;border:1px solid var(--border);border-radius:3px"></td>
                   <td style="padding:4px 8px;width:130px">
@@ -14921,6 +14973,7 @@ window._devAddCustomStep = function(pipeline) {
     expected_date: dueStr,
     is_custom: true,
     step_group: 'custom',
+    stage: 'sampling',  // 預設掛在打樣階段(常見),可改
   });
   window._devRerender();
 };
@@ -14939,6 +14992,7 @@ window._devUpdateCustomStep = function(pipeline, key, field, value) {
   if (field === 'name') { step.name = value; return; }  // 文字輸入:只更新資料,不 rerender(避免輸入框被重建、焦點掉)
   if (field === 'days') step.days = parseInt(value) || 1;
   else if (field === 'due_date') step.expected_date = value;
+  else if (field === 'stage') step.stage = value;
   else if (field === 'assignee') {
     const el = typeof value === 'object' ? value : null;
     if (el) {
@@ -15097,11 +15151,12 @@ async function _saveDevProject() {
     // 自訂任務
     const custom = d.customSteps?.[pl] || [];
     custom.forEach(step => {
+      const stage = step.stage || 'sampling';
       taskInserts.push({
         project_id: projectId,
         variant_id: null,
         pipeline: pl,
-        step_key: step.key,
+        step_key: step.key.includes(stage) ? step.key : `custom_${stage}_${Date.now()}_${Math.floor(Math.random()*1000)}`,
         step_name: step.name || '新任務',
         step_group: 'custom',
         is_milestone: false,
@@ -15111,6 +15166,7 @@ async function _saveDevProject() {
         expected_date: step.expected_date || null,
         due_date: step.expected_date || null,
         status: '未開始',
+        notes: `[stage:${stage}]`,  // 階段註記,配合 _computeDevProjectStages 可依此分組(目前主要用 step 模板的 stage,custom 任務之後可擴充)
       });
     });
   });
