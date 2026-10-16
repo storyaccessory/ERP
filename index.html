@@ -11234,24 +11234,32 @@ window._rpRequote = async function(orderId) {
 //   trigger: null=前一步接續 / 'sample_approved' 樣品審過 / 'production_deploy' 量產發包 / 'cost_done' 成本完 / 'price_done' 售價完
 //   milestone: true 是里程碑(🎯)
 
+// 4 大共用階段(閘門定義在階段層,整個系列共用,不分 pipeline)
+const DEV_STAGES = [
+  { key: 'design',     label: '設計',        gate: '設計送審通過',   color: '#5c6bc0' },
+  { key: 'modeling',   label: '建模',        gate: '3D 審過',       color: '#26a69a' },
+  { key: 'sampling',   label: '打樣',        gate: '樣品審過',       color: '#ec407a' },
+  { key: 'production', label: '量產 / 上市', gate: '上市',           color: '#66bb6a' },
+];
+
 const PIPELINE_TEMPLATES = {
   silver: {
     label: '純銀',
     color: '#78909c',
     main: [
-      { key:'design_draft',      name:'設計圖',              days:10, assignee_name:'劉怡汝' },
-      { key:'design_lock',       name:'設計定稿&mail送審',   days:2,  assignee_name:'郭子嫣', issue_design_number:true },
-      { key:'mail_review',       name:'郵件送審追蹤 / 預計審過日', days:5,  assignee_name:'郭子嫣' },
-      { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子嫣' },
-      { key:'design_approved',   name:'設計圖審過',          days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true },
-      { key:'modeling',          name:'3D 建模 & 列印寄出送審', days:3,  assignee_name:'郭子嫣' },
-      { key:'model_approved',    name:'蠟模送審追蹤 / 3D 審過', days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true },
-      { key:'wax_print',         name:'3D 鑄造蠟列印',       days:1,  assignee_name:'郭子嫣' },
-      { key:'sampling',          name:'打樣',                days:12, assignee_name:'王韋翔' },
-      { key:'sample_submit',     name:'樣品送審寄出',        days:1,  assignee_name:'郭子嫣' },
-      { key:'sample_approved',   name:'樣品送審追蹤 / 審過', days:5,  assignee_name:'蔡采玲', milestone:true, trigger_side:true, is_review:true },
-      { key:'visual',            name:'視覺 / 上架素材',     days:14, assignee_name:'林毓馨', parallel:true, after:'sample_approved' },
-      { key:'production',        name:'量產',                days:14, assignee_name:'王韋翔', parallel:true, after:'sample_approved', milestone:true, is_launch:true },
+      { key:'design_draft',      name:'設計圖',              stage:'design',   days:10, assignee_name:'劉怡汝' },
+      { key:'design_lock',       name:'設計定稿&mail送審',   stage:'design',   days:2,  assignee_name:'郭子嫣', issue_design_number:true },
+      { key:'mail_review',       name:'郵件送審追蹤 / 預計審過日', stage:'design',   days:5,  assignee_name:'郭子嫣' },
+      { key:'system_submit',     name:'系統送審',            stage:'design',   days:1,  assignee_name:'郭子嫣' },
+      { key:'design_approved',   name:'設計圖審過',          stage:'design',   days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
+      { key:'modeling',          name:'3D 建模 & 列印寄出送審', stage:'modeling', days:3,  assignee_name:'郭子嫣' },
+      { key:'model_approved',    name:'蠟模送審追蹤 / 3D 審過', stage:'modeling', days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
+      { key:'wax_print',         name:'3D 鑄造蠟列印',       stage:'sampling', days:1,  assignee_name:'郭子嫣' },
+      { key:'sampling',          name:'打樣',                stage:'sampling', days:12, assignee_name:'王韋翔' },
+      { key:'sample_submit',     name:'樣品送審寄出',        stage:'sampling', days:1,  assignee_name:'郭子嫣' },
+      { key:'sample_approved',   name:'樣品送審追蹤 / 審過', stage:'sampling', days:5,  assignee_name:'蔡采玲', milestone:true, trigger_side:true, is_review:true, is_stage_gate:true },
+      { key:'visual',            name:'視覺 / 上架素材',     stage:'production', days:14, assignee_name:'林毓馨', parallel:true, after:'sample_approved' },
+      { key:'production',        name:'量產',                stage:'production', days:14, assignee_name:'王韋翔', parallel:true, after:'sample_approved', milestone:true, is_launch:true, is_stage_gate:true },
     ],
     side: [
       { key:'plating_photo',   name:'電鍍拍照樣一套',    assignee_name:'王韋翔', trigger:'sample_approved', offset:5 },
@@ -11268,22 +11276,24 @@ const PIPELINE_TEMPLATES = {
     label: '合金',
     color: '#c9a961',
     main: [
-      // 前 7 步共用銀件的設計→3D審過(拷貝一份,獨立追蹤)
-      { key:'design_draft',      name:'設計圖',              days:10, assignee_name:'劉怡汝' },
-      { key:'design_lock',       name:'設計定稿',            days:3,  assignee_name:'郭子嫣', issue_design_number:true },
-      { key:'mail_review',       name:'郵件送審',            days:7,  assignee_name:'郭子嫣' },
-      { key:'system_submit',     name:'系統送審',            days:1,  assignee_name:'郭子嫣' },
-      { key:'design_approved',   name:'設計圖審過',          days:7,  assignee_name:'蔡采玲', milestone:true },
-      { key:'modeling',          name:'建模',                days:3,  assignee_name:'郭子嫣' },
-      { key:'model_approved',    name:'建模確認 / 3D 審過',  days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true },
-      // 合金專屬
-      { key:'factory_file',      name:'工廠發包檔製作',      days:3,  assignee_name:'郭子嫣' },
-      { key:'factory_search',    name:'找工廠 / 打樣發包',   days:7,  assignee_key:'factory_owner' },  // 取專案的 factory_owner
-      { key:'alloy_sampling',    name:'打樣',                days:30, assignee_key:'factory_owner' },
-      { key:'sample_approved',   name:'樣品送審',            days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true },
-      { key:'production_deploy', name:'量產發包',            days:5,  assignee_key:'factory_owner', trigger_side:true },
-      { key:'production_track',  name:'量產追蹤',            days:30, assignee_key:'factory_owner' },
-      { key:'arrival_check',    name:'到貨驗收',            days:7,  assignee_name:'陳秋惠', milestone:true, is_launch:true },
+      // 階段 1-2 名稱對齊純銀
+      { key:'design_draft',      name:'設計圖',              stage:'design',   days:10, assignee_name:'劉怡汝' },
+      { key:'design_lock',       name:'設計定稿&mail送審',   stage:'design',   days:3,  assignee_name:'郭子嫣', issue_design_number:true },
+      { key:'mail_review',       name:'郵件送審追蹤 / 預計審過日', stage:'design',   days:7,  assignee_name:'郭子嫣' },
+      { key:'system_submit',     name:'系統送審',            stage:'design',   days:1,  assignee_name:'郭子嫣' },
+      { key:'design_approved',   name:'設計圖審過',          stage:'design',   days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
+      { key:'modeling',          name:'3D 建模 & 列印寄出送審', stage:'modeling', days:3,  assignee_name:'郭子嫣' },
+      { key:'model_approved',    name:'蠟模送審追蹤 / 3D 審過', stage:'modeling', days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
+      // 階段 3 打樣:合金專屬流程
+      { key:'factory_file',      name:'工廠發包檔製作',      stage:'sampling', days:3,  assignee_name:'郭子嫣' },
+      { key:'factory_search',    name:'找工廠 / 打樣發包',   stage:'sampling', days:7,  assignee_key:'factory_owner' },
+      { key:'alloy_sampling',    name:'打樣',                stage:'sampling', days:30, assignee_key:'factory_owner' },
+      { key:'sample_submit',     name:'樣品送審寄出',        stage:'sampling', days:1,  assignee_name:'郭子嫣' },
+      { key:'sample_approved',   name:'樣品送審追蹤 / 審過', stage:'sampling', days:7,  assignee_name:'蔡采玲', milestone:true, trigger_side:true, is_review:true, is_stage_gate:true },
+      // 階段 4 量產/上市
+      { key:'production_deploy', name:'量產發包',            stage:'production', days:5,  assignee_key:'factory_owner', trigger_side:true },
+      { key:'production_track',  name:'量產追蹤',            stage:'production', days:30, assignee_key:'factory_owner' },
+      { key:'arrival_check',     name:'到貨驗收',            stage:'production', days:7,  assignee_name:'陳秋惠', milestone:true, is_launch:true, is_stage_gate:true },
     ],
     side: [
       { key:'cost_and_price',  name:'成本+售價',   assignee_name:'劉怡汝', trigger:'production_deploy', offset:5 },
@@ -11296,15 +11306,15 @@ const PIPELINE_TEMPLATES = {
     label: '周邊',
     color: '#ec407a',
     main: [
-      { key:'material_confirm', name:'先確認追素材',       days:5,  assignee_name:'蔡采玲' },
-      { key:'item_brainstorm',  name:'開發品項發想討論',   days:5,  assignee_name:'林毓馨' },
-      { key:'item_confirm',     name:'開發品項確認',       days:7,  assignee_name:'林毓馨', is_review:true },
-      { key:'item_design',      name:'開發品項設計',       days:10, assignee_name:'林毓馨' },
-      { key:'design_confirm',   name:'開發品項設計確認',   days:7,  assignee_name:'林毓馨', issue_design_number:true, is_review:true },
-      { key:'factory_file',     name:'商品工廠檔完稿',     days:3,  assignee_name:'林毓馨' },
-      { key:'production_deploy',name:'商品發包量產',       days:5,  assignee_name:'蔡采玲', trigger_side:true },
-      { key:'production_track', name:'商品量產追蹤',       days:10, assignee_name:'蔡采玲' },
-      { key:'arrival_check',   name:'商品到貨驗收',       days:3,  assignee_name:'陳秋惠', milestone:true, is_launch:true },
+      { key:'material_confirm', name:'先確認追素材',       stage:'design',   days:5,  assignee_name:'蔡采玲' },
+      { key:'item_brainstorm',  name:'開發品項發想討論',   stage:'design',   days:5,  assignee_name:'林毓馨' },
+      { key:'item_confirm',     name:'開發品項確認',       stage:'design',   days:7,  assignee_name:'林毓馨', is_review:true, is_stage_gate:true },
+      { key:'item_design',      name:'開發品項設計',       stage:'sampling', days:10, assignee_name:'林毓馨' },
+      { key:'design_confirm',   name:'開發品項設計確認',   stage:'sampling', days:7,  assignee_name:'林毓馨', issue_design_number:true, is_review:true, is_stage_gate:true },
+      { key:'factory_file',     name:'商品工廠檔完稿',     stage:'production', days:3,  assignee_name:'林毓馨' },
+      { key:'production_deploy',name:'商品發包量產',       stage:'production', days:5,  assignee_name:'蔡采玲', trigger_side:true },
+      { key:'production_track', name:'商品量產追蹤',       stage:'production', days:10, assignee_name:'蔡采玲' },
+      { key:'arrival_check',    name:'商品到貨驗收',       stage:'production', days:3,  assignee_name:'陳秋惠', milestone:true, is_launch:true, is_stage_gate:true },
     ],
     side: [
       { key:'sheet_draft',     name:'商品表 初版',    assignee_name:'陳秋惠', trigger:'production_deploy', offset:5 },
@@ -11778,6 +11788,122 @@ window.closeDevProject = function() {
 // ═══════════════════════════════════════════════
 // 專案詳情頁
 // ═══════════════════════════════════════════════
+// ─── 大階段:算每個階段的進度 + 共用閘門狀態 ───────────────
+// 回傳: [{ stageKey, label, color, gate, pipelines:[...], gatePassed, allDone, progress, taskCount, doneCount }]
+function _computeDevProjectStages(project, mainTasks, pipelines) {
+  const stages = DEV_STAGES.map(st => {
+    const stageTasks = mainTasks.filter(t => {
+      const tpl = PIPELINE_TEMPLATES[t.pipeline];
+      const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+      return step?.stage === st.key;
+    });
+    const nonCancel = stageTasks.filter(t => t.status !== '取消');
+    const done = nonCancel.filter(t => t.status === '完成').length;
+    const total = nonCancel.length;
+    // 閘門狀態:階段裡 is_stage_gate 的任務們,全部 gate_passed_at 都有值才算通過
+    const gateTasks = nonCancel.filter(t => {
+      const tpl = PIPELINE_TEMPLATES[t.pipeline];
+      const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+      return step?.is_stage_gate;
+    });
+    const gatePassed = gateTasks.length > 0 && gateTasks.every(t => !!t.gate_passed_at);
+    const gateReady = gateTasks.length > 0 && gateTasks.every(t => t.status === '完成');
+    return {
+      stageKey: st.key, label: st.label, gate: st.gate, color: st.color,
+      taskCount: total, doneCount: done,
+      progress: total > 0 ? Math.round(done/total*100) : 0,
+      pipelineKeys: pipelines,
+      gateTasks, gatePassed, gateReady,
+    };
+  });
+  // 當前階段 = 第一個閘門未通過的階段
+  const curIdx = stages.findIndex(s => !s.gatePassed);
+  stages.forEach((s, i) => { s.isCurrent = i === curIdx; });
+  return stages;
+}
+
+// 大階段橫向 bar(整個系列共用)
+function _buildDevProjectStageBar(project, mainTasks, pipelines) {
+  const stages = _computeDevProjectStages(project, mainTasks, pipelines);
+  if (!stages.length) return '';
+  const chips = stages.map((s, idx) => {
+    let bg = '#fff', border = '#e0e0e0', numBg = '#f5f5f5', numCol = '#999', mark = String(idx+1);
+    if (s.gatePassed) { bg = s.color + '18'; border = s.color; numBg = s.color; numCol = '#fff'; mark = '✓'; }
+    else if (s.isCurrent) { bg = s.color + '22'; border = s.color; numBg = s.color; numCol = '#fff'; mark = '●'; }
+    const gateBtn = (s.isCurrent && s.gateReady && !s.gatePassed)
+      ? `<button onclick="window._devPassStage('${project.id}','${s.stageKey}')"
+          style="margin-top:8px;padding:4px 12px;font-size:11px;background:#2e7d32;color:#fff;border:none;border-radius:4px;cursor:pointer;font-weight:700">✓ 通過閘門</button>`
+      : (s.gatePassed
+        ? `<button onclick="window._devUnpassStage('${project.id}','${s.stageKey}')"
+            style="margin-top:8px;padding:3px 8px;font-size:10px;background:#fafafa;color:#888;border:1px solid #ddd;border-radius:4px;cursor:pointer">↩ 撤銷</button>`
+        : '');
+    return `<div style="flex:1;min-width:140px;border:1.5px solid ${border};background:${bg};border-radius:8px;padding:10px 12px;text-align:center">
+      <div style="display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:4px">
+        <span style="display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;background:${numBg};color:${numCol};border-radius:50%;font-size:11px;font-weight:700">${mark}</span>
+        <span style="font-size:13px;font-weight:700;color:${s.color}">${s.label}</span>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:4px">${s.doneCount}/${s.taskCount} · ${s.progress}%</div>
+      <div style="font-size:10px;color:#999">🔐 ${s.gate}</div>
+      ${gateBtn}
+    </div>`;
+  }).join('<div style="color:#ddd;font-size:14px;align-self:center">→</div>');
+  return `<div class="card" style="margin-bottom:14px;padding:12px">
+    <div style="font-size:12px;font-weight:700;color:var(--muted);margin-bottom:10px">📍 專案階段(跨 pipeline 共用)</div>
+    <div style="display:flex;gap:6px;align-items:stretch;overflow-x:auto">${chips}</div>
+  </div>`;
+}
+
+// 共用閘門通過 → 同階段所有 pipeline 的 stage_gate 任務一起通過
+window._devPassStage = async function(projectId, stageKey) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const stageInfo = DEV_STAGES.find(s => s.key === stageKey);
+  if (!stageInfo) return;
+  const note = prompt(`通過「${stageInfo.label}」閘門 (${stageInfo.gate}),可留備註(選填):`, '') || null;
+  const now = new Date().toISOString();
+  const uid = state.user?.id || null;
+  // 找同階段所有 pipeline 的 stage_gate 任務
+  const gateTasks = (p.dev_tasks||[]).filter(t => {
+    if (t.status === '取消') return false;
+    const tpl = PIPELINE_TEMPLATES[t.pipeline];
+    const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+    return step?.stage === stageKey && step?.is_stage_gate;
+  });
+  if (!gateTasks.length) { showToast('找不到此階段的閘門任務','error'); return; }
+  for (const t of gateTasks) {
+    await db.from('dev_tasks').update({
+      gate_passed_at: now,
+      gate_passed_by: uid,
+      gate_passed_note: note,
+    }).eq('id', t.id);
+  }
+  showToast(`✓ 已通過「${stageInfo.label}」閘門 (${gateTasks.length} 個 pipeline)`);
+  await loadDev();
+  renderApp();
+};
+
+// 撤銷階段閘門
+window._devUnpassStage = async function(projectId, stageKey) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const stageInfo = DEV_STAGES.find(s => s.key === stageKey);
+  if (!stageInfo) return;
+  if (!confirm(`撤銷「${stageInfo.label}」階段閘門?同系列所有 pipeline 的閘門會一起撤銷。`)) return;
+  const gateTasks = (p.dev_tasks||[]).filter(t => {
+    const tpl = PIPELINE_TEMPLATES[t.pipeline];
+    const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+    return step?.stage === stageKey && step?.is_stage_gate;
+  });
+  for (const t of gateTasks) {
+    await db.from('dev_tasks').update({
+      gate_passed_at: null, gate_passed_by: null, gate_passed_note: null
+    }).eq('id', t.id);
+  }
+  showToast('已撤銷閘門');
+  await loadDev();
+  renderApp();
+};
+
 // 回傳「標準工作天」小 chip HTML(供任務列顯示)
 function _devStdDaysChip(task, isCancelled) {
   if (isCancelled) return '';
@@ -11791,29 +11917,48 @@ function _devStdDaysChip(task, isCancelled) {
     + std + '天</span>';
 }
 
+// 判斷任務是否需要「閘門」確認(送審類 / 里程碑);其他步驟勾完成 = 直接完成
+function _devTaskHasGate(task) {
+  if (!task || !task.step_key) return false;
+  const tpl = PIPELINE_TEMPLATES[task.pipeline];
+  if (!tpl) return false;
+  const step = (tpl.main||[]).find(s => s.key === task.step_key);
+  if (!step) return false;
+  return !!(step.is_review || step.milestone || task.is_milestone);
+}
+// 「有效完成」= 一般步驟 status === 完成 即可;需閘門者還要通過閘門
+function _devTaskIsDone(task) {
+  if (!task) return false;
+  if (task.status === '取消') return false;
+  if (task.status !== '完成') return false;
+  if (_devTaskHasGate(task)) return !!task.gate_passed_at;
+  return true;  // 無閘門 → 勾完成就算完成
+}
+
 // 建橫向階段卡片 HTML(獨立 helper,避免深層巢狀 template literal)
 function _buildDevStageCards(plMain, t, today) {
   if (!plMain || !plMain.length) return '';
-  // 「當前階段」= 第一個「尚未通過閘門」且「非取消」的任務
-  // (即使已勾完成,只要還沒按閘門,它仍是當前)
-  const curTaskIdx = plMain.findIndex(x => x.status !== '取消' && !x.gate_passed_at);
+  // 「當前階段」= 第一個「尚未視為完成」且「非取消」的任務
+  const curTaskIdx = plMain.findIndex(x => x.status !== '取消' && !_devTaskIsDone(x));
   const tplMap = {};
   (t.main||[]).forEach(s => { tplMap[s.key] = s; });
   const cards = plMain.map(function(task, idx) {
     const stdDays = tplMap[task.step_key] && tplMap[task.step_key].days;
+    const hasGate = _devTaskHasGate(task);
     const gatePassed = !!task.gate_passed_at;
-    const isDone = task.status === '完成';
+    const isDone = _devTaskIsDone(task);  // 已算入「閘門是否通過」
+    const isDoneRaw = task.status === '完成';  // 原始勾完成狀態
     const isCancelled = task.status === '取消';
     const isCurrent = idx === curTaskIdx;
-    const isOverdue = !gatePassed && !isCancelled && task.due_date && task.due_date < today;
+    const isOverdue = !isDone && !isCancelled && task.due_date && task.due_date < today;
     const isMile = task.is_milestone;
-    // 卡片視覺四種狀態:通過閘門(綠底✓)/ 取消 / 當前(高亮) / 待辦
+    // 卡片視覺:完成(綠底✓) / 取消 / 當前(高亮) / 待閘門(黃底⏳) / 待辦
     let bg='#fff', border=t.color+'33', numBg='#f5f5f5', numCol='#999', mark='';
-    if (gatePassed)   { bg=t.color+'15'; border=t.color; numBg=t.color; numCol='#fff'; mark='✓'; }
+    if (isDone)       { bg=t.color+'15'; border=t.color; numBg=t.color; numCol='#fff'; mark='✓'; }
     else if (isCancelled) { bg='#f5f5f5'; border='#ddd'; numBg='#eee'; numCol='#999'; mark='⊘'; }
     else if (isCurrent) {
-      // 當前階段:若已完成等待閘門 → 用黃底提示 PM 可按閘門
-      if (isDone) { bg='#fff8e1'; border='#ff9800'; numBg='#ff9800'; numCol='#fff'; mark='⏳'; }
+      // 當前階段:若已勾完成但要通過閘門 → 黃底提示 PM
+      if (isDoneRaw && hasGate) { bg='#fff8e1'; border='#ff9800'; numBg='#ff9800'; numCol='#fff'; mark='⏳'; }
       else { bg=t.color+'22'; border=t.color; numBg=t.color; numCol='#fff'; mark='●'; }
     }
     else if (isOverdue)  { bg='#ffebee'; border='#c62828'; numBg='#c62828'; numCol='#fff'; mark='!'; }
@@ -11890,6 +12035,9 @@ function _renderDevDetail(id) {
         <button class="btn btn-sm" style="background:#ffebee;color:#c62828" onclick="window._devDeleteProject('${p.id}')">🗑 刪除專案</button>
       </div>
     </div>
+
+    <!-- 大階段共用進度(跨 pipeline) -->
+    ${_buildDevProjectStageBar(p, mainTasks, pipelines)}
 
     <!-- 每條 pipeline 的主線 + 副線 -->
     ${pipelines.map(pl => {
@@ -12037,27 +12185,35 @@ function _renderDevTaskRow(task, project) {
     <td style="padding:5px;text-align:center;font-size:11px">
       <div style="display:flex;flex-direction:column;align-items:center;gap:3px">
         ${(() => {
+          const hasGate = _devTaskHasGate(task);
           const gatePassed = !!task.gate_passed_at;
-          if (gatePassed) return '<span style="color:#2e7d32;font-weight:700">🔓 已通過閘門</span>';
           if (isCancelled) return '<span style="color:#999">⊘ 略過</span>';
-          if (isDone) return '<span style="color:#f57c00;font-weight:600">⏳ 完成,待通過閘門</span>';
+          if (isDone && hasGate && gatePassed) return '<span style="color:#2e7d32;font-weight:700">✓ 已通過</span>';
+          if (isDone) return '<span style="color:#2e7d32;font-weight:600">✓ 完成</span>';
+          if (hasGate && task.status === '完成' && !gatePassed) return '<span style="color:#f57c00;font-weight:600">⏳ 待通過閘門</span>';
           if (isOverdue) return '<span style="color:#c62828;font-weight:600">⚠ 逾期</span>';
           return '<span style="color:var(--muted)">待辦</span>';
         })()}
         ${(() => {
+          const hasGate = _devTaskHasGate(task);
           const gatePassed = !!task.gate_passed_at;
-          if (gatePassed) {
-            return `<button onclick="window._devUnpassGate('${task.id}')" title="撤銷閘門(回到待通過)"
-              style="font-size:10px;padding:1px 6px;border:1px solid #e0e0e0;background:#fafafa;color:#888;border-radius:3px;cursor:pointer">↩ 撤銷</button>`;
-          }
           if (isCancelled) {
             return `<button onclick="window._devToggleTaskSkip('${task.id}',false)" title="恢復此任務"
               style="font-size:10px;padding:1px 6px;border:1px solid #90caf9;background:#e3f2fd;color:#1565c0;border-radius:3px;cursor:pointer">↩ 恢復</button>`;
           }
-          if (isDone) {
-            return `<button onclick="window._devPassGate('${task.id}')" title="通過閘門,進入下一階段"
+          // 需閘門且已通過 → 顯示撤銷按鈕
+          if (hasGate && gatePassed) {
+            return `<button onclick="window._devUnpassGate('${task.id}')" title="撤銷閘門"
+              style="font-size:10px;padding:1px 6px;border:1px solid #e0e0e0;background:#fafafa;color:#888;border-radius:3px;cursor:pointer">↩ 撤銷</button>`;
+          }
+          // 需閘門且勾完成但未通過 → 顯示通過閘門按鈕
+          if (hasGate && task.status === '完成' && !gatePassed) {
+            return `<button onclick="window._devPassGate('${task.id}')" title="確認通過,進入下一階段"
               style="font-size:10px;padding:2px 10px;border:1px solid #2e7d32;background:#2e7d32;color:#fff;border-radius:3px;cursor:pointer;font-weight:700">✓ 通過閘門</button>`;
           }
+          // 已完成(不需閘門) → 不用按鈕
+          if (isDone) return '';
+          // 其他:略過按鈕
           return `<button onclick="window._devToggleTaskSkip('${task.id}',true)" title="此任務不需要,從流程略過(可恢復)"
               style="font-size:10px;padding:1px 6px;border:1px solid #e0e0e0;background:#fafafa;color:#888;border-radius:3px;cursor:pointer">⊘ 略過</button>`;
         })()}
