@@ -11602,14 +11602,16 @@ window._dnVoid = async function(id, num) {
 
 function renderDev() {
   const projects = state.data.dev || [];
-  const tab = state.data.devTab || 'projects';
+  const tab = state.data.devTab || 'dashboard';
   if (tab === '設計圖號') return _renderDesignNumbers();
   if (state.data.devDetailId) return _renderDevDetail(state.data.devDetailId);
   const activeProjects = projects.filter(p => p.status !== '完成' && p.status !== '取消');
   if (tab === 'matrix') return _renderDevMatrix(activeProjects);
+  if (tab === 'dashboard') return _renderDevDashboard(activeProjects, projects);
 
   return `
     <div class="tabs">
+      <div class="tab ${tab==='dashboard'?'active':''}" data-dev-tab="dashboard">🎯 快速瀏覽</div>
       <div class="tab ${tab==='projects'?'active':''}" data-dev-tab="projects">🛠 進行中專案 (${activeProjects.length})</div>
       <div class="tab ${tab==='matrix'?'active':''}" data-dev-tab="matrix">📊 進度總覽</div>
       <div class="tab ${tab==='all'?'active':''}" data-dev-tab="all">全部專案 (${projects.length})</div>
@@ -11620,6 +11622,237 @@ function renderDev() {
     </div>
     ${(tab==='all'?projects:activeProjects).length === 0 ? `<div class="card"><div class="empty"><div class="empty-icon">🛠️</div><p>${tab==='all'?'尚無專案':'目前沒有進行中的專案'}</p></div></div>` :
       (tab==='all'?projects:activeProjects).map(p => _renderDevProjectCard(p)).join('')}`;
+}
+
+// 🎯 快速瀏覽儀表(預設首屏)
+function _renderDevDashboard(activeProjects, allProjects) {
+  const today = _localToday();
+  const in7d = _dateAdd(today, 7);
+  const monthStart = today.slice(0, 7) + '-01';
+  const monthEnd = (() => {
+    const [y,m] = today.split('-').map(Number);
+    return `${today.slice(0,7)}-${String(new Date(y, m, 0).getDate()).padStart(2,'0')}`;
+  })();
+
+  // 預先算每個專案的 stage 資訊
+  const enriched = activeProjects.map(p => {
+    const mainOnly = (p.dev_tasks||[]).filter(t => t.step_group === 'main');
+    const stages = _computeDevProjectStages(p, mainOnly, p.pipelines||[]);
+    const curStage = stages.find(s => s.isCurrent) || null;
+    return { p, mainOnly, stages, curStage };
+  });
+
+  // KPI
+  const totalActive = activeProjects.length;
+  const launchingThisMonth = activeProjects.filter(p => p.launch_date && p.launch_date >= monthStart && p.launch_date <= monthEnd).length;
+  const overdueTasks = [];
+  const gateWaiting = [];
+  const upcomingMilestones = [];
+  enriched.forEach(({p, mainOnly, stages, curStage}) => {
+    mainOnly.forEach(t => {
+      if (t.status === '取消' || t.status === '完成') return;
+      if (t.due_date && t.due_date < today) overdueTasks.push({ project: p, task: t });
+    });
+    // 待通過閘門:當前階段所有 stage_gate 任務都完成但 gate_passed_at 未設
+    if (curStage && curStage.gateReady && !curStage.gatePassed) {
+      gateWaiting.push({ project: p, stage: curStage });
+    }
+    // 本週里程碑
+    mainOnly.forEach(t => {
+      const tpl = PIPELINE_TEMPLATES[t.pipeline];
+      const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+      if (step?.milestone && t.status !== '完成' && t.status !== '取消' && t.due_date && t.due_date >= today && t.due_date <= in7d) {
+        upcomingMilestones.push({ project: p, task: t });
+      }
+    });
+  });
+
+  // 按階段分組
+  const byStage = { design: [], modeling: [], sampling: [], production: [] };
+  enriched.forEach(e => {
+    if (e.curStage) byStage[e.curStage.stageKey]?.push(e);
+    else byStage.production.push(e);  // 全部通過的視為量產/上市
+  });
+
+  // 快速瀏覽列表(緊湊單列,排序:逾期→里程碑近→進度低)
+  const rows = [...enriched].sort((a,b) => {
+    const aOv = a.mainOnly.some(t => t.due_date && t.due_date < today && t.status !== '完成' && t.status !== '取消');
+    const bOv = b.mainOnly.some(t => t.due_date && t.due_date < today && t.status !== '完成' && t.status !== '取消');
+    if (aOv !== bOv) return aOv ? -1 : 1;
+    return (a.p.launch_date || '9999').localeCompare(b.p.launch_date || '9999');
+  });
+
+  return `
+    <div class="tabs">
+      <div class="tab active" data-dev-tab="dashboard">🎯 快速瀏覽</div>
+      <div class="tab" data-dev-tab="projects">🛠 進行中專案 (${totalActive})</div>
+      <div class="tab" data-dev-tab="matrix">📊 進度總覽</div>
+      <div class="tab" data-dev-tab="all">全部專案 (${allProjects.length})</div>
+      <div class="tab" data-dev-tab="設計圖號">🔢 設計圖號</div>
+    </div>
+    <div class="search-bar">
+      <button class="btn btn-primary" onclick="modalNewDevProject()">+ 新增開發專案</button>
+    </div>
+
+    <!-- KPI 卡 -->
+    <div class="cards cards-4" style="margin-bottom:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+      <div class="card" style="border-left:4px solid #1565c0"><div class="card-title">🛠 進行中</div><div class="card-value" style="color:#1565c0">${totalActive}</div></div>
+      <div class="card" style="border-left:4px solid #2e7d32"><div class="card-title">🚀 本月上市</div><div class="card-value" style="color:#2e7d32">${launchingThisMonth}</div></div>
+      <div class="card" style="border-left:4px solid ${overdueTasks.length?'#c62828':'#bbb'}"><div class="card-title">⚠ 逾期任務</div><div class="card-value" style="color:${overdueTasks.length?'#c62828':'var(--muted)'}">${overdueTasks.length}</div></div>
+      <div class="card" style="border-left:4px solid #e65100"><div class="card-title">📅 7 天內里程碑</div><div class="card-value" style="color:#e65100">${upcomingMilestones.length}</div></div>
+    </div>
+
+    <!-- 需要注意 -->
+    ${(gateWaiting.length + overdueTasks.length + upcomingMilestones.length) > 0 ? `
+    <div class="card" style="margin-bottom:14px;padding:12px 14px;background:linear-gradient(135deg,#fff8e1,#fff)">
+      <div style="font-size:13px;font-weight:700;color:#e65100;margin-bottom:8px">🚨 需要你注意</div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        ${gateWaiting.slice(0,5).map(({project, stage}) => `<div style="padding:6px 10px;background:#fff;border-left:3px solid #2e7d32;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:8px" onclick="openDevProject('${project.id}')">
+          <span style="font-size:11px;background:#2e7d32;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">🔐 待閘門</span>
+          <span style="font-size:13px;font-weight:600">${project.name}</span>
+          <span style="font-size:11px;color:var(--muted)">· ${stage.label} 階段已完成,等 PM 按通過</span>
+        </div>`).join('')}
+        ${overdueTasks.slice(0,8).map(({project, task}) => `<div style="padding:6px 10px;background:#fff;border-left:3px solid #c62828;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:8px" onclick="openDevProject('${project.id}')">
+          <span style="font-size:11px;background:#c62828;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">⚠ 逾期 ${_daysDiff(task.due_date, today)} 天</span>
+          <span style="font-size:13px;font-weight:600">${project.name}</span>
+          <span style="font-size:11px;color:var(--muted)">· ${task.step_name} · ${task.assignee_name||'未指派'} · ${task.due_date}</span>
+        </div>`).join('')}
+        ${upcomingMilestones.slice(0,5).map(({project, task}) => {
+          const days = _daysDiff(today, task.due_date);
+          return `<div style="padding:6px 10px;background:#fff;border-left:3px solid #e65100;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:8px" onclick="openDevProject('${project.id}')">
+            <span style="font-size:11px;background:#e65100;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">🎯 ${days===0?'今天':days+' 天後'}</span>
+            <span style="font-size:13px;font-weight:600">${project.name}</span>
+            <span style="font-size:11px;color:var(--muted)">· ${task.step_name} · ${task.assignee_name||'未指派'}</span>
+          </div>`;
+        }).join('')}
+      </div>
+    </div>` : ''}
+
+    <!-- 檢視切換:列表 vs 看板 -->
+    <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--muted)">檢視:</span>
+      ${(() => {
+        const mode = state.data.devDashMode || 'list';
+        return ['list','kanban'].map(m => `<button class="btn btn-sm ${mode===m?'btn-primary':'btn-outline'}" onclick="state.data.devDashMode='${m}';renderApp()">${m==='list'?'📋 列表':'📊 看板(依階段)'}</button>`).join('');
+      })()}
+    </div>
+
+    ${(state.data.devDashMode||'list') === 'kanban' ? _renderDevKanban(enriched) : `
+    <!-- 緊湊專案列表 -->
+    ${rows.length === 0 ? `<div class="card"><div class="empty"><div class="empty-icon">🛠️</div><p>目前沒有進行中的專案</p></div></div>` : `
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="padding:10px 14px;font-size:12px;font-weight:700;color:var(--muted);background:#f5f5f5;border-bottom:1px solid var(--border)">📋 進行中專案 (${rows.length} 個) <span style="font-weight:400">· 逾期在上,再按上市日排</span></div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
+          <tr>
+            <th style="padding:6px 10px;text-align:left">專案</th>
+            <th style="padding:6px;text-align:center;width:80px">PM</th>
+            <th style="padding:6px;text-align:center;width:100px">Pipeline</th>
+            <th style="padding:6px;text-align:center;width:140px">階段</th>
+            <th style="padding:6px;text-align:center;width:120px">進度</th>
+            <th style="padding:6px;text-align:center;width:180px">下個關鍵節點</th>
+            <th style="padding:6px;text-align:center;width:90px">上市日</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${rows.map(({p, mainOnly, stages, curStage}) => {
+            const allDone = stages.every(s => s.gatePassed);
+            const plLabels = (p.pipelines||[]).map(pl => (PIPELINE_TEMPLATES[pl]?.label||pl).replace(/^[🥈🥇🎁]\s*/,'')).join('·');
+            const nextMile = mainOnly.find(t => {
+              const tpl = PIPELINE_TEMPLATES[t.pipeline];
+              const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+              return step?.milestone && t.status !== '完成' && t.status !== '取消';
+            });
+            const dot = stages.map(s => {
+              const col = s.gatePassed ? s.color : (s.isCurrent ? s.color + 'aa' : '#e0e0e0');
+              const mk = s.gatePassed ? '✓' : (s.isCurrent ? '●' : '○');
+              const txt = s.gatePassed || s.isCurrent ? '#fff' : '#aaa';
+              return `<span title="${s.label}" style="display:inline-flex;align-items:center;justify-content:center;width:14px;height:14px;background:${col};color:${txt};border-radius:50%;font-size:9px;font-weight:700;margin-right:1px">${mk}</span>`;
+            }).join('');
+            const totalDone = mainOnly.filter(t => t.status === '完成').length;
+            const totalTasks = mainOnly.filter(t => t.status !== '取消').length;
+            const pct = totalTasks ? Math.round(totalDone/totalTasks*100) : 0;
+            const launchOverdue = p.launch_date && p.launch_date < today && !allDone;
+            return `<tr style="cursor:pointer;border-top:1px solid #eee" onclick="openDevProject('${p.id}')">
+              <td style="padding:8px 10px"><b style="color:var(--accent-dark)">${p.name}</b></td>
+              <td style="padding:8px;text-align:center">${p.pm_name||'—'}</td>
+              <td style="padding:8px;text-align:center;font-size:11px;color:var(--muted)">${plLabels}</td>
+              <td style="padding:8px;text-align:center">
+                ${allDone
+                  ? '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:700">🚀 已上市</span>'
+                  : curStage ? `<span style="color:${curStage.color};font-weight:700">● ${curStage.label}</span>` : '—'}
+                <div style="margin-top:3px">${dot}</div>
+              </td>
+              <td style="padding:8px;text-align:center">
+                <div style="height:6px;background:#eee;border-radius:3px;overflow:hidden"><div style="height:100%;background:${pct===100?'#2e7d32':'var(--accent)'};width:${pct}%"></div></div>
+                <div style="font-size:11px;color:var(--muted);margin-top:2px">${totalDone}/${totalTasks} · ${pct}%</div>
+              </td>
+              <td style="padding:8px;text-align:center;font-size:11px">
+                ${nextMile ? `<div style="color:#c62828;font-weight:600">🎯 ${nextMile.step_name}</div><div style="color:var(--muted);margin-top:2px">${nextMile.due_date||'—'} · ${nextMile.assignee_name||'未指派'}</div>` : '<span style="color:#2e7d32">✅ 無待辦里程碑</span>'}
+              </td>
+              <td style="padding:8px;text-align:center;font-size:12px;color:${launchOverdue?'#c62828':'var(--text)'};font-weight:${launchOverdue?700:400}">${p.launch_date||'—'}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>`}
+    `}
+  `;
+}
+
+// 看板視圖:4 欄 = 4 大階段,每欄顯示該階段的專案卡
+function _renderDevKanban(enriched) {
+  const byStage = { design: [], modeling: [], sampling: [], production: [] };
+  const launched = [];
+  enriched.forEach(e => {
+    const allDone = e.stages.every(s => s.gatePassed);
+    if (allDone) launched.push(e);
+    else if (e.curStage) byStage[e.curStage.stageKey].push(e);
+  });
+  const today = _localToday();
+  const _card = (e) => {
+    const {p, curStage, stages} = e;
+    const plLabels = (p.pipelines||[]).map(pl => (PIPELINE_TEMPLATES[pl]?.label||pl).replace(/^[🥈🥇🎁]\s*/,'')).join('·');
+    const mainOnly = e.mainOnly;
+    const totalDone = mainOnly.filter(t => t.status === '完成').length;
+    const totalTasks = mainOnly.filter(t => t.status !== '取消').length;
+    const pct = totalTasks ? Math.round(totalDone/totalTasks*100) : 0;
+    const nextMile = mainOnly.find(t => {
+      const tpl = PIPELINE_TEMPLATES[t.pipeline];
+      const step = (tpl?.main||[]).find(s => s.key === t.step_key);
+      return step?.milestone && t.status !== '完成' && t.status !== '取消';
+    });
+    const launchOv = p.launch_date && p.launch_date < today;
+    return `<div style="background:#fff;border:1px solid var(--border);border-left:3px solid ${curStage?curStage.color:'#2e7d32'};border-radius:6px;padding:10px 12px;margin-bottom:8px;cursor:pointer" onclick="openDevProject('${p.id}')">
+      <div style="font-size:13px;font-weight:700;color:var(--accent-dark);margin-bottom:4px">${p.name}</div>
+      <div style="font-size:11px;color:var(--muted);margin-bottom:6px">${plLabels} · ${p.pm_name||'—'}</div>
+      <div style="height:5px;background:#eee;border-radius:3px;overflow:hidden;margin-bottom:5px"><div style="height:100%;background:${curStage?curStage.color:'#2e7d32'};width:${pct}%"></div></div>
+      <div style="display:flex;justify-content:space-between;align-items:center;font-size:11px">
+        <span style="color:var(--muted)">${totalDone}/${totalTasks} · ${pct}%</span>
+        <span style="color:${launchOv?'#c62828':'var(--muted)'};font-weight:${launchOv?700:400}">${p.launch_date?'🎯 '+p.launch_date:''}</span>
+      </div>
+      ${nextMile ? `<div style="font-size:11px;color:#e65100;margin-top:4px;padding-top:4px;border-top:1px dashed #eee">🎯 ${nextMile.step_name} · ${nextMile.due_date||'—'}</div>` : ''}
+    </div>`;
+  };
+  return `<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px">
+    ${DEV_STAGES.map(st => {
+      const list = byStage[st.key] || [];
+      return `<div style="background:${st.color}0d;border:1px solid ${st.color}44;border-radius:8px;padding:10px">
+        <div style="font-size:13px;font-weight:700;color:${st.color};margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid ${st.color}33;display:flex;justify-content:space-between;align-items:center">
+          <span>● ${st.label}</span>
+          <span style="font-size:11px;background:${st.color};color:#fff;padding:2px 8px;border-radius:10px">${list.length}</span>
+        </div>
+        ${list.length === 0 ? `<div style="padding:20px;text-align:center;color:var(--muted);font-size:11px">—</div>` : list.map(_card).join('')}
+      </div>`;
+    }).join('')}
+    ${launched.length ? `<div style="background:#e8f5e9;border:1px solid #a5d6a7;border-radius:8px;padding:10px">
+      <div style="font-size:13px;font-weight:700;color:#2e7d32;margin-bottom:10px;padding-bottom:8px;border-bottom:1px solid #a5d6a7;display:flex;justify-content:space-between;align-items:center">
+        <span>🚀 已上市</span>
+        <span style="font-size:11px;background:#2e7d32;color:#fff;padding:2px 8px;border-radius:10px">${launched.length}</span>
+      </div>
+      ${launched.map(_card).join('')}
+    </div>` : ''}
+  </div>`;
 }
 
 // 進度總覽:大階段模式(一列一專案 × 4 階段)
