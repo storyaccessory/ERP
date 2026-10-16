@@ -11253,7 +11253,7 @@ const PIPELINE_TEMPLATES = {
       { key:'system_submit',     name:'系統送審',            stage:'design',   days:1,  assignee_name:'郭子嫣' },
       { key:'design_approved',   name:'設計圖送審追蹤 / 審過', stage:'design',   days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
       { key:'modeling',          name:'建模 & 列印寄出送審',   stage:'modeling', days:5,  assignee_name:'郭子嫣' },
-      { key:'model_approved',    name:'建模送審追蹤 / 建模審過', stage:'modeling', days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
+      { key:'model_approved',    name:'建模送審追蹤 / 審過', stage:'modeling', days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
       { key:'wax_print',         name:'3D 鑄造蠟列印',       stage:'sampling', days:1,  assignee_name:'郭子嫣' },
       { key:'sampling',          name:'打樣',                stage:'sampling', days:12, assignee_name:'王韋翔' },
       { key:'sample_submit',     name:'打樣送審寄出',        stage:'sampling', days:1,  assignee_name:'郭子嫣' },
@@ -11283,7 +11283,7 @@ const PIPELINE_TEMPLATES = {
       { key:'system_submit',     name:'系統送審',            stage:'design',   days:1,  assignee_name:'郭子嫣' },
       { key:'design_approved',   name:'設計圖送審追蹤 / 審過', stage:'design',   days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
       { key:'modeling',          name:'建模 & 列印寄出送審',   stage:'modeling', days:3,  assignee_name:'郭子嫣' },
-      { key:'model_approved',    name:'建模送審追蹤 / 建模審過', stage:'modeling', days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
+      { key:'model_approved',    name:'建模送審追蹤 / 審過', stage:'modeling', days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
       // 階段 3 打樣:合金專屬流程
       { key:'factory_file',      name:'工廠發包檔製作',      stage:'sampling', days:3,  assignee_name:'郭子嫣' },
       { key:'factory_search',    name:'找工廠 / 打樣發包',   stage:'sampling', days:7,  assignee_key:'factory_owner' },
@@ -11694,19 +11694,49 @@ function _renderDevDashboard(activeProjects, allProjects) {
       <button class="btn btn-primary" onclick="modalNewDevProject()">+ 新增開發專案</button>
     </div>
 
+    ${(() => {
+      // 計算待 PM 決策的任務(notes 內含「等 PM」字樣)
+      const myId = state.user?.id;
+      const _ep = effectiveProfile() || {};
+      const amAdmin = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com';
+      const pending = [];
+      enriched.forEach(({p, mainOnly}) => {
+        const isMyProject = amAdmin || p.pm_id === myId;
+        if (!isMyProject) return;
+        mainOnly.forEach(t => {
+          if (t.notes && t.notes.includes('等 PM')) pending.push({ project: p, task: t });
+        });
+      });
+      window._devPendingDecisions = pending;
+      return '';
+    })()}
     <!-- KPI 卡 -->
-    <div class="cards cards-4" style="margin-bottom:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px">
+    <div class="cards" style="margin-bottom:14px;display:grid;grid-template-columns:repeat(auto-fit,minmax(135px,1fr));gap:10px">
       <div class="card" style="border-left:4px solid #1565c0"><div class="card-title">🛠 進行中</div><div class="card-value" style="color:#1565c0">${totalActive}</div></div>
       <div class="card" style="border-left:4px solid #2e7d32"><div class="card-title">🚀 本月上市</div><div class="card-value" style="color:#2e7d32">${launchingThisMonth}</div></div>
       <div class="card" style="border-left:4px solid ${overdueTasks.length?'#c62828':'#bbb'}"><div class="card-title">⚠ 逾期任務</div><div class="card-value" style="color:${overdueTasks.length?'#c62828':'var(--muted)'}">${overdueTasks.length}</div></div>
+      ${(() => {
+        const n = (window._devPendingDecisions||[]).length;
+        if (n === 0) return '';
+        return `<div class="card" style="border-left:4px solid #6a1b9a;cursor:pointer" onclick="window._devScrollToPending()" title="點擊看待決策任務">
+          <div class="card-title">🔔 待你決策</div>
+          <div class="card-value" style="color:#6a1b9a">${n}</div>
+        </div>`;
+      })()}
       <div class="card" style="border-left:4px solid #e65100"><div class="card-title">📅 7 天內里程碑</div><div class="card-value" style="color:#e65100">${upcomingMilestones.length}</div></div>
     </div>
 
     <!-- 需要注意 -->
-    ${(gateWaiting.length + overdueTasks.length + upcomingMilestones.length) > 0 ? `
-    <div class="card" style="margin-bottom:14px;padding:12px 14px;background:linear-gradient(135deg,#fff8e1,#fff)">
+    ${(gateWaiting.length + overdueTasks.length + upcomingMilestones.length + (window._devPendingDecisions||[]).length) > 0 ? `
+    <div id="dev-attention" class="card" style="margin-bottom:14px;padding:12px 14px;background:linear-gradient(135deg,#fff8e1,#fff)">
       <div style="font-size:13px;font-weight:700;color:#e65100;margin-bottom:8px">🚨 需要你注意</div>
       <div style="display:flex;flex-direction:column;gap:4px">
+        ${(window._devPendingDecisions||[]).slice(0,8).map(({project, task}) => `<div style="padding:6px 10px;background:#fff;border-left:3px solid #6a1b9a;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:8px" onclick="event.stopPropagation();window._devPmDecideTiming('${task.id}')">
+          <span style="font-size:11px;background:#6a1b9a;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">🔔 待決策</span>
+          <span style="font-size:13px;font-weight:600">${project.name}</span>
+          <span style="font-size:11px;color:var(--muted)">· ${task.step_name} · ${task.notes||''}</span>
+          <span style="margin-left:auto;font-size:11px;color:#6a1b9a;font-weight:600">PM 處理 →</span>
+        </div>`).join('')}
         ${gateWaiting.slice(0,5).map(({project, stage}) => `<div style="padding:6px 10px;background:#fff;border-left:3px solid #2e7d32;border-radius:4px;cursor:pointer;display:flex;align-items:center;gap:8px" onclick="openDevProject('${project.id}')">
           <span style="font-size:11px;background:#2e7d32;color:#fff;padding:2px 8px;border-radius:10px;font-weight:600">🔐 待閘門</span>
           <span style="font-size:13px;font-weight:600">${project.name}</span>
@@ -12375,6 +12405,12 @@ function _buildDevProjectStageBar(project, mainTasks, pipelines) {
   </div>`;
 }
 
+// 捲到需要注意區塊(KPI 點擊)
+window._devScrollToPending = function() {
+  const el = document.getElementById('dev-attention');
+  if (el) el.scrollIntoView({ behavior:'smooth', block:'start' });
+};
+
 // 共用閘門通過 → 同階段所有 pipeline 的 stage_gate 任務一起通過
 window._devPassStage = async function(projectId, stageKey) {
   const p = (state.data.dev||[]).find(x => x.id === projectId);
@@ -12695,7 +12731,17 @@ function _renderDevTaskRow(task, project) {
             title="完成日期(PM 可改,用於補登歷史)">
         </span>
       ` : ''}
-      ${task.notes && task.notes.includes('等 PM') ? `<div style="font-size:10px;color:#e65100;background:#fff3e0;padding:2px 6px;border-radius:4px;margin-top:3px;display:inline-block">🔔 ${task.notes} <button style="border:none;background:#e65100;color:#fff;font-size:9px;padding:1px 6px;border-radius:3px;margin-left:4px;cursor:pointer" onclick="event.stopPropagation();window._devPmDecideTiming('${task.id}')">PM 處理</button></div>` : ''}
+      ${task.notes && task.notes.includes('等 PM') ? (() => {
+        // PM 處理按鈕:只有該專案 PM 或老闆看得到
+        const _me = state.user?.id;
+        const _ep2 = effectiveProfile() || {};
+        const _amAdmin = _ep2.role === 'admin' || _ep2.email === 'cailing0516@gmail.com';
+        const _amPM = project && (project.pm_id === _me || _amAdmin);
+        const btn = _amPM
+          ? `<button style="border:none;background:#e65100;color:#fff;font-size:9px;padding:1px 6px;border-radius:3px;margin-left:4px;cursor:pointer" onclick="event.stopPropagation();window._devPmDecideTiming('${task.id}')">PM 處理</button>`
+          : `<span style="font-size:9px;color:#999;margin-left:4px">(等 PM 處理)</span>`;
+        return `<div style="font-size:10px;color:#e65100;background:#fff3e0;padding:2px 6px;border-radius:4px;margin-top:3px;display:inline-block">🔔 ${task.notes}${btn}</div>`;
+      })() : ''}
     </td>
     <td style="padding:5px">
       <select onchange="window._devSetTaskAssignee('${task.id}',this)" style="width:100%;padding:2px 4px;font-size:11px;border:1px solid var(--border);border-radius:3px" ${isDone||isCancelled?'disabled':''}>
