@@ -11763,15 +11763,15 @@ function _renderDevDashboard(activeProjects, allProjects) {
       </div>
     </div>` : ''}
 
-    <!-- 檢視切換:列表 / 看板 / 階段矩陣 / 詳細步驟 -->
+    <!-- 檢視切換:階段矩陣(預設) / 緊湊列表 / 看板 / 詳細步驟 -->
     <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
       <span style="font-size:12px;color:var(--muted)">檢視:</span>
       ${(() => {
-        const mode = state.data.devDashMode || 'list';
+        const mode = state.data.devDashMode || 'matrix_stage';
         const views = [
+          { k: 'matrix_stage', label: '📍 階段矩陣' },
           { k: 'list',   label: '📋 緊湊列表' },
           { k: 'kanban', label: '📊 看板(依階段)' },
-          { k: 'matrix_stage', label: '📍 階段矩陣' },
           { k: 'matrix_detail', label: '🔍 詳細步驟' },
         ];
         return views.map(v => `<button class="btn btn-sm ${mode===v.k?'btn-primary':'btn-outline'}" onclick="state.data.devDashMode='${v.k}';renderApp()">${v.label}</button>`).join('');
@@ -11779,12 +11779,9 @@ function _renderDevDashboard(activeProjects, allProjects) {
     </div>
 
     ${(() => {
-      const mode = state.data.devDashMode || 'list';
+      const mode = state.data.devDashMode || 'matrix_stage';
       if (mode === 'kanban') return _renderDevKanban(enriched);
-      if (mode === 'matrix_stage') return _renderDevDashboardMatrixStage(activeProjects);
-      if (mode === 'matrix_detail') return _renderDevDashboardMatrixDetail(activeProjects);
-      // 預設 list
-      return `
+      if (mode === 'list') return `
     <!-- 緊湊專案列表 -->
     ${rows.length === 0 ? `<div class="card"><div class="empty"><div class="empty-icon">🛠️</div><p>目前沒有進行中的專案</p></div></div>` : `
     <div class="card" style="padding:0;overflow:hidden">
