@@ -11758,6 +11758,7 @@ function _renderDevDashboard(activeProjects, allProjects) {
         <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
           <tr>
             <th style="padding:6px 10px;text-align:left">專案</th>
+            <th style="padding:6px;text-align:center;width:70px">品項</th>
             <th style="padding:6px;text-align:center;width:80px">PM</th>
             <th style="padding:6px;text-align:center;width:100px">Pipeline</th>
             <th style="padding:6px;text-align:center;width:140px">階段</th>
@@ -11785,8 +11786,13 @@ function _renderDevDashboard(activeProjects, allProjects) {
             const totalTasks = mainOnly.filter(t => t.status !== '取消').length;
             const pct = totalTasks ? Math.round(totalDone/totalTasks*100) : 0;
             const launchOverdue = p.launch_date && p.launch_date < today && !allDone;
+            const vActive = (p.dev_variants||[]).filter(v => !v.cancelled_at).length;
+            const vCancelled = (p.dev_variants||[]).filter(v => v.cancelled_at).length;
             return `<tr style="cursor:pointer;border-top:1px solid #eee" onclick="openDevProject('${p.id}')">
               <td style="padding:8px 10px"><b style="color:var(--accent-dark)">${p.name}</b></td>
+              <td style="padding:8px;text-align:center">
+                <span style="font-weight:700;color:var(--accent-dark)">${vActive}</span>${vCancelled?`<span style="font-size:10px;color:var(--muted)"> +${vCancelled}取消</span>`:''}
+              </td>
               <td style="padding:8px;text-align:center">${p.pm_name||'—'}</td>
               <td style="padding:8px;text-align:center;font-size:11px;color:var(--muted)">${plLabels}</td>
               <td style="padding:8px;text-align:center">
