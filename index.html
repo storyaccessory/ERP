@@ -11627,7 +11627,7 @@ function renderDev() {
 // 🎯 快速瀏覽儀表(預設首屏)
 function _renderDevDashboard(activeProjects, allProjects) {
   const today = _localToday();
-  const in7d = _dateAdd(today, 7);
+  const in7d = (() => { const d = new Date(today+'T00:00:00'); d.setDate(d.getDate()+7); return _localDateStr(d); })();
   const monthStart = today.slice(0, 7) + '-01';
   const monthEnd = (() => {
     const [y,m] = today.split('-').map(Number);
