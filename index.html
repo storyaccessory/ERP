@@ -11622,11 +11622,92 @@ function renderDev() {
       (tab==='all'?projects:activeProjects).map(p => _renderDevProjectCard(p)).join('')}`;
 }
 
+// 進度總覽:大階段模式(一列一專案 × 4 階段)
+function _renderDevMatrixStage(projects) {
+  const today = _localToday();
+  const matrixMode = state.data.devMatrixMode || 'stage';
+  // 排序:進行中在上(當前階段較前面的在上)、已上市最下
+  const rows = projects.map(p => {
+    const mainOnly = (p.dev_tasks||[]).filter(t => t.step_group === 'main');
+    const stages = _computeDevProjectStages(p, mainOnly, p.pipelines||[]);
+    const curIdx = stages.findIndex(s => s.isCurrent);
+    const allDone = stages.every(s => s.gatePassed);
+    return { project: p, stages, curIdx, allDone };
+  }).sort((a,b) => {
+    if (a.allDone !== b.allDone) return a.allDone ? 1 : -1;
+    return (a.curIdx === -1 ? 99 : a.curIdx) - (b.curIdx === -1 ? 99 : b.curIdx);
+  });
+
+  return `
+    <div class="tabs">
+      <div class="tab" data-dev-tab="projects">🛠 進行中專案</div>
+      <div class="tab active" data-dev-tab="matrix">📊 進度總覽</div>
+      <div class="tab" data-dev-tab="all">全部專案</div>
+      <div class="tab" data-dev-tab="設計圖號">🔢 設計圖號</div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--muted)">檢視:</span>
+      <button class="btn btn-sm ${matrixMode==='stage'?'btn-primary':'btn-outline'}" onclick="state.data.devMatrixMode='stage';renderApp()">📍 大階段</button>
+      <button class="btn btn-sm ${matrixMode==='detail'?'btn-primary':'btn-outline'}" onclick="state.data.devMatrixMode='detail';renderApp()">🔍 詳細步驟</button>
+    </div>
+    <div class="card" style="padding:0;overflow:hidden">
+      <div style="overflow-x:auto">
+        <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:800px">
+          <thead style="background:#f5f5f5">
+            <tr>
+              <th style="padding:10px;text-align:left;position:sticky;left:0;background:#f5f5f5;z-index:1;min-width:180px;border-right:1px solid var(--border)">專案</th>
+              <th style="padding:10px;text-align:center;min-width:90px">Pipeline</th>
+              <th style="padding:10px;text-align:center;min-width:80px">PM</th>
+              ${DEV_STAGES.map(st => `<th style="padding:10px;text-align:center;min-width:120px;color:${st.color};border-right:1px solid #eee">${st.label}</th>`).join('')}
+              <th style="padding:10px;text-align:center;min-width:70px">上市日</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${rows.map(({project: p, stages, allDone}) => {
+              const plLabels = (p.pipelines||[]).map(pl => (PIPELINE_TEMPLATES[pl]?.label||pl).replace(/^[🥈🥇🎁]\s*/,'')).join(' · ');
+              return `<tr style="cursor:pointer;border-top:1px solid #eee;${allDone?'opacity:.6':''}" onclick="openDevProject('${p.id}')">
+                <td style="padding:10px;position:sticky;left:0;background:#fff;border-right:1px solid var(--border)">
+                  <div style="font-weight:700;color:var(--accent-dark)">${p.name}</div>
+                  <div style="font-size:11px;color:var(--muted);margin-top:2px">起始 ${p.start_date||'—'}${allDone?' · 🚀 已上市':''}</div>
+                </td>
+                <td style="padding:10px;text-align:center;font-size:11px;color:var(--muted)">${plLabels}</td>
+                <td style="padding:10px;text-align:center;font-size:12px">${p.pm_name||'—'}</td>
+                ${stages.map(s => {
+                  let cellBg = '#fff', cellCol = '#999', content = '—';
+                  if (s.gatePassed) {
+                    cellBg = s.color + '18'; cellCol = s.color;
+                    content = `<div style="font-weight:700">✓ 已通過</div><div style="font-size:10px;color:var(--muted);margin-top:2px">${s.doneCount}/${s.taskCount}</div>`;
+                  } else if (s.isCurrent) {
+                    cellBg = s.color + '30'; cellCol = s.color;
+                    content = `<div style="font-weight:700">● 進行中</div><div style="font-size:10px;margin-top:2px">${s.doneCount}/${s.taskCount} · ${s.progress}%</div>`;
+                  } else if (s.taskCount === 0) {
+                    content = '<span style="color:#ccc">—</span>';
+                  } else {
+                    content = `<span style="color:#bbb">待入階</span>`;
+                  }
+                  return `<td style="padding:10px;text-align:center;background:${cellBg};color:${cellCol};border-right:1px solid #f5f5f5">${content}</td>`;
+                }).join('')}
+                <td style="padding:10px;text-align:center;font-size:12px;color:${p.launch_date&&p.launch_date<today?'#c62828':'var(--text)'}">${p.launch_date||'—'}</td>
+              </tr>`;
+            }).join('')}
+          </tbody>
+        </table>
+      </div>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">
+      ✓ 已通過 · ● 進行中 · 待入階 = 要等前面階段通過閘門才會開始 · 點列可進詳情
+    </div>`;
+}
+
 // ═══════════════════════════════════════════════
 // 📊 進度總覽矩陣表
 // ═══════════════════════════════════════════════
 function _renderDevMatrix(projects) {
   if (!projects.length) return `<div class="card"><div class="empty"><div class="empty-icon">📊</div><p>沒有進行中的專案</p></div></div>`;
+
+  const matrixMode = state.data.devMatrixMode || 'stage';  // 'stage' | 'detail'
+  // 階段模式:每個專案一列,4 大階段為欄,整張總覽
+  if (matrixMode === 'stage') return _renderDevMatrixStage(projects);
 
   // 找每條 pipeline 各自的專案
   const groupByPipeline = {};
@@ -11658,6 +11739,11 @@ function _renderDevMatrix(projects) {
       <div class="tab active" data-dev-tab="matrix">📊 進度總覽</div>
       <div class="tab" data-dev-tab="all">全部專案</div>
       <div class="tab" data-dev-tab="設計圖號">🔢 設計圖號</div>
+    </div>
+    <div style="display:flex;gap:6px;margin-bottom:10px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--muted)">檢視:</span>
+      <button class="btn btn-sm ${matrixMode==='stage'?'btn-primary':'btn-outline'}" onclick="state.data.devMatrixMode='stage';renderApp()">📍 大階段</button>
+      <button class="btn btn-sm ${matrixMode==='detail'?'btn-primary':'btn-outline'}" onclick="state.data.devMatrixMode='detail';renderApp()">🔍 詳細步驟</button>
     </div>
     <div style="font-size:11px;color:var(--muted);margin-bottom:8px">
       <b style="color:#2e7d32">✓</b> 已完成 · <b style="color:#555">日期</b> 預計完成 · <b style="color:#c62828">紅色日期</b> 逾期 · — 未開始/取消 · 滑鼠移到格子看負責人
@@ -12115,7 +12201,7 @@ function _renderDevDetail(id) {
             const plCustom = (p.dev_tasks||[]).filter(t => t.pipeline === pl && t.step_group === 'custom').sort((a,b)=>(a.order_num||0)-(b.order_num||0));
             return `
             ${plCustom.length ? `
-            <div style="font-size:11px;color:#e65100;font-weight:600;margin:12px 0 4px">自訂任務 ⭐</div>
+            <div style="font-size:11px;color:#e65100;font-weight:600;margin:12px 0 4px">自訂任務 ⭐ <span style="font-weight:400;color:var(--muted)">(含打樣分組 — 包裝/禮盒等)</span></div>
             <table style="width:100%;font-size:12px;border-collapse:collapse">
               <thead style="background:#fff8e1;font-size:11px;color:var(--muted)">
                 <tr>
@@ -12128,8 +12214,11 @@ function _renderDevDetail(id) {
               </thead>
               <tbody>${plCustom.map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
             </table>` : ''}
-            <div style="text-align:center;margin-top:10px;padding-top:8px;border-top:1px dashed var(--border)">
-              <button class="btn btn-sm btn-outline" onclick="window._devAddDetailCustomTask('${p.id}','${pl}')" style="background:#fff;color:#e65100;border-color:#ffb74d;font-size:11px">⭐ + 加自訂任務到 ${t.label}</button>
+            <div style="text-align:center;margin-top:10px;padding-top:8px;border-top:1px dashed var(--border);display:flex;gap:6px;justify-content:center;flex-wrap:wrap">
+              <button class="btn btn-sm btn-outline" onclick="window._devAddDetailCustomTask('${p.id}','${pl}')" style="background:#fff;color:#e65100;border-color:#ffb74d;font-size:11px">⭐ + 加自訂任務</button>
+              <button class="btn btn-sm btn-outline" onclick="window._devAddSamplingGroup('${p.id}','${pl}','包裝打樣')" style="background:#fce4ec;color:#c2185b;border-color:#f8bbd0;font-size:11px" title="打樣階段新增分組(可指派不同負責人)">+ 包裝打樣</button>
+              <button class="btn btn-sm btn-outline" onclick="window._devAddSamplingGroup('${p.id}','${pl}','禮盒打樣')" style="background:#fce4ec;color:#c2185b;border-color:#f8bbd0;font-size:11px">+ 禮盒打樣</button>
+              <button class="btn btn-sm btn-outline" onclick="window._devAddSamplingGroup('${p.id}','${pl}','')" style="background:#fce4ec;color:#c2185b;border-color:#f8bbd0;font-size:11px">+ 其他打樣分組</button>
             </div>`;
           })()}
         </div>
@@ -12212,30 +12301,16 @@ function _renderDevTaskRow(task, project) {
           if (isCancelled) return '<span style="color:#999">⊘ 略過</span>';
           if (isDone && hasGate && gatePassed) return '<span style="color:#2e7d32;font-weight:700">✓ 已通過</span>';
           if (isDone) return '<span style="color:#2e7d32;font-weight:600">✓ 完成</span>';
-          if (hasGate && task.status === '完成' && !gatePassed) return '<span style="color:#f57c00;font-weight:600">⏳ 待通過閘門</span>';
+          if (hasGate && task.status === '完成' && !gatePassed) return '<span style="color:#f57c00;font-weight:600;font-size:10px" title="請到上方「專案階段」按閘門">⏳ 待階段閘門</span>';
           if (isOverdue) return '<span style="color:#c62828;font-weight:600">⚠ 逾期</span>';
           return '<span style="color:var(--muted)">待辦</span>';
         })()}
         ${(() => {
-          const hasGate = _devTaskHasGate(task);
-          const gatePassed = !!task.gate_passed_at;
           if (isCancelled) {
             return `<button onclick="window._devToggleTaskSkip('${task.id}',false)" title="恢復此任務"
               style="font-size:10px;padding:1px 6px;border:1px solid #90caf9;background:#e3f2fd;color:#1565c0;border-radius:3px;cursor:pointer">↩ 恢復</button>`;
           }
-          // 需閘門且已通過 → 顯示撤銷按鈕
-          if (hasGate && gatePassed) {
-            return `<button onclick="window._devUnpassGate('${task.id}')" title="撤銷閘門"
-              style="font-size:10px;padding:1px 6px;border:1px solid #e0e0e0;background:#fafafa;color:#888;border-radius:3px;cursor:pointer">↩ 撤銷</button>`;
-          }
-          // 需閘門且勾完成但未通過 → 顯示通過閘門按鈕
-          if (hasGate && task.status === '完成' && !gatePassed) {
-            return `<button onclick="window._devPassGate('${task.id}')" title="確認通過,進入下一階段"
-              style="font-size:10px;padding:2px 10px;border:1px solid #2e7d32;background:#2e7d32;color:#fff;border-radius:3px;cursor:pointer;font-weight:700">✓ 通過閘門</button>`;
-          }
-          // 已完成(不需閘門) → 不用按鈕
           if (isDone) return '';
-          // 其他:略過按鈕
           return `<button onclick="window._devToggleTaskSkip('${task.id}',true)" title="此任務不需要,從流程略過(可恢復)"
               style="font-size:10px;padding:1px 6px;border:1px solid #e0e0e0;background:#fafafa;color:#888;border-radius:3px;cursor:pointer">⊘ 略過</button>`;
         })()}
@@ -13211,25 +13286,34 @@ window._devAddDetailCustomTask = async function(projectId, pipeline) {
   const dueD = addWorkdays(new Date(today+'T00:00:00'), 3);
   const defaultDate = `${dueD.getFullYear()}-${String(dueD.getMonth()+1).padStart(2,'0')}-${String(dueD.getDate()).padStart(2,'0')}`;
 
-  showModal(`⭐ 加自訂任務到 ${PIPELINE_TEMPLATES[pipeline]?.label}`, `
+  // 預設階段:若傳入 initialStage(例如打樣分組按鈕),用那個;否則用當前階段
+  const presetStage = arguments[2] || null;  // 第 3 參數 = 預設 stage
+  const presetTemplate = arguments[3] || '';  // 第 4 參數 = 預設任務名稱範本(例如 "包裝打樣")
+  showModal(`⭐ 加自訂任務 · ${PIPELINE_TEMPLATES[pipeline]?.label}`, `
     <div class="form-group"><label>任務名稱 *</label>
-      <input class="form-control" id="dct-name" placeholder="例:補開發票、追蹤樣品運送、重寄催件">
+      <input class="form-control" id="dct-name" placeholder="例:包裝打樣、禮盒打樣、補開發票" value="${presetTemplate}">
     </div>
     <div class="form-row form-row-2">
-      <div class="form-group"><label>負責人</label>
-        <select class="form-control" id="dct-assignee">
-          <option value="">— 選擇 —</option>
-          ${activeUsers.map(u => `<option value="${u.id}" data-name="${u.name}">${u.name}</option>`).join('')}
+      <div class="form-group"><label>所屬階段 *</label>
+        <select class="form-control" id="dct-stage">
+          ${DEV_STAGES.map(st => `<option value="${st.key}" ${presetStage===st.key?'selected':''}>${st.label}</option>`).join('')}
         </select>
       </div>
       <div class="form-group"><label>預定完成日 *</label>
         <input type="date" class="form-control" id="dct-date" value="${defaultDate}">
       </div>
     </div>
+    <div class="form-group"><label>負責人</label>
+      <select class="form-control" id="dct-assignee">
+        <option value="">— 選擇 —</option>
+        ${activeUsers.map(u => `<option value="${u.id}" data-name="${u.name}">${u.name}</option>`).join('')}
+      </select>
+    </div>
   `, [
     { label:'加入', primary:true, onclick: async () => {
       const name = document.getElementById('dct-name').value.trim();
       const dueDate = document.getElementById('dct-date').value;
+      const stage = document.getElementById('dct-stage').value;
       const sel = document.getElementById('dct-assignee');
       if (!name) { showToast('請填任務名稱','error'); return; }
       if (!dueDate) { showToast('請選預定完成日','error'); return; }
@@ -13238,7 +13322,7 @@ window._devAddDetailCustomTask = async function(projectId, pipeline) {
         project_id: projectId,
         variant_id: null,
         pipeline,
-        step_key: `custom_${Date.now()}`,
+        step_key: `custom_${stage}_${Date.now()}`,  // 把 stage 編進 key,方便歸類
         step_name: name,
         step_group: 'custom',
         is_milestone: false,
@@ -13248,6 +13332,7 @@ window._devAddDetailCustomTask = async function(projectId, pipeline) {
         expected_date: dueDate,
         due_date: dueDate,
         status: '未開始',
+        notes: `[stage:${stage}]`,  // 註記所屬階段(方便後續 group by)
       });
       if (error) { showToast('新增失敗:'+error.message,'error'); return; }
       showToast(`✓ 已加「${name}」`);
@@ -13257,6 +13342,11 @@ window._devAddDetailCustomTask = async function(projectId, pipeline) {
     }},
     { label:'取消', onclick: closeModal },
   ]);
+};
+
+// 針對打樣階段 → 預設新增一個「打樣分組」自訂任務(常見:包裝打樣 / 禮盒打樣 / 外包樣)
+window._devAddSamplingGroup = function(projectId, pipeline, template) {
+  return window._devAddDetailCustomTask(projectId, pipeline, 'sampling', template || '');
 };
 
 // 編輯專案基本資料
