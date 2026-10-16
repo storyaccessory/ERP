@@ -11851,6 +11851,9 @@ function _renderDevDashboard(activeProjects, allProjects) {
       </table>
     </div>`}
     `;
+      if (mode === 'matrix_detail') return _renderDevDashboardMatrixDetail(activeProjects);
+      // 預設 matrix_stage
+      return _renderDevDashboardMatrixStage(activeProjects);
     })()}
   `;
 }
