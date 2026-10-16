@@ -12891,8 +12891,25 @@ function _renderDevTaskRow(task, project) {
       </select>
     </td>
     <td style="padding:5px;text-align:center">
-      <input type="date" value="${task.due_date||''}" onchange="window._devSetTaskDate('${task.id}',this.value)"
-        style="width:100%;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1px solid var(--border);border-radius:3px" ${isCancelled?'disabled':''}>
+      ${(() => {
+        // 判斷延期:due_date 比原本 expected_date 晚 → 顯示 chip
+        const orig = task.expected_date;
+        const cur = task.due_date;
+        let delayBadge = '';
+        if (orig && cur && !isCancelled && !isDone) {
+          const delta = _daysDiff(orig, cur);
+          if (delta > 0) {
+            delayBadge = `<div style="font-size:9px;color:#c62828;font-weight:700;margin-top:2px" title="原定 ${orig}">⚠ 已延 ${delta} 天</div>`;
+          } else if (delta < 0) {
+            delayBadge = `<div style="font-size:9px;color:#2e7d32;font-weight:700;margin-top:2px" title="原定 ${orig}">✨ 提早 ${-delta} 天</div>`;
+          }
+        }
+        const borderCol = delayBadge && !isDone && !isCancelled
+          ? (orig < cur ? '#c62828' : '#2e7d32')
+          : 'var(--border)';
+        return `<input type="date" value="${cur||''}" onchange="window._devSetTaskDate('${task.id}',this.value)"
+          style="width:100%;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1.5px solid ${borderCol};border-radius:3px" ${isCancelled?'disabled':''}>${delayBadge}`;
+      })()}
     </td>
     <td style="padding:5px;text-align:center;font-size:11px">
       <div style="display:flex;flex-direction:column;align-items:center;gap:3px">
