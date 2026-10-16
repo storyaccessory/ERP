@@ -11311,20 +11311,31 @@ const PIPELINE_TEMPLATES = {
     label: '周邊',
     color: '#ec407a',
     main: [
-      { key:'material_confirm', name:'先確認追素材',       stage:'design',   days:5,  assignee_name:'蔡采玲' },
-      { key:'item_brainstorm',  name:'開發品項發想討論',   stage:'design',   days:5,  assignee_name:'林毓馨' },
-      { key:'item_confirm',     name:'開發品項確認',       stage:'design',   days:7,  assignee_name:'林毓馨', is_review:true, is_stage_gate:true },
-      { key:'item_design',      name:'開發品項設計',       stage:'sampling', days:10, assignee_name:'林毓馨' },
-      { key:'design_confirm',   name:'開發品項設計確認',   stage:'sampling', days:7,  assignee_name:'林毓馨', issue_design_number:true, is_review:true, is_stage_gate:true },
-      { key:'factory_file',     name:'商品工廠檔完稿',     stage:'production', days:3,  assignee_name:'林毓馨' },
-      { key:'production_deploy',name:'商品發包量產',       stage:'production', days:5,  assignee_name:'蔡采玲', trigger_side:true },
-      { key:'production_track', name:'商品量產追蹤',       stage:'production', days:10, assignee_name:'蔡采玲' },
-      { key:'arrival_check',    name:'商品到貨驗收',       stage:'production', days:3,  assignee_name:'陳秋惠', milestone:true, is_launch:true, is_stage_gate:true },
+      // 設計階段(周邊沒建模,打樣前的所有設計相關都歸這)
+      { key:'material_confirm',   name:'確認可用素材',        stage:'design', days:5, assignee_name:'蔡采玲' },
+      { key:'item_brainstorm',    name:'開發品項發想討論',    stage:'design', days:3, assignee_name:'林毓馨' },
+      { key:'item_confirm',       name:'開發品項與授權方確認', stage:'design', days:5, assignee_name:'林毓馨', is_review:true },
+      { key:'item_design',        name:'開發品項設計',        stage:'design', days:5, assignee_name:'林毓馨' },
+      { key:'design_confirm',     name:'開發品項設計送審確認', stage:'design', days:5, assignee_name:'蔡采玲', issue_design_number:true, is_review:true, is_stage_gate:true },
+      // 打樣階段
+      { key:'factory_file',       name:'商品設計完稿',        stage:'sampling', days:2, assignee_name:'林毓馨' },
+      { key:'sampling_assign',    name:'商品打樣發包',        stage:'sampling', days:3, assignee_name:'蔡采玲' },
+      { key:'sampling_track',     name:'商品打樣追蹤',        stage:'sampling', days:7, assignee_name:'蔡采玲' },
+      { key:'sample_approved',    name:'商品打樣送審',        stage:'sampling', days:5, assignee_name:'蔡采玲', milestone:true, trigger_side:true, is_review:true, is_stage_gate:true },
+      // 量產階段
+      { key:'production_deploy',  name:'商品量產發包',        stage:'production', days:3, assignee_name:'蔡采玲' },
+      { key:'production_track',   name:'商品量產追蹤',        stage:'production', days:10, assignee_name:'蔡采玲' },
+      { key:'arrival_check',      name:'商品到貨驗收',        stage:'production', days:5, assignee_name:'陳秋惠', milestone:true, is_launch:true, is_stage_gate:true },
     ],
     side: [
-      { key:'sheet_draft',     name:'商品表 初版',    assignee_name:'陳秋惠', trigger:'production_deploy', offset:5 },
-      { key:'cost_and_price',  name:'成本+售價',      assignee_name:'蔡采玲', trigger:'production_deploy', offset:5 },
-      { key:'sheet_final',     name:'商品表 最終版',  assignee_name:'陳秋惠', trigger:'price_done',        offset:5 },
+      // 跟純銀一致
+      { key:'plating_photo',   name:'電鍍拍照樣一套',  assignee_name:'王韋翔', trigger:'sample_approved', offset:5 },
+      { key:'spec_sheet',      name:'產品規格單',      assignee_name:'郭子嫣', trigger:'sample_approved', offset:2 },
+      { key:'restock_order',   name:'補貨單',          assignee_name:'陳秋惠', trigger:'sample_approved', offset:3 },
+      { key:'cost_calc',       name:'成本計算',        assignee_name:'王韋翔', trigger:'sample_approved', offset:10 },
+      { key:'retail_price',    name:'商品售價',        assignee_name:'劉怡汝', trigger:'cost_done',       offset:2 },
+      { key:'product_sheet',   name:'商品表',          assignee_name:'陳秋惠', trigger:'price_done',      offset:1 },
+      { key:'gold_mark',       name:'金標申請',        assignee_name:'蔡采玲', trigger:'price_done',      offset:2 },
     ]
   }
 };
