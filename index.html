@@ -13807,13 +13807,9 @@ window._devOpenCustomEditor = function(projectId, pipeline) {
     <div style="margin-top:10px;font-size:11px;color:var(--muted)">✕ = 標記刪除(存檔時才真的刪);改完按下方「儲存全部」</div>
   `;
 
-  openModal({
-    title: `✏ 批次編輯自訂任務 (${tasks.length})`,
-    body: html,
-    width: '820px',
-    actions: [
-      { label: '取消', onClick: closeModal },
-      { label: '💾 儲存全部', primary: true, onClick: async () => {
+  showModal(`✏ 批次編輯自訂任務 (${tasks.length})`, html, [
+      { label: '取消', onclick: closeModal },
+      { label: '💾 儲存全部', primary: true, onclick: async () => {
         const rows = document.querySelectorAll('#cstEditorBody tr');
         const updates = [];
         const deletes = [];
@@ -13854,8 +13850,7 @@ window._devOpenCustomEditor = function(projectId, pipeline) {
           showToast('儲存失敗:' + (e.message||e), 'error');
         }
       } }
-    ]
-  });
+    ], { width: '820px' });
 };
 
 // 通過閘門:正式進入下一階段。寫入 gate_passed_at / by,並記決策紀錄
