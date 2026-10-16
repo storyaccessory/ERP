@@ -13956,13 +13956,26 @@ window._devEditProject = async function(projectId) {
     </div>
     <div class="form-group"><label>備註</label><textarea class="form-control" rows="2" id="ep-notes">${p.notes||''}</textarea></div>
     <div class="form-group" style="padding:10px 12px;background:#e3f2fd;border-radius:6px;border-left:3px solid #1565c0">
-      <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0;font-weight:600;color:#1565c0">
-        <input type="checkbox" id="ep-shift-tasks" checked style="width:16px;height:16px">
-        改起始日時 → <b>所有未完成任務一起順移</b>相同天數
-      </label>
-      <div style="font-size:11px;color:var(--muted);margin-top:4px;padding-left:24px">
-        · 已完成/已取消的任務不會動(保留歷史)<br>
-        · 行事曆子任務日期一併同步
+      <div style="font-weight:600;color:#1565c0;margin-bottom:6px">📅 改起始日時,未完成任務要怎麼調整?</div>
+      <div style="display:flex;flex-direction:column;gap:6px">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;padding:6px 8px;border-radius:4px;background:#fff">
+          <input type="radio" name="ep-date-mode" value="shift" checked style="margin-top:2px">
+          <div><b style="font-size:12px">① 整體順移</b>
+            <div style="font-size:11px;color:var(--muted);line-height:1.5">所有未完成任務的 due_date 一起加減相同天數,相對間隔不變</div></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;padding:6px 8px;border-radius:4px;background:#fff">
+          <input type="radio" name="ep-date-mode" value="recompute" style="margin-top:2px">
+          <div><b style="font-size:12px">② 依新起始日重新排程</b>
+            <div style="font-size:11px;color:var(--muted);line-height:1.5">以模板工作天重新算所有未完成任務日期(推薦:原日期錯亂或起始日落差大時)</div></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;padding:6px 8px;border-radius:4px;background:#fff">
+          <input type="radio" name="ep-date-mode" value="none" style="margin-top:2px">
+          <div><b style="font-size:12px">③ 不動任務</b>
+            <div style="font-size:11px;color:var(--muted);line-height:1.5">只改專案起始日,所有任務日期維持原狀</div></div>
+        </label>
+      </div>
+      <div style="font-size:11px;color:var(--muted);margin-top:6px">
+        · 已完成/已取消的任務永遠不會動 · 行事曆會自動重建
       </div>
     </div>
   `, [
@@ -13975,7 +13988,7 @@ window._devEditProject = async function(projectId) {
       };
       const startChanged = upd.start_date !== p.start_date;
       const launchChanged = upd.launch_date !== p.launch_date;
-      const shiftTasks = document.getElementById('ep-shift-tasks')?.checked;
+      const dateMode = document.querySelector('input[name="ep-date-mode"]:checked')?.value || 'shift';
 
       // 計算起始日位移天數
       let deltaDays = 0;
@@ -13983,22 +13996,43 @@ window._devEditProject = async function(projectId) {
         deltaDays = _daysDiff(p.start_date, upd.start_date);
       }
 
-      // 若有勾選 + 起始日有變 + 有位移 → 順移所有未完成/未取消任務
       let shiftedCount = 0;
-      if (shiftTasks && deltaDays !== 0) {
-        const movableTasks = (p.dev_tasks||[]).filter(t =>
-          t.status !== '完成' && t.status !== '取消' && t.due_date
-        );
-        if (movableTasks.length) {
-          const msg = `${deltaDays > 0 ? '順延' : '提前'} ${Math.abs(deltaDays)} 天 — 影響 ${movableTasks.length} 個未完成任務。確定?`;
-          if (!confirm(msg)) return;
-          for (const t of movableTasks) {
-            const newDate = _shiftDate(t.due_date, deltaDays);
-            await db.from('dev_tasks').update({ due_date: newDate }).eq('id', t.id);
+      const movableTasks = (p.dev_tasks||[]).filter(t =>
+        t.status !== '完成' && t.status !== '取消' && t.step_group === 'main'
+      );
+      // 模式 ①:整體順移
+      if (dateMode === 'shift' && deltaDays !== 0 && movableTasks.length) {
+        const msg = `整體順移:${deltaDays > 0 ? '順延' : '提前'} ${Math.abs(deltaDays)} 天 — 影響 ${movableTasks.length} 個未完成任務。確定?`;
+        if (!confirm(msg)) return;
+        for (const t of movableTasks) {
+          if (!t.due_date) continue;
+          const newDate = _shiftDate(t.due_date, deltaDays);
+          await db.from('dev_tasks').update({ due_date: newDate }).eq('id', t.id);
+          shiftedCount++;
+        }
+      }
+      // 模式 ②:依新起始日重新排程
+      else if (dateMode === 'recompute' && upd.start_date && movableTasks.length) {
+        // 計算每條 pipeline 依新起始日的預期日期
+        const newDateMap = {};  // key: pipeline+step_key, value: expected_date
+        (p.pipelines||[]).forEach(pl => {
+          const { dates } = _calcMainDates(pl, upd.start_date);
+          dates.forEach(step => {
+            newDateMap[pl + '::' + step.key] = step.expected_date;
+          });
+        });
+        // 預覽影響任務數
+        const effects = movableTasks.filter(t => newDateMap[t.pipeline + '::' + t.step_key]);
+        if (!confirm(`依新起始日 ${upd.start_date} 重新排程 — 將重算 ${effects.length} 個未完成任務的 due_date。確定?`)) return;
+        for (const t of effects) {
+          const newDate = newDateMap[t.pipeline + '::' + t.step_key];
+          if (newDate && newDate !== t.due_date) {
+            await db.from('dev_tasks').update({ due_date: newDate, expected_date: newDate }).eq('id', t.id);
             shiftedCount++;
           }
         }
       }
+      // 模式 ③:不動任務 — 什麼都不做
 
       // 從現有任務重算「最快可上市日」(拿最後里程碑或最後 due_date)
       await loadDev();  // 載入最新 tasks(含順移後的)
