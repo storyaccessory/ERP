@@ -11878,6 +11878,7 @@ function _renderDevDashboardMatrixStage(projects) {
         <thead style="background:#f5f5f5">
           <tr>
             <th style="padding:10px;text-align:left;position:sticky;left:0;background:#f5f5f5;z-index:1;min-width:180px;border-right:1px solid var(--border)">專案</th>
+            <th style="padding:10px;text-align:center;min-width:70px">品項</th>
             <th style="padding:10px;text-align:center;min-width:90px">Pipeline</th>
             <th style="padding:10px;text-align:center;min-width:80px">PM</th>
             ${DEV_STAGES.map(st => `<th style="padding:10px;text-align:center;min-width:120px;color:${st.color};border-right:1px solid #eee">${st.label}</th>`).join('')}
@@ -11888,10 +11889,15 @@ function _renderDevDashboardMatrixStage(projects) {
           ${rows.map(({project: p, stages, allDone}) => {
             const plLabels = (p.pipelines||[]).map(pl => (PIPELINE_TEMPLATES[pl]?.label||pl).replace(/^[🥈🥇🎁]\s*/,'')).join(' · ');
             const notYet = p.start_date && p.start_date > today;
+            const vActive = (p.dev_variants||[]).filter(v => !v.cancelled_at).length;
+            const vCancelled = (p.dev_variants||[]).filter(v => v.cancelled_at).length;
             return `<tr style="cursor:pointer;border-top:1px solid #eee;${allDone?'opacity:.6':''}" onclick="openDevProject('${p.id}')">
               <td style="padding:10px;position:sticky;left:0;background:#fff;border-right:1px solid var(--border)">
                 <div style="font-weight:700;color:var(--accent-dark)">${p.name}</div>
                 <div style="font-size:11px;color:var(--muted);margin-top:2px">起始 ${p.start_date||'—'}${allDone?' · 🚀 已上市':''}${notYet?' · ⏸ 待啟動':''}</div>
+              </td>
+              <td style="padding:10px;text-align:center">
+                <span style="font-weight:700;color:var(--accent-dark)">${vActive}</span>${vCancelled?`<span style="font-size:10px;color:var(--muted)"> +${vCancelled}取消</span>`:''}
               </td>
               <td style="padding:10px;text-align:center;font-size:11px;color:var(--muted)">${plLabels}</td>
               <td style="padding:10px;text-align:center;font-size:12px">${p.pm_name||'—'}</td>
