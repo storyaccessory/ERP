@@ -13997,12 +13997,19 @@ window._devEditProject = async function(projectId) {
       }
 
       let shiftedCount = 0;
+      // 主線 + 副線 都算,副線也會跟著動(因為副線日期是從主線里程碑算的)
       const movableTasks = (p.dev_tasks||[]).filter(t =>
-        t.status !== '完成' && t.status !== '取消' && t.step_group === 'main'
+        t.status !== '完成' && t.status !== '取消' &&
+        (t.step_group === 'main' || t.step_group === 'side' || t.step_group === 'custom')
       );
-      // 模式 ①:整體順移
+      const mainCount = movableTasks.filter(t => t.step_group === 'main').length;
+      const sideCount = movableTasks.filter(t => t.step_group === 'side').length;
+      const customCount = movableTasks.filter(t => t.step_group === 'custom').length;
+      const sumLabel = `主線 ${mainCount}${sideCount?` · 副線 ${sideCount}`:''}${customCount?` · 自訂 ${customCount}`:''}`;
+
+      // 模式 ①:整體順移(主+副+自訂一起動)
       if (dateMode === 'shift' && deltaDays !== 0 && movableTasks.length) {
-        const msg = `整體順移:${deltaDays > 0 ? '順延' : '提前'} ${Math.abs(deltaDays)} 天 — 影響 ${movableTasks.length} 個未完成任務。確定?`;
+        const msg = `整體順移:${deltaDays > 0 ? '順延' : '提前'} ${Math.abs(deltaDays)} 天\n影響 ${movableTasks.length} 個未完成任務(${sumLabel})\n確定?`;
         if (!confirm(msg)) return;
         for (const t of movableTasks) {
           if (!t.due_date) continue;
@@ -14011,25 +14018,36 @@ window._devEditProject = async function(projectId) {
           shiftedCount++;
         }
       }
-      // 模式 ②:依新起始日重新排程
+      // 模式 ②:依新起始日重新排程(主線用模板,副線用新主線里程碑重算)
       else if (dateMode === 'recompute' && upd.start_date && movableTasks.length) {
-        // 計算每條 pipeline 依新起始日的預期日期
-        const newDateMap = {};  // key: pipeline+step_key, value: expected_date
+        const newMainMap = {};   // key: pipeline+step_key, value: 新 expected_date
+        const newSideMap = {};   // key: pipeline+step_key, value: 新 expected_date
         (p.pipelines||[]).forEach(pl => {
-          const { dates } = _calcMainDates(pl, upd.start_date);
-          dates.forEach(step => {
-            newDateMap[pl + '::' + step.key] = step.expected_date;
-          });
+          const { dates, stepMap } = _calcMainDates(pl, upd.start_date);
+          dates.forEach(step => { newMainMap[pl + '::' + step.key] = step.expected_date; });
+          const sides = _calcSideDates(pl, stepMap);
+          sides.forEach(step => { newSideMap[pl + '::' + step.key] = step.expected_date; });
         });
-        // 預覽影響任務數
-        const effects = movableTasks.filter(t => newDateMap[t.pipeline + '::' + t.step_key]);
-        if (!confirm(`依新起始日 ${upd.start_date} 重新排程 — 將重算 ${effects.length} 個未完成任務的 due_date。確定?`)) return;
-        for (const t of effects) {
-          const newDate = newDateMap[t.pipeline + '::' + t.step_key];
+        // 自訂任務依 delta 位移(模板沒有定義,只能順移)
+        const canRecompute = movableTasks.filter(t =>
+          (t.step_group === 'main' && newMainMap[t.pipeline + '::' + t.step_key]) ||
+          (t.step_group === 'side' && newSideMap[t.pipeline + '::' + t.step_key])
+        );
+        const customNeedShift = movableTasks.filter(t => t.step_group === 'custom' && t.due_date && deltaDays !== 0);
+        if (!confirm(`依新起始日 ${upd.start_date} 重新排程\n· 主線/副線 ${canRecompute.length} 個任務用模板重算\n· 自訂任務 ${customNeedShift.length} 個順移 ${deltaDays > 0 ? '+' : ''}${deltaDays} 天\n確定?`)) return;
+        for (const t of canRecompute) {
+          const newDate = t.step_group === 'main'
+            ? newMainMap[t.pipeline + '::' + t.step_key]
+            : newSideMap[t.pipeline + '::' + t.step_key];
           if (newDate && newDate !== t.due_date) {
             await db.from('dev_tasks').update({ due_date: newDate, expected_date: newDate }).eq('id', t.id);
             shiftedCount++;
           }
+        }
+        for (const t of customNeedShift) {
+          const newDate = _shiftDate(t.due_date, deltaDays);
+          await db.from('dev_tasks').update({ due_date: newDate }).eq('id', t.id);
+          shiftedCount++;
         }
       }
       // 模式 ③:不動任務 — 什麼都不做
