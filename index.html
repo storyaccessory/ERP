@@ -11252,7 +11252,7 @@ const PIPELINE_TEMPLATES = {
       { key:'mail_review',       name:'郵件送審寄出&追蹤', stage:'design',   days:5,  assignee_name:'郭子嫣' },
       { key:'system_submit',     name:'系統送審',            stage:'design',   days:1,  assignee_name:'郭子嫣' },
       { key:'design_approved',   name:'設計圖審過',          stage:'design',   days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
-      { key:'modeling',          name:'3D 建模 & 列印寄出送審', stage:'modeling', days:3,  assignee_name:'郭子嫣' },
+      { key:'modeling',          name:'3D 建模 & 列印寄出送審', stage:'modeling', days:5,  assignee_name:'郭子嫣' },
       { key:'model_approved',    name:'蠟模送審追蹤 / 3D 審過', stage:'modeling', days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
       { key:'wax_print',         name:'3D 鑄造蠟列印',       stage:'sampling', days:1,  assignee_name:'郭子嫣' },
       { key:'sampling',          name:'打樣',                stage:'sampling', days:12, assignee_name:'王韋翔' },
@@ -11287,12 +11287,12 @@ const PIPELINE_TEMPLATES = {
       // 階段 3 打樣:合金專屬流程
       { key:'factory_file',      name:'工廠發包檔製作',      stage:'sampling', days:3,  assignee_name:'郭子嫣' },
       { key:'factory_search',    name:'找工廠 / 打樣發包',   stage:'sampling', days:7,  assignee_key:'factory_owner' },
-      { key:'alloy_sampling',    name:'打樣',                stage:'sampling', days:30, assignee_key:'factory_owner' },
+      { key:'alloy_sampling',    name:'打樣',                stage:'sampling', days:20, assignee_key:'factory_owner' },
       { key:'sample_submit',     name:'樣品送審寄出',        stage:'sampling', days:1,  assignee_name:'郭子嫣' },
       { key:'sample_approved',   name:'樣品送審追蹤 / 審過', stage:'sampling', days:7,  assignee_name:'蔡采玲', milestone:true, trigger_side:true, is_review:true, is_stage_gate:true },
       // 階段 4 量產/上市
       { key:'production_deploy', name:'量產發包',            stage:'production', days:5,  assignee_key:'factory_owner', trigger_side:true },
-      { key:'production_track',  name:'量產追蹤',            stage:'production', days:30, assignee_key:'factory_owner' },
+      { key:'production_track',  name:'量產追蹤',            stage:'production', days:20, assignee_key:'factory_owner' },
       { key:'arrival_check',     name:'到貨驗收',            stage:'production', days:7,  assignee_name:'陳秋惠', milestone:true, is_launch:true, is_stage_gate:true },
     ],
     side: [
