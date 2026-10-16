@@ -12612,6 +12612,57 @@ window._devUnpassStage = async function(projectId, stageKey) {
   renderApp();
 };
 
+// 建案 modal:細選步驟勾選面板(避免深層巢狀 template literal)
+function _buildDevSkippedStepsPicker(d) {
+  if (!d.pipelines || !d.pipelines.length) return '';
+  const skippedSteps = d.skippedSteps || [];
+  const skippedStages = d.skippedStages || [];
+  const header = '🔧 進階:細選步驟(預設全跑;取消勾的步驟建案時直接略過)'
+    + (skippedSteps.length ? ' · <span style="color:#e65100">已跳過 ' + skippedSteps.length + ' 步</span>' : '');
+  let body = '';
+  d.pipelines.forEach(pl => {
+    const tpl = PIPELINE_TEMPLATES[pl];
+    if (!tpl) return;
+    const plLabel = (tpl.label||'').replace(/^[🥈🥇🎁]\s*/,'');
+    const byStage = {};
+    (tpl.main||[]).forEach(s => {
+      if (skippedStages.includes(s.stage)) return;
+      (byStage[s.stage] = byStage[s.stage] || []).push(s);
+    });
+    let plBody = '<div style="padding:8px 10px;border-left:3px solid '+tpl.color+';background:'+tpl.color+'0d;border-radius:4px">';
+    plBody += '<div style="font-size:12px;font-weight:700;color:'+tpl.color+';margin-bottom:6px">'+plLabel+'</div>';
+    for (const st of DEV_STAGES) {
+      const steps = byStage[st.key] || [];
+      if (!steps.length) continue;
+      plBody += '<div style="margin-bottom:6px">';
+      plBody += '<div style="font-size:10px;color:var(--muted);margin-bottom:3px">· '+st.label+'</div>';
+      plBody += '<div style="display:flex;gap:4px;flex-wrap:wrap;padding-left:10px">';
+      for (const s of steps) {
+        const skipKey = pl + ':' + s.key;
+        const skipped = skippedSteps.includes(skipKey);
+        const canSkip = !s.is_stage_gate;
+        const dis = canSkip ? '' : 'opacity:.5;cursor:not-allowed;';
+        const title = canSkip ? '' : '這是閘門步驟,不建議單獨略過(用階段跳過整組)';
+        const borderCol = skipped ? '#ddd' : tpl.color+'55';
+        const bg = skipped ? '#fafafa' : '#fff';
+        const txtCol = skipped ? '#999' : 'var(--text)';
+        plBody += '<label title="'+title.replace(/"/g,'&quot;')+'" style="display:flex;align-items:center;gap:4px;padding:3px 8px;border-radius:12px;border:1px solid '+borderCol+';background:'+bg+';'+dis+'font-size:11px;color:'+txtCol+'">';
+        plBody += '<input type="checkbox" '+(skipped?'':'checked')+' '+(canSkip?'':'disabled')
+                + ' onchange="window._devToggleSkippedStep(\''+skipKey+'\')" style="margin:0">';
+        plBody += '<span style="'+(skipped?'text-decoration:line-through':'')+'">'+(s.name||'')+'</span>';
+        plBody += '</label>';
+      }
+      plBody += '</div></div>';
+    }
+    plBody += '</div>';
+    body += plBody;
+  });
+  return '<details style="margin-top:8px;padding:8px 12px;background:#fff;border-radius:6px"'+(skippedSteps.length?' open':'')+'>'
+    + '<summary style="cursor:pointer;font-size:12px;color:var(--muted);font-weight:600">'+header+'</summary>'
+    + '<div style="margin-top:10px;display:flex;flex-direction:column;gap:10px">'+body+'</div>'
+    + '</details>';
+}
+
 // 回傳「標準工作天」小 chip HTML(供任務列顯示)
 function _devStdDaysChip(task, isCancelled) {
   if (isCancelled) return '';
@@ -14532,7 +14583,10 @@ function _renderDevModalBody() {
           }).join('')}
         </div>
         ${(d.skippedStages||[]).length ? `<div style="margin-top:6px;font-size:11px;color:#e65100">⚠ 跳過的階段:${(d.skippedStages).map(k => DEV_STAGES.find(s=>s.key===k)?.label).join('、')}</div>` : ''}
-      </div>` : ''}
+      </div>
+      <!-- 進階:選單步驟(可折疊,用 helper 避免深層巢狀) -->
+      ${_buildDevSkippedStepsPicker(d)}
+      ` : ''}
     </div>
 
     <!-- 品項說明(改在初稿完成後才加) -->
@@ -14715,6 +14769,16 @@ window._devToggleSkippedStage = function(stageKey) {
   const i = d.skippedStages.indexOf(stageKey);
   if (i >= 0) d.skippedStages.splice(i, 1);
   else d.skippedStages.push(stageKey);
+  window._devRerender();
+};
+
+// 單步驟勾選跳過 — key 格式: "pipeline:step_key"
+window._devToggleSkippedStep = function(skipKey) {
+  const d = state.data._devDraft;
+  if (!d.skippedSteps) d.skippedSteps = [];
+  const i = d.skippedSteps.indexOf(skipKey);
+  if (i >= 0) d.skippedSteps.splice(i, 1);
+  else d.skippedSteps.push(skipKey);
   window._devRerender();
 };
 
@@ -14912,6 +14976,7 @@ async function _saveDevProject() {
     const overrides = d.overrides?.[pl] || {};
     // 主線
     const skippedStages = d.skippedStages || [];
+    const skippedSteps = d.skippedSteps || [];
     dates.forEach(step => {
       const ov = overrides[step.key] || {};
       let assignee_name = step.assignee_name;
@@ -14927,7 +14992,7 @@ async function _saveDevProject() {
         if (u) assignee_id = u.id;
       }
       const dueDate = ov.due_date || step.expected_date;
-      const isSkip = skippedStages.includes(step.stage);
+      const isSkip = skippedStages.includes(step.stage) || skippedSteps.includes(pl + ':' + step.key);
       taskInserts.push({
         project_id: projectId,
         variant_id: null,
