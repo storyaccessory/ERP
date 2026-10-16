@@ -11724,14 +11724,36 @@ function _renderDevProjectCard(p) {
   const overdue = tasks.filter(t => t.due_date && t.due_date < today && t.status !== '完成' && t.status !== '取消').length;
   const dueToday = tasks.filter(t => t.due_date === today && t.status !== '完成' && t.status !== '取消').length;
 
+  // 計算當前階段(跨 pipeline 共用)
+  const mainOnly = tasks.filter(t => t.step_group === 'main');
+  const stageInfo = _computeDevProjectStages(p, mainOnly, pipelines);
+  const curStage = stageInfo.find(s => s.isCurrent);
+  const allPassed = stageInfo.every(s => s.gatePassed);
+  const stageBadge = allPassed
+    ? '<span style="background:#e8f5e9;color:#2e7d32;padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">🚀 已上市</span>'
+    : curStage
+      ? `<span style="background:${curStage.color}22;color:${curStage.color};padding:2px 10px;border-radius:10px;font-size:11px;font-weight:700">● ${curStage.label}中 · ${curStage.progress}%</span>`
+      : '';
+  // 階段迷你進度:4 格小圓點顯示大階段通過狀態
+  const stageMiniDots = stageInfo.map(s => {
+    const c = s.gatePassed ? s.color : (s.isCurrent ? s.color + 'aa' : '#e0e0e0');
+    const txt = s.gatePassed ? '#fff' : (s.isCurrent ? '#fff' : '#aaa');
+    const mark = s.gatePassed ? '✓' : (s.isCurrent ? '●' : '○');
+    return `<span title="${s.label} · ${s.progress}%" style="display:inline-flex;align-items:center;justify-content:center;width:18px;height:18px;background:${c};color:${txt};border-radius:50%;font-size:10px;font-weight:700;margin-right:2px">${mark}</span>`;
+  }).join('<span style="color:#ddd;font-size:9px;margin:0 1px">—</span>');
+
   return `<div class="card" style="margin-bottom:12px;cursor:pointer" onclick="openDevProject('${p.id}')">
     <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:12px;flex-wrap:wrap;margin-bottom:10px">
       <div style="flex:1;min-width:220px">
-        <div style="font-size:16px;font-weight:700;color:var(--accent-dark)">${p.name}</div>
-        <div style="font-size:12px;color:var(--muted);margin-top:3px">
-          專案 PM: ${p.pm_name||'—'} · 起始 ${p.start_date||'—'} ·
+        <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+          <div style="font-size:16px;font-weight:700;color:var(--accent-dark)">${p.name}</div>
+          ${stageBadge}
+        </div>
+        <div style="font-size:12px;color:var(--muted);margin-top:4px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <span>${stageMiniDots}</span>
+          <span>專案 PM: ${p.pm_name||'—'} · 起始 ${p.start_date||'—'} ·
           ${p.launch_date?`上市 <b style="color:var(--accent-dark)">${p.launch_date}</b>`:'上市日未設'}
-          ${p.earliest_launch?` · 最快 ${p.earliest_launch}`:''}
+          ${p.earliest_launch?` · 最快 ${p.earliest_launch}`:''}</span>
         </div>
       </div>
       <div style="text-align:right;min-width:80px">
