@@ -12852,10 +12852,18 @@ function _renderDevDetail(id) {
       const totalPct = (plMain.length+plSide.length) ? Math.round((mDone+sDone)/(plMain.length+plSide.length)*100) : 0;
       // 橫向階段卡片 HTML(用 helper 產生,避免 template literal 深層巢狀)
       const _stageCardsHtml = _buildDevStageCards(plMain, t, today);
+      // 略過任務隱藏狀態(每個 pipeline 獨立記)
+      const _showSkipKey = 'dev_showSkip_' + p.id + '_' + pl;
+      const _showSkip = !!state.data[_showSkipKey];
+      const _skippedCount = plMain.filter(x => x.status === '取消').length + plSide.filter(x => x.status === '取消').length;
       return `
         <div class="card" style="margin-bottom:14px;border-left:4px solid ${t.color}">
-          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:10px;flex-wrap:wrap;gap:6px">
             <div style="font-size:15px;font-weight:700;color:${t.color}">${(t.label||'').replace(/^[🥈🥇🎁]\s*/,'')} <span style="font-size:12px;color:var(--muted);font-weight:400">· 主線 ${mDone}/${plMain.length}${plSide.length?` · 副線 ${sDone}/${plSide.length}`:''} · ${totalPct}%</span></div>
+            ${_skippedCount ? `<label style="display:flex;align-items:center;gap:4px;font-size:11px;color:var(--muted);cursor:pointer">
+              <input type="checkbox" ${_showSkip?'checked':''} onchange="state.data['${_showSkipKey}']=this.checked;renderApp()" style="margin:0">
+              顯示已略過 (${_skippedCount})
+            </label>` : ''}
           </div>
           ${_stageCardsHtml}
           <div class="progress-bar" style="height:8px;margin-bottom:10px"><div class="progress-fill" style="width:${totalPct}%;background:${t.color}"></div></div>
@@ -12872,11 +12880,11 @@ function _renderDevDetail(id) {
                 <th style="padding:5px;text-align:center;width:80px">狀態</th>
               </tr>
             </thead>
-            <tbody>${plMain.map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
+            <tbody>${plMain.filter(t => _showSkip || t.status !== '取消').map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
           </table>
 
           <!-- 副線 -->
-          ${plSide.length ? `
+          ${plSide.filter(t => _showSkip || t.status !== '取消').length ? `
           <div style="font-size:11px;color:var(--muted);font-weight:600;margin:12px 0 4px">副線 <span style="font-weight:400">(系列共用,一次做完所有品項)</span></div>
           <table style="width:100%;font-size:12px;border-collapse:collapse">
             <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
@@ -12888,7 +12896,7 @@ function _renderDevDetail(id) {
                 <th style="padding:5px;text-align:center;width:80px">狀態</th>
               </tr>
             </thead>
-            <tbody>${plSide.map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
+            <tbody>${plSide.filter(t => _showSkip || t.status !== '取消').map(task => _renderDevTaskRow(task, p)).join('')}</tbody>
           </table>` : ''}
 
           <!-- 自訂任務 + 新增按鈕 -->
