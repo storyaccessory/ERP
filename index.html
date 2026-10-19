@@ -11703,12 +11703,30 @@ function _renderDevDashboard(activeProjects, allProjects) {
     else byStage.production.push(e);  // 全部通過的視為量產/上市
   });
 
-  // 快速瀏覽列表(緊湊單列,排序:逾期→里程碑近→進度低)
+  // 快速瀏覽列表 — 排序設定(預設:起始日 升冪)
+  const _listSortKey = state.data.devListSortKey || 'start';   // 'start' | 'status' | 'launch'
+  const _listSortDir = state.data.devListSortDir || 'asc';
+  const _healthRankList = h => {
+    if (h.label === '已完成') return 5;
+    if (h.label === '待啟動') return 4;
+    if (h.label === '準時')   return 3;
+    if (h.label === '今日到期') return 2;
+    return 1;
+  };
   const rows = [...enriched].sort((a,b) => {
-    const aOv = a.mainOnly.some(t => t.due_date && t.due_date < today && t.status !== '完成' && t.status !== '取消');
-    const bOv = b.mainOnly.some(t => t.due_date && t.due_date < today && t.status !== '完成' && t.status !== '取消');
-    if (aOv !== bOv) return aOv ? -1 : 1;
-    return (a.p.launch_date || '9999').localeCompare(b.p.launch_date || '9999');
+    const dir = _listSortDir === 'asc' ? 1 : -1;
+    if (_listSortKey === 'start') {
+      return ((a.p.start_date||'9999').localeCompare(b.p.start_date||'9999')) * dir;
+    }
+    if (_listSortKey === 'launch') {
+      return ((a.p.launch_date||'9999').localeCompare(b.p.launch_date||'9999')) * dir;
+    }
+    if (_listSortKey === 'status') {
+      const ha = _computeDevHealth(a.p, a.mainOnly);
+      const hb = _computeDevHealth(b.p, b.mainOnly);
+      return (_healthRankList(ha) - _healthRankList(hb)) * dir;
+    }
+    return 0;
   });
 
   return `
@@ -11809,19 +11827,20 @@ function _renderDevDashboard(activeProjects, allProjects) {
     <!-- 緊湊專案列表 -->
     ${rows.length === 0 ? `<div class="card"><div class="empty"><div class="empty-icon">🛠️</div><p>目前沒有進行中的專案</p></div></div>` : `
     <div class="card" style="padding:0;overflow:hidden">
-      <div style="padding:10px 14px;font-size:12px;font-weight:700;color:var(--muted);background:#f5f5f5;border-bottom:1px solid var(--border)">📋 進行中專案 (${rows.length} 個) <span style="font-weight:400">· 逾期在上,再按上市日排</span></div>
+      <div style="padding:10px 14px;font-size:12px;font-weight:700;color:var(--muted);background:#f5f5f5;border-bottom:1px solid var(--border)">📋 進行中專案 (${rows.length} 個) <span style="font-weight:400">· 點表頭可切換排序</span></div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead style="background:#fafafa;font-size:11px;color:var(--muted)">
           <tr>
             <th style="padding:6px 10px;text-align:left">專案</th>
-            <th style="padding:6px;text-align:center;width:90px">狀態</th>
-            <th style="padding:6px;text-align:center;width:70px">品項</th>
-            <th style="padding:6px;text-align:center;width:80px">PM</th>
-            <th style="padding:6px;text-align:center;width:100px">Pipeline</th>
-            <th style="padding:6px;text-align:center;width:140px">階段</th>
-            <th style="padding:6px;text-align:center;width:120px">進度</th>
-            <th style="padding:6px;text-align:center;width:180px">下個關鍵節點</th>
-            <th style="padding:6px;text-align:center;width:90px">上市日</th>
+            <th style="padding:6px;text-align:center;width:90px;cursor:pointer;user-select:none" onclick="(function(){const st=state.data;if(st.devListSortKey===&quot;start&quot;)st.devListSortDir=st.devListSortDir===&quot;asc&quot;?&quot;desc&quot;:&quot;asc&quot;;else{st.devListSortKey=&quot;start&quot;;st.devListSortDir=&quot;asc&quot;;}renderApp();})()">起始日${_listSortKey==='start'?(_listSortDir==='asc'?' ▲':' ▼'):' ⇅'}</th>
+            <th style="padding:6px;text-align:center;width:90px;cursor:pointer;user-select:none" onclick="(function(){const st=state.data;if(st.devListSortKey===&quot;status&quot;)st.devListSortDir=st.devListSortDir===&quot;asc&quot;?&quot;desc&quot;:&quot;asc&quot;;else{st.devListSortKey=&quot;status&quot;;st.devListSortDir=&quot;asc&quot;;}renderApp();})()">狀態${_listSortKey==='status'?(_listSortDir==='asc'?' ▲':' ▼'):' ⇅'}</th>
+            <th style="padding:6px;text-align:center;width:60px">品項</th>
+            <th style="padding:6px;text-align:center;width:70px">PM</th>
+            <th style="padding:6px;text-align:center;width:90px">Pipeline</th>
+            <th style="padding:6px;text-align:center;width:130px">階段</th>
+            <th style="padding:6px;text-align:center;width:110px">進度</th>
+            <th style="padding:6px;text-align:center;width:170px">下個關鍵節點</th>
+            <th style="padding:6px;text-align:center;width:90px;cursor:pointer;user-select:none" onclick="(function(){const st=state.data;if(st.devListSortKey===&quot;launch&quot;)st.devListSortDir=st.devListSortDir===&quot;asc&quot;?&quot;desc&quot;:&quot;asc&quot;;else{st.devListSortKey=&quot;launch&quot;;st.devListSortDir=&quot;asc&quot;;}renderApp();})()">上市日${_listSortKey==='launch'?(_listSortDir==='asc'?' ▲':' ▼'):' ⇅'}</th>
           </tr>
         </thead>
         <tbody>
@@ -11848,6 +11867,7 @@ function _renderDevDashboard(activeProjects, allProjects) {
             const health = _computeDevHealth(p, mainOnly);
             return `<tr style="cursor:pointer;border-top:1px solid #eee" onclick="openDevProject('${p.id}')">
               <td style="padding:8px 10px"><b style="color:var(--accent-dark)">${p.name}</b></td>
+              <td style="padding:8px;text-align:center;font-size:11px;font-family:monospace;color:var(--text)">${p.start_date||'—'}</td>
               <td style="padding:8px;text-align:center">
                 <span style="display:inline-block;background:${health.bg};color:${health.color};padding:2px 8px;border-radius:10px;font-size:10px;font-weight:700;white-space:nowrap">${health.emoji} ${health.label}</span>
               </td>
@@ -11890,8 +11910,8 @@ function _renderDevDashboard(activeProjects, allProjects) {
 // 總覽內嵌:階段矩陣(複用 _renderDevMatrixStage 核心內容但不含 tabs)
 function _renderDevDashboardMatrixStage(projects) {
   const today = _localToday();
-  // 排序設定(預設:進度階段)
-  const sortKey = state.data.devMatrixSortKey || 'stage';   // 'start' | 'status' | 'launch' | 'stage'
+  // 排序設定(預設:起始日 升冪)
+  const sortKey = state.data.devMatrixSortKey || 'start';   // 'start' | 'status' | 'launch' | 'stage'
   const sortDir = state.data.devMatrixSortDir || 'asc';     // 'asc' | 'desc'
   const _sortIcon = k => sortKey === k ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ' ⇅';
   const _setSort = k => `onclick="(function(){const st=state.data;if(st.devMatrixSortKey===\'${k}\')st.devMatrixSortDir=st.devMatrixSortDir===\'asc\'?\'desc\':\'asc\';else{st.devMatrixSortKey=\'${k}\';st.devMatrixSortDir=\'asc\';}renderApp();})()"`;
