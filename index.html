@@ -11890,44 +11890,75 @@ function _renderDevDashboard(activeProjects, allProjects) {
 // 總覽內嵌:階段矩陣(複用 _renderDevMatrixStage 核心內容但不含 tabs)
 function _renderDevDashboardMatrixStage(projects) {
   const today = _localToday();
+  // 排序設定(預設:進度階段)
+  const sortKey = state.data.devMatrixSortKey || 'stage';   // 'start' | 'status' | 'launch' | 'stage'
+  const sortDir = state.data.devMatrixSortDir || 'asc';     // 'asc' | 'desc'
+  const _sortIcon = k => sortKey === k ? (sortDir === 'asc' ? ' ▲' : ' ▼') : ' ⇅';
+  const _setSort = k => `onclick="(function(){const st=state.data;if(st.devMatrixSortKey===\'${k}\')st.devMatrixSortDir=st.devMatrixSortDir===\'asc\'?\'desc\':\'asc\';else{st.devMatrixSortKey=\'${k}\';st.devMatrixSortDir=\'asc\';}renderApp();})()"`;
+
   const rows = projects.map(p => {
     const mainOnly = (p.dev_tasks||[]).filter(t => t.step_group === 'main');
     const stages = _computeDevProjectStages(p, mainOnly, p.pipelines||[]);
     const curIdx = stages.findIndex(s => s.isCurrent);
     const allDone = stages.every(s => s.gatePassed);
-    return { project: p, stages, curIdx, allDone };
-  }).sort((a,b) => {
-    if (a.allDone !== b.allDone) return a.allDone ? 1 : -1;
-    return (a.curIdx === -1 ? 99 : a.curIdx) - (b.curIdx === -1 ? 99 : b.curIdx);
+    const mainTasksForHealth = (p.dev_tasks||[]).filter(t => t.step_group === 'main');
+    const health = _computeDevHealth(p, mainTasksForHealth);
+    return { project: p, stages, curIdx, allDone, health };
   });
+
+  // 健康度排序順位:延遲 > 今日 > 準時 > 待啟動 > 已完成
+  const _healthRank = h => {
+    if (h.label === '已完成') return 5;
+    if (h.label === '待啟動') return 4;
+    if (h.label === '準時')   return 3;
+    if (h.label === '今日到期') return 2;
+    return 1; // 延遲
+  };
+
+  rows.sort((a,b) => {
+    const dir = sortDir === 'asc' ? 1 : -1;
+    if (sortKey === 'start') {
+      return ((a.project.start_date||'9999').localeCompare(b.project.start_date||'9999')) * dir;
+    }
+    if (sortKey === 'launch') {
+      return ((a.project.launch_date||'9999').localeCompare(b.project.launch_date||'9999')) * dir;
+    }
+    if (sortKey === 'status') {
+      return (_healthRank(a.health) - _healthRank(b.health)) * dir;
+    }
+    // 預設:階段進度(已完成在最下)
+    if (a.allDone !== b.allDone) return a.allDone ? 1 : -1;
+    return ((a.curIdx === -1 ? 99 : a.curIdx) - (b.curIdx === -1 ? 99 : b.curIdx)) * dir;
+  });
+
   if (!rows.length) return `<div class="card"><div class="empty"><div class="empty-icon">📍</div><p>沒有進行中的專案</p></div></div>`;
   return `<div class="card" style="padding:0;overflow:hidden">
     <div style="overflow-x:auto">
-      <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:800px">
+      <table style="width:100%;border-collapse:collapse;font-size:13px;min-width:900px">
         <thead style="background:#f5f5f5">
           <tr>
-            <th style="padding:10px;text-align:left;position:sticky;left:0;background:#f5f5f5;z-index:1;min-width:180px;border-right:1px solid var(--border)">專案</th>
-            <th style="padding:10px;text-align:center;min-width:80px">狀態</th>
-            <th style="padding:10px;text-align:center;min-width:70px">品項</th>
+            <th style="padding:10px;text-align:left;position:sticky;left:0;background:#f5f5f5;z-index:1;min-width:160px;border-right:1px solid var(--border)">專案</th>
+            <th style="padding:10px;text-align:center;min-width:95px;cursor:pointer;user-select:none" ${_setSort('start')} title="點擊排序">起始日${_sortIcon('start')}</th>
+            <th style="padding:10px;text-align:center;min-width:80px;cursor:pointer;user-select:none" ${_setSort('status')} title="點擊排序">狀態${_sortIcon('status')}</th>
+            <th style="padding:10px;text-align:center;min-width:60px">品項</th>
             <th style="padding:10px;text-align:center;min-width:90px">Pipeline</th>
             <th style="padding:10px;text-align:center;min-width:80px">PM</th>
-            ${DEV_STAGES.map(st => `<th style="padding:10px;text-align:center;min-width:120px;color:${st.color};border-right:1px solid #eee">${st.label}</th>`).join('')}
-            <th style="padding:10px;text-align:center;min-width:70px">上市日</th>
+            ${DEV_STAGES.map(st => `<th style="padding:10px;text-align:center;min-width:110px;color:${st.color};border-right:1px solid #eee">${st.label}</th>`).join('')}
+            <th style="padding:10px;text-align:center;min-width:95px;cursor:pointer;user-select:none" ${_setSort('launch')} title="點擊排序">上市日${_sortIcon('launch')}</th>
           </tr>
         </thead>
         <tbody>
-          ${rows.map(({project: p, stages, allDone}) => {
+          ${rows.map(({project: p, stages, allDone, health}) => {
             const plLabels = (p.pipelines||[]).map(pl => (PIPELINE_TEMPLATES[pl]?.label||pl).replace(/^[🥈🥇🎁]\s*/,'')).join(' · ');
             const notYet = p.start_date && p.start_date > today;
             const vActive = (p.dev_variants||[]).filter(v => !v.cancelled_at).length;
             const vCancelled = (p.dev_variants||[]).filter(v => v.cancelled_at).length;
-            const mainTasksForHealth = (p.dev_tasks||[]).filter(t => t.step_group === 'main');
-            const health = _computeDevHealth(p, mainTasksForHealth);
             return `<tr style="cursor:pointer;border-top:1px solid #eee;${allDone?'opacity:.6':''}" onclick="openDevProject('${p.id}')">
               <td style="padding:10px;position:sticky;left:0;background:#fff;border-right:1px solid var(--border)">
                 <div style="font-weight:700;color:var(--accent-dark)">${p.name}</div>
-                <div style="font-size:11px;color:var(--muted);margin-top:2px">起始 ${p.start_date||'—'}${allDone?' · 🚀 已上市':''}${notYet?' · ⏸ 待啟動':''}</div>
+                ${allDone?'<div style="font-size:11px;color:var(--muted);margin-top:2px">🚀 已上市</div>':(notYet?'<div style="font-size:11px;color:var(--muted);margin-top:2px">⏸ 待啟動</div>':'')}
               </td>
+              <td style="padding:10px;text-align:center;font-size:12px;font-family:monospace;color:var(--text)">${p.start_date||'—'}</td>
               <td style="padding:10px;text-align:center">
                 <span style="display:inline-block;background:${health.bg};color:${health.color};padding:3px 10px;border-radius:12px;font-size:11px;font-weight:700;white-space:nowrap">${health.emoji} ${health.label}</span>
                 ${health.overdueCount?`<div style="font-size:10px;color:#c62828;margin-top:2px">${health.overdueCount} 筆逾期</div>`:''}
@@ -13027,14 +13058,21 @@ function _renderDevTaskRow(task, project) {
         return `<span style="background:#e3f2fd;color:#1565c0;padding:1px 6px;border-radius:8px;font-size:10px;font-weight:700;margin-left:6px" title="共用送審:勾完成會同時更新所有 pipeline">🤝 共用</span>`;
       })()}
       ${_devStdDaysChip(task, isCancelled)}
-      ${task.completed_at ? `
-        <span style="font-size:10px;color:#2e7d32;margin-left:6px">
-          ✓ <input type="date" value="${task.completed_at.slice(0,10)}"
+      ${task.completed_at ? (() => {
+        const _cd = task.completed_at.slice(0,10);
+        let _diffChip = '';
+        if (task.due_date && _cd) {
+          const _d = _daysDiff(task.due_date, _cd);
+          if (_d > 0) _diffChip = `<span style="font-size:10px;color:#c62828;background:#ffebee;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="比預定完成日(${task.due_date})晚">⚠ 延 ${_d} 天</span>`;
+          else if (_d < 0) _diffChip = `<span style="font-size:10px;color:#1565c0;background:#e3f2fd;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="比預定完成日(${task.due_date})早">⚡ 提早 ${-_d} 天</span>`;
+        }
+        return `<span style="font-size:10px;color:#2e7d32;margin-left:6px">
+          ✓ <input type="date" value="${_cd}"
             onchange="window._devEditCompletedDate('${task.id}',this.value)"
             style="font-size:10px;padding:1px 3px;border:1px solid #a5d6a7;border-radius:3px;background:#f1f8e9;color:#2e7d32;font-family:monospace;width:110px"
             title="完成日期(PM 可改,用於補登歷史)">
-        </span>
-      ` : ''}
+        </span>${_diffChip}`;
+      })() : ''}
       ${task.notes && task.notes.includes('等 PM') ? (() => {
         // PM 處理按鈕:只有該專案 PM 或老闆看得到
         const _me = state.user?.id;
