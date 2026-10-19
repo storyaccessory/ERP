@@ -11241,6 +11241,17 @@ const DEV_STAGES = [
   { key: 'sampling',   label: '打樣',        gate: '樣品審過',       color: '#ec407a' },
   { key: 'production', label: '量產 / 上市', gate: '上市',           color: '#66bb6a' },
 ];
+// 從自訂任務抓所屬階段(存在 step_key 或 notes [stage:xxx])
+function _getCustomTaskStage(task) {
+  if (!task) return null;
+  // step_key: custom_<stage>_<ts>
+  const km = (task.step_key||'').match(/^custom_([a-z]+)_/);
+  if (km && DEV_STAGES.find(s => s.key === km[1])) return km[1];
+  // notes: [stage:xxx]
+  const nm = (task.notes||'').match(/\[stage:([a-z]+)\]/);
+  if (nm && DEV_STAGES.find(s => s.key === nm[1])) return nm[1];
+  return null;
+}
 
 const PIPELINE_TEMPLATES = {
   silver: {
@@ -12397,12 +12408,16 @@ window.closeDevProject = function() {
 // ─── 大階段:算每個階段的進度 + 共用閘門狀態 ───────────────
 // 回傳: [{ stageKey, label, color, gate, pipelines:[...], gatePassed, allDone, progress, taskCount, doneCount }]
 function _computeDevProjectStages(project, mainTasks, pipelines) {
+  // 自訂任務一起算進階段(透過 _getCustomTaskStage)
+  const customTasks = (project.dev_tasks||[]).filter(t => t.step_group === 'custom');
   const stages = DEV_STAGES.map(st => {
-    const stageTasks = mainTasks.filter(t => {
+    const stageMain = mainTasks.filter(t => {
       const tpl = PIPELINE_TEMPLATES[t.pipeline];
       const step = (tpl?.main||[]).find(s => s.key === t.step_key);
       return step?.stage === st.key;
     });
+    const stageCustom = customTasks.filter(t => _getCustomTaskStage(t) === st.key);
+    const stageTasks = [...stageMain, ...stageCustom];
     const cancelled = stageTasks.filter(t => t.status === '取消');
     const nonCancel = stageTasks.filter(t => t.status !== '取消');
     // 階段視為「跳過」:有任務但全被略過(手動 → 階段不需要),或根本沒任務(pipeline 沒配置該階段)
@@ -12988,7 +13003,12 @@ function _renderDevTaskRow(task, project) {
       <input type="checkbox" ${isDone?'checked':''} onchange="window._devToggleTaskDone('${task.id}',this.checked)" style="cursor:pointer;width:16px;height:16px" ${isCancelled?'disabled':''}>
     </td>
     <td style="padding:5px">
-      ${task.step_group === 'custom' ? (task.step_name||'(未命名)') : task.step_name}
+      ${task.step_group === 'custom' ? (() => {
+        const _cs = _getCustomTaskStage(task);
+        const _st = _cs ? DEV_STAGES.find(s=>s.key===_cs) : null;
+        const _badge = _st ? `<span style="background:${_st.color}22;color:${_st.color};padding:1px 6px;border-radius:8px;font-size:10px;font-weight:600;margin-right:6px">${_st.label}</span>` : '';
+        return _badge + (task.step_name||'(未命名)');
+      })() : task.step_name}
       ${isMilestone?'<span style="color:#c62828;margin-left:4px">🎯</span>':''}
       ${(() => {
         if (!project?.shared_review) return '';
@@ -13775,10 +13795,18 @@ window._devOpenCustomEditor = function(projectId, pipeline) {
   const activeUsers = (state.data.users||[]).filter(u => u.is_active !== false);
   const plLabel = (PIPELINE_TEMPLATES[pipeline]?.label||pipeline);
 
-  const rowsHtml = tasks.map(t => `
+  const rowsHtml = tasks.map(t => {
+    const curStage = _getCustomTaskStage(t) || '';
+    return `
     <tr data-task-id="${t.id}" style="border-bottom:1px solid #eee">
       <td style="padding:6px 4px;text-align:center">
         <button onclick="this.closest('tr').dataset.deleted=this.closest('tr').dataset.deleted==='1'?'0':'1';this.closest('tr').style.opacity=this.closest('tr').dataset.deleted==='1'?'.3':'1';this.closest('tr').style.textDecoration=this.closest('tr').dataset.deleted==='1'?'line-through':'none';this.textContent=this.closest('tr').dataset.deleted==='1'?'↩':'✕'" style="background:none;border:none;color:#c62828;cursor:pointer;font-size:16px">✕</button>
+      </td>
+      <td style="padding:6px 4px">
+        <select class="cst-stage" style="padding:4px;font-size:11px;border:1px solid var(--border);border-radius:3px;width:100%">
+          <option value="">(未分類)</option>
+          ${DEV_STAGES.map(s => `<option value="${s.key}" ${curStage===s.key?'selected':''}>${s.label}</option>`).join('')}
+        </select>
       </td>
       <td style="padding:6px 4px">
         <input class="form-control cst-name" value="${(t.step_name||'').replace(/"/g,'&quot;')}" style="font-size:12px;padding:4px 6px;width:100%" placeholder="任務名稱">
@@ -13793,16 +13821,17 @@ window._devOpenCustomEditor = function(projectId, pipeline) {
         <input type="date" class="cst-date" value="${t.due_date||''}" style="font-size:12px;padding:3px;border:1px solid var(--border);border-radius:3px">
       </td>
     </tr>
-  `).join('');
+  `;}).join('');
 
   const html = `
     <div style="padding:4px 2px 10px 2px;font-size:12px;color:var(--muted)">${plLabel} · 共 ${tasks.length} 筆自訂任務</div>
     <table style="width:100%;border-collapse:collapse;font-size:12px">
-      <thead style="background:#fff8e1;color:var(--muted)">
+      <thead style="background:#fafafa;color:var(--muted)">
         <tr>
           <th style="padding:6px 4px;width:32px"></th>
+          <th style="padding:6px 4px;text-align:left;width:110px">所屬階段</th>
           <th style="padding:6px 4px;text-align:left">任務名稱</th>
-          <th style="padding:6px 4px;text-align:left;width:160px">負責人</th>
+          <th style="padding:6px 4px;text-align:left;width:140px">負責人</th>
           <th style="padding:6px 4px;text-align:center;width:140px">預定完成</th>
         </tr>
       </thead>
@@ -13823,8 +13852,13 @@ window._devOpenCustomEditor = function(projectId, pipeline) {
           const name = tr.querySelector('.cst-name').value.trim() || '(未命名)';
           const assignee = tr.querySelector('.cst-assignee').value || null;
           const date = tr.querySelector('.cst-date').value || null;
+          const stage = tr.querySelector('.cst-stage').value || '';
           const assigneeName = assignee ? (activeUsers.find(u=>u.id===assignee)?.name || null) : null;
-          updates.push({ id, step_name: name, assignee_id: assignee, assignee_name: assigneeName, due_date: date });
+          // 更新 notes 裡的 [stage:xxx] 標記(保留其他文字)
+          const origTask = tasks.find(x => x.id === id);
+          let notes = (origTask?.notes||'').replace(/\[stage:[a-z]+\]/g, '').trim();
+          if (stage) notes = `[stage:${stage}]${notes?' '+notes:''}`;
+          updates.push({ id, step_name: name, assignee_id: assignee, assignee_name: assigneeName, due_date: date, notes: notes || null });
         });
         try {
           // 刪除
@@ -14415,6 +14449,17 @@ window._devEditProject = async function(projectId) {
       <div class="form-group"><label>上市日</label><input type="date" class="form-control" id="ep-launch" value="${p.launch_date||''}"></div>
     </div>
     <div class="form-group"><label>備註</label><textarea class="form-control" rows="2" id="ep-notes">${p.notes||''}</textarea></div>
+    <div class="form-group">
+      <label>📅 行事曆分類</label>
+      ${(() => {
+        const typeMap = (typeof getCalEventTypes === 'function') ? getCalEventTypes() : {};
+        const cur = p.calendar_event_type || (typeMap['new'] ? 'new' : Object.keys(typeMap)[0]||'');
+        return `<select class="form-control" id="ep-caltype" style="max-width:260px">
+          ${Object.entries(typeMap).map(([k,v]) => `<option value="${k}" ${cur===k?'selected':''}>${v.label}</option>`).join('')}
+        </select>
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">改這個會重建行事曆事件</div>`;
+      })()}
+    </div>
     <div class="form-group" style="padding:10px 12px;background:#e3f2fd;border-radius:6px;border-left:3px solid #1565c0">
       <div style="font-weight:600;color:#1565c0;margin-bottom:6px">📅 改起始日時,未完成任務要怎麼調整?</div>
       <div style="display:flex;flex-direction:column;gap:6px">
@@ -14445,9 +14490,11 @@ window._devEditProject = async function(projectId) {
         start_date: document.getElementById('ep-start').value || null,
         launch_date: document.getElementById('ep-launch').value || null,
         notes: document.getElementById('ep-notes').value.trim() || null,
+        calendar_event_type: document.getElementById('ep-caltype')?.value || null,
       };
       const startChanged = upd.start_date !== p.start_date;
       const launchChanged = upd.launch_date !== p.launch_date;
+      const caltypeChanged = upd.calendar_event_type !== (p.calendar_event_type||null);
       const dateMode = document.querySelector('input[name="ep-date-mode"]:checked')?.value || 'shift';
 
       // 計算起始日位移天數
@@ -14524,7 +14571,7 @@ window._devEditProject = async function(projectId) {
       await db.from('dev_projects').update(upd).eq('id', projectId);
 
       // 日期有變 → 自動重建行事曆事件
-      if (startChanged || launchChanged || shiftedCount > 0) {
+      if (startChanged || launchChanged || shiftedCount > 0 || caltypeChanged) {
         const oldEventIds = [...new Set((p2.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
         if (oldEventIds.length) {
           await db.from('calendar_events').delete().in('id', oldEventIds);
@@ -14955,6 +15002,18 @@ function _renderDevModalBody() {
         oninput="state.data._devDraft.notes=this.value">${d.notes||''}</textarea>
     </div>
 
+    <div class="form-group">
+      <label>📅 行事曆分類 <span style="font-weight:400;color:var(--muted);font-size:11px">(專案事件要掛哪個分類)</span></label>
+      ${(() => {
+        const typeMap = (typeof getCalEventTypes === 'function') ? getCalEventTypes() : {};
+        const cur = d.calendar_event_type || (typeMap['new'] ? 'new' : (typeMap['dev'] ? 'dev' : Object.keys(typeMap)[0]||''));
+        if (!d.calendar_event_type) state.data._devDraft.calendar_event_type = cur;
+        return `<select class="form-control" oninput="state.data._devDraft.calendar_event_type=this.value" style="max-width:260px">
+          ${Object.entries(typeMap).map(([k,v]) => `<option value="${k}" ${cur===k?'selected':''}>${v.label}</option>`).join('')}
+        </select>`;
+      })()}
+    </div>
+
     <div style="font-size:11px;color:var(--muted);padding:8px 12px;background:#f5f5f5;border-radius:6px;line-height:1.6">
       按建立後系統會:1) 建立專案 · 2) 每條 pipeline 生成主線+副線任務 · 3) 依日期聚合建立行事曆事件 · 4) 指派給各負責人
     </div>
@@ -15175,6 +15234,7 @@ async function _saveDevProject() {
     notes: d.notes?.trim() || null,
     status: '進行中',
     shared_review: !!d.shared_review,
+    calendar_event_type: d.calendar_event_type || null,
     created_by: state.user?.id,
   }).select('id').single();
   if (pErr) { showToast('建專案失敗:'+pErr.message,'error'); return; }
@@ -15349,11 +15409,19 @@ async function _buildDevCalendarEvents(project, tasks, projectName) {
     launchDate ? `${launchDate.slice(5,7)}/${launchDate.slice(8,10)} 上市 🎉` : null,
   ].filter(Boolean).join('<br>');
 
-  // 選 event_type:優先用 id='new' (使用者的自訂分類),再找 label='新品',否則 fallback 到 'dev'
+  // 選 event_type:
+  // 1) 專案自己有設 calendar_event_type → 用它
+  // 2) 否則優先 'new'(新品),再找 label='新品' / '新品上市'
+  // 3) 最後 fallback 到 'dev' / 'project'
   const typeMap = getCalEventTypes();
   let evType = 'dev';
-  if (typeMap['new']) evType = 'new';
-  else {
+  if (project.calendar_event_type && typeMap[project.calendar_event_type]) {
+    evType = project.calendar_event_type;
+  } else if (typeMap['new']) {
+    evType = 'new';
+  } else if (typeMap['project']) {
+    evType = 'project';
+  } else {
     for (const [k, v] of Object.entries(typeMap)) {
       if (v.label === '新品' || v.label === '新品上市') { evType = k; break; }
     }
