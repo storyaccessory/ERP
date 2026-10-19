@@ -14442,6 +14442,7 @@ window._devAddSamplingGroup = function(projectId, pipeline, template) {
 window._devEditProject = async function(projectId) {
   const p = (state.data.dev||[]).find(x => x.id === projectId);
   if (!p) return;
+  if (typeof loadCalEventTypes === 'function') { try { await loadCalEventTypes(); } catch(e){} }
   showModal('✏️ 編輯專案', `
     <div class="form-group"><label>系列名</label><input class="form-control" id="ep-name" value="${p.name||''}"></div>
     <div class="form-row form-row-2">
@@ -14659,10 +14660,11 @@ window._devDeleteProject = async function(id) {
 // 新增開發專案 · 3 步 modal
 // ═══════════════════════════════════════════════
 window.modalNewDevProject = async function() {
-  // 每次都強制重載 users(避免舊快取欄位不齊)
+  // 每次都強制重載 users + 行事曆分類(確保下拉拿到最新自訂類型)
   await Promise.all([
     db.from('profiles').select('id,name,role,is_active,email').order('name').then(({data})=>{state.data.users=data||[]}),
     (state.data.series||[]).length ? Promise.resolve() : loadIPTree(),
+    (typeof loadCalEventTypes === 'function') ? loadCalEventTypes() : Promise.resolve(),
   ]);
 
   // 初始化 draft
