@@ -11261,8 +11261,8 @@ const PIPELINE_TEMPLATES = {
       { key:'design_draft',      name:'設計圖',              stage:'design',   days:10, assignee_name:'劉怡汝' },
       { key:'design_lock',       name:'設計定稿&mail送審',   stage:'design',   days:2,  assignee_name:'郭子嫣', issue_design_number:true },
       { key:'mail_review',       name:'郵件送審寄出&追蹤', stage:'design',   days:5,  assignee_name:'郭子嫣' },
-      { key:'system_submit',     name:'系統送審',            stage:'design',   days:1,  assignee_name:'郭子嫣' },
-      { key:'design_approved',   name:'設計圖送審追蹤 / 審過', stage:'design',   days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
+      { key:'system_submit',     name:'系統圖審',            stage:'design',   days:1,  assignee_name:'郭子嫣' },
+      { key:'design_approved',   name:'系統圖審追蹤 / 審過', stage:'design',   days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
       { key:'modeling',          name:'建模 & 列印寄出送審',   stage:'modeling', days:5,  assignee_name:'郭子嫣' },
       { key:'model_approved',    name:'建模送審追蹤 / 審過', stage:'modeling', days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
       { key:'wax_print',         name:'3D 鑄造蠟列印',       stage:'sampling', days:1,  assignee_name:'郭子嫣' },
@@ -11291,8 +11291,8 @@ const PIPELINE_TEMPLATES = {
       { key:'design_draft',      name:'設計圖',              stage:'design',   days:10, assignee_name:'劉怡汝' },
       { key:'design_lock',       name:'設計定稿&mail送審',   stage:'design',   days:2,  assignee_name:'郭子嫣', issue_design_number:true },
       { key:'mail_review',       name:'郵件送審寄出&追蹤',   stage:'design',   days:5,  assignee_name:'郭子嫣' },
-      { key:'system_submit',     name:'系統送審',            stage:'design',   days:1,  assignee_name:'郭子嫣' },
-      { key:'design_approved',   name:'設計圖送審追蹤 / 審過', stage:'design',   days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
+      { key:'system_submit',     name:'系統圖審',            stage:'design',   days:1,  assignee_name:'郭子嫣' },
+      { key:'design_approved',   name:'系統圖審追蹤 / 審過', stage:'design',   days:5,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
       { key:'modeling',          name:'建模 & 列印寄出送審',   stage:'modeling', days:3,  assignee_name:'郭子嫣' },
       { key:'model_approved',    name:'建模送審追蹤 / 審過', stage:'modeling', days:7,  assignee_name:'蔡采玲', milestone:true, is_review:true, is_stage_gate:true },
       // 階段 3 打樣:合金專屬流程
@@ -13080,18 +13080,35 @@ function _renderDevTaskRow(task, project) {
       ${_devStdDaysChip(task, isCancelled)}
       ${task.completed_at ? (() => {
         const _cd = task.completed_at.slice(0,10);
+        // 用 baseline(expected_date)作為歸責基準;due_date 只是當前承諾
+        const _base = task.expected_date;
+        const _due = task.due_date;
         let _diffChip = '';
-        if (task.due_date && _cd) {
-          const _d = _daysDiff(task.due_date, _cd);
-          if (_d > 0) _diffChip = `<span style="font-size:10px;color:#c62828;background:#ffebee;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="比預定完成日(${task.due_date})晚">⚠ 延 ${_d} 天</span>`;
-          else if (_d < 0) _diffChip = `<span style="font-size:10px;color:#1565c0;background:#e3f2fd;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="比預定完成日(${task.due_date})早">⚡ 提早 ${-_d} 天</span>`;
+        if (_cd) {
+          const _late = _base ? _daysDiff(_base, _cd) : null;   // vs baseline(歸責)
+          const _pushed = (_base && _due) ? _daysDiff(_base, _due) : 0;   // 上游推了幾天
+          const _vsDue = _due ? _daysDiff(_due, _cd) : null;    // vs 當前承諾
+          if (_late !== null && _late > 0) {
+            if (_pushed > 0 && _vsDue !== null && _vsDue <= 0) {
+              // 被推但在承諾內交 → 黃色,非 KPI
+              _diffChip = `<span style="font-size:10px;color:#f57c00;background:#fff8e1;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="原定 ${_base},被上游推至 ${_due},準時交">🔁 被推 ${_late} 天</span>`;
+            } else {
+              // 真的本人晚
+              _diffChip = `<span style="font-size:10px;color:#c62828;background:#ffebee;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="原定 ${_base}">⚠ 延 ${_late} 天</span>`;
+            }
+          } else if (_late !== null && _late < 0) {
+            _diffChip = `<span style="font-size:10px;color:#1565c0;background:#e3f2fd;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="原定 ${_base}">⚡ 提早 ${-_late} 天</span>`;
+          }
         }
+        // 若有延遲原因附註,顯示小字
+        const _reasonMatch = (task.notes||'').match(/\[delay_reason:(.*?)\]/);
+        const _reasonChip = _reasonMatch ? `<span style="font-size:10px;color:var(--muted);margin-left:4px" title="延遲原因">📝 ${_reasonMatch[1]}</span>` : '';
         return `<span style="font-size:10px;color:#2e7d32;margin-left:6px">
           ✓ <input type="date" value="${_cd}"
             onchange="window._devEditCompletedDate('${task.id}',this.value)"
             style="font-size:10px;padding:1px 3px;border:1px solid #a5d6a7;border-radius:3px;background:#f1f8e9;color:#2e7d32;font-family:monospace;width:110px"
             title="完成日期(PM 可改,用於補登歷史)">
-        </span>${_diffChip}`;
+        </span>${_diffChip}${_reasonChip}`;
       })() : ''}
       ${task.notes && task.notes.includes('等 PM') ? (() => {
         // PM 處理按鈕:只有該專案 PM 或老闆看得到
@@ -13113,20 +13130,24 @@ function _renderDevTaskRow(task, project) {
     </td>
     <td style="padding:5px;text-align:center">
       ${(() => {
-        // 判斷延期:due_date 比原本 expected_date 晚 → 顯示 chip
-        const orig = task.expected_date;
+        // 新版延遲標示(雙日期系統):
+        //   expected_date = baseline(專案成立時凍結的交期)
+        //   due_date      = 當前承諾交期(可被 PM 動)
+        //   pushed = due_date - baseline → 「被推 N 天」(上游造成,不計 KPI)
+        //   late   = completed_at - baseline → 「延 N 天(自己)」(本人造成,算 KPI)
+        const base = task.expected_date;
         const cur = task.due_date;
         let delayBadge = '';
-        if (orig && cur && !isCancelled && !isDone) {
-          const delta = _daysDiff(orig, cur);
-          if (delta > 0) {
-            delayBadge = `<div style="font-size:9px;color:#c62828;font-weight:700;margin-top:2px" title="原定 ${orig}">⚠ 已延 ${delta} 天</div>`;
-          } else if (delta < 0) {
-            delayBadge = `<div style="font-size:9px;color:#2e7d32;font-weight:700;margin-top:2px" title="原定 ${orig}">✨ 提早 ${-delta} 天</div>`;
+        if (base && cur && !isCancelled && !isDone) {
+          const pushed = _daysDiff(base, cur);
+          if (pushed > 0) {
+            delayBadge = `<div style="font-size:9px;color:#f57c00;background:#fff8e1;padding:1px 5px;border-radius:4px;font-weight:700;margin-top:2px;display:inline-block" title="原定 ${base} · 被上游推遲">🔁 被推 ${pushed} 天</div>`;
+          } else if (pushed < 0) {
+            delayBadge = `<div style="font-size:9px;color:#2e7d32;background:#e8f5e9;padding:1px 5px;border-radius:4px;font-weight:700;margin-top:2px;display:inline-block" title="比原定 ${base} 提早">✨ 提早 ${-pushed} 天</div>`;
           }
         }
         const borderCol = delayBadge && !isDone && !isCancelled
-          ? (orig < cur ? '#c62828' : '#2e7d32')
+          ? (base < cur ? '#f57c00' : '#2e7d32')
           : 'var(--border)';
         return `<input type="date" value="${cur||''}" onchange="window._devSetTaskDate('${task.id}',this.value)"
           style="width:100%;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1.5px solid ${borderCol};border-radius:3px" ${isCancelled?'disabled':''}>${delayBadge}`;
@@ -13715,6 +13736,20 @@ window._devToggleTaskDone = async function(taskId, checked) {
 
     // 標為完成
     const upd = { status: '完成', completed_at: new Date().toISOString(), completed_by: state.user?.id||null };
+    // 延遲 >3 天(vs baseline/expected_date)→ 請他寫一句原因,之後查 KPI 用
+    if (task.expected_date) {
+      const _lateDays = _daysDiff(task.expected_date, today);
+      const _pushedDays = task.due_date ? _daysDiff(task.expected_date, task.due_date) : 0;
+      // 真的本人延遲(late > 3 且 late > pushed → 不是上游的鍋)
+      if (_lateDays > 3 && _lateDays > _pushedDays) {
+        const _r = prompt(`這個任務比原定 (${task.expected_date}) 晚了 ${_lateDays} 天完成\n請簡單寫個原因(選填,日後 PM 查 KPI 用):`, '');
+        if (_r && _r.trim()) {
+          const _tag = `[delay_reason:${_r.trim().replace(/[\[\]]/g,'').slice(0,60)}]`;
+          const _oldNotes = (task.notes||'').replace(/\[delay_reason:.*?\]/g, '').trim();
+          upd.notes = _tag + (_oldNotes ? ' '+_oldNotes : '');
+        }
+      }
+    }
     const { error } = await db.from('dev_tasks').update(upd).eq('id', taskId);
     if (error) { showToast('更新失敗:'+error.message,'error'); return; }
     Object.assign(task, upd);
@@ -14229,6 +14264,20 @@ window._devHandleTimingChange = function(projectId, taskId, deltaDays) {
     <div style="font-size:13px;line-height:1.7;margin-bottom:12px">
       <div><b>負責人:</b> ${task.assignee_name||'—'} · <b>原定:</b> ${task.due_date} · <b>實際:</b> ${_localToday()}</div>
     </div>
+    ${isLate ? `
+    <div style="padding:10px 12px;background:#fff8e1;border-radius:6px;margin-bottom:10px;border-left:3px solid #e65100">
+      <div style="font-size:12px;font-weight:700;color:#e65100;margin-bottom:6px">⚖ 這次延遲算誰造成?(影響後續任務要不要被歸責)</div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="dt-blame" value="self" checked style="margin-top:2px">
+          <div><b>${task.assignee_name||'負責人'} 本人造成</b> <span style="color:var(--muted)">(算 KPI · 後續任務的 baseline 不動)</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="dt-blame" value="upstream" style="margin-top:2px">
+          <div><b>上游 / 外部造成</b>(廠商、料件、PM 調整)<span style="color:var(--muted)"> · 後續任務一併「赦免」,baseline 跟著推</span></div>
+        </label>
+      </div>
+    </div>` : ''}
     ${laterTasks.length ? `
     <div style="padding:8px 10px;background:#f5f5f5;border-radius:6px;margin-bottom:10px;font-size:12px">
       勾選要連動 ${shiftArrow} ${shiftWord} ${Math.abs(deltaDays)} 天的任務(預設全選,可只勾前幾個)
@@ -14270,13 +14319,19 @@ window._devHandleTimingChange = function(projectId, taskId, deltaDays) {
       if (!toShift.length && laterTasks.length) {
         if (!confirm('沒勾任何任務,要只標記完成不順延嗎?')) return;
       }
+      // 讀「延遲責任」(只有延遲才會問,提早不問)
+      const blame = isLate ? (document.querySelector('input[name="dt-blame"]:checked')?.value || 'self') : 'self';
       for (const t of toShift) {
         const newDate = _shiftDate(t.due_date, deltaDays);
-        await db.from('dev_tasks').update({ due_date: newDate }).eq('id', t.id);
+        // 上游造成 → baseline(expected_date)跟著推,等於「赦免」下游
+        // 本人造成 → 只動 due_date,下游 baseline 維持(他們之後要加油)
+        const upd = { due_date: newDate };
+        if (blame === 'upstream') upd.expected_date = newDate;
+        await db.from('dev_tasks').update(upd).eq('id', t.id);
         await _devSyncCalendarSubtaskDate(t, newDate);
       }
       await db.from('dev_tasks').update({ notes: null }).eq('id', taskId);
-      showToast(toShift.length ? `已${shiftWord} ${toShift.length} 個任務` : '已記錄,未順延後續');
+      showToast(toShift.length ? `已${shiftWord} ${toShift.length} 個任務 (${blame==='upstream'?'一併赦免 baseline':'baseline 不動'})` : '已記錄,未順延後續');
       closeModal();
       await loadDev();
       try { await loadCalendarEvents?.(); } catch(e) {}
