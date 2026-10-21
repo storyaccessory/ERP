@@ -13961,7 +13961,21 @@ window._devOpenCustomEditor = function(projectId, pipeline) {
           const origTask = tasks.find(x => x.id === id);
           let notes = (origTask?.notes||'').replace(/\[stage:[a-z]+\]/g, '').trim();
           if (stage) notes = `[stage:${stage}]${notes?' '+notes:''}`;
-          updates.push({ id, step_name: name, assignee_id: assignee, assignee_name: assigneeName, due_date: date, notes: notes || null });
+          // 同步更新 step_key(_getCustomTaskStage 優先讀 step_key)
+          const payload = { step_name: name, assignee_id: assignee, assignee_name: assigneeName, due_date: date, notes: notes || null };
+          if (origTask) {
+            const curKeyStage = (origTask.step_key||'').match(/^custom_([a-z]+)_/)?.[1];
+            if (stage && curKeyStage !== stage) {
+              // 重寫 step_key:custom_<stage>_<原本的 ts 或新產一個>
+              const tsPart = (origTask.step_key||'').replace(/^custom_[a-z]+_/, '') || Date.now().toString();
+              payload.step_key = `custom_${stage}_${tsPart}`;
+            } else if (!stage && curKeyStage) {
+              // 清空階段 → step_key 改成 custom_none_<ts>
+              const tsPart = (origTask.step_key||'').replace(/^custom_[a-z]+_/, '') || Date.now().toString();
+              payload.step_key = `custom_none_${tsPart}`;
+            }
+          }
+          updates.push({ id, ...payload });
         });
         try {
           // 刪除
