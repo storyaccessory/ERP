@@ -12920,11 +12920,11 @@ function _renderDevDetail(id) {
         <div><b>起始日 (D0):</b> ${p.start_date||'—'}</div>
         <div><b>開發類型:</b> ${pipelines.map(pl => (PIPELINE_TEMPLATES[pl]?.label||pl).replace(/^[🥈🥇🎁]\s*/,'')).join(' · ')}</div>
         ${p.factory_owner_name?`<div><b>合金發包人:</b> ${p.factory_owner_name}</div>`:''}
-        ${p.notes?`<div style="grid-column:1/-1"><b>備註:</b> ${p.notes}</div>`:''}
+        ${p.notes?`<div style="grid-column:1/-1"><b>備註:</b> <span style="white-space:pre-wrap">${p.notes}</span></div>`:''}
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="window._devEditProject('${p.id}')">✏️ 編輯專案</button>
-        <button class="btn btn-sm btn-outline" onclick="window._devRebuildCalendar('${p.id}')" style="background:#e3f2fd;color:#1565c0">🔄 重建行事曆</button>
+        <button class="btn btn-sm btn-outline" onclick="window._devRebuildCalendar('${p.id}')" style="background:#ffebee;color:#c62828;border-color:#ef9a9a;font-weight:600" title="會先刪除舊的行事曆事件再重建">🔄 重建行事曆</button>
         <button class="btn btn-sm" style="background:#ffebee;color:#c62828" onclick="window._devDeleteProject('${p.id}')">🗑 刪除專案</button>
       </div>
     </div>
