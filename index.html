@@ -35324,6 +35324,10 @@ function renderPurchases() {
 
   const activeStatus = state.data._purchaseStatus || '未結案';
   const searchQ = (state.data._purchaseSearch || '').toLowerCase().trim();
+  const filterRequester = state.data._puFilterRequester || '';   // 申請人 id · 空=全部
+  const filterPurchaser = state.data._puFilterPurchaser || '';   // 採購負責人 id · 空=全部
+  const filterCategory  = state.data._puFilterCategory  || '';
+  const onlyMine        = !!state.data._puFilterOnlyMine;
 
   let filtered = list;
   if (activeStatus === '未結案') filtered = filtered.filter(r => r.status !== '結案' && r.status !== '暫不採購');
@@ -35336,6 +35340,11 @@ function renderPurchases() {
     return defect > 0 || short > 0;
   });
   else if (activeStatus !== '全部') filtered = filtered.filter(r => r.status === activeStatus);
+  // 自訂篩選:申請人 / 負責人 / 類別 / 只看我申請
+  if (onlyMine && state.user?.id) filtered = filtered.filter(r => r.requester_id === state.user.id);
+  else if (filterRequester) filtered = filtered.filter(r => r.requester_id === filterRequester);
+  if (filterPurchaser) filtered = filtered.filter(r => r.purchaser_id === filterPurchaser);
+  if (filterCategory) filtered = filtered.filter(r => r.category === filterCategory);
   if (searchQ) filtered = filtered.filter(r =>
     (r.item_name||'').toLowerCase().includes(searchQ) ||
     (r.requester_name||'').toLowerCase().includes(searchQ) ||
@@ -35370,10 +35379,10 @@ function renderPurchases() {
 
   return `
     <div class="cards cards-6" style="margin-bottom:16px;display:grid;grid-template-columns:repeat(6,1fr);gap:12px">
-      <div class="card" style="border-left:4px solid #e53935"><div class="card-title">🔔 待指派</div><div class="card-value" style="color:#c62828">${stats.待指派}</div></div>
-      <div class="card"><div class="card-title">⏳ 待採購</div><div class="card-value warning">${stats.待採購}</div></div>
-      <div class="card"><div class="card-title">📮 已採購</div><div class="card-value accent">${stats.已採購}</div></div>
-      <div class="card" style="border-left:4px solid #d84315"><div class="card-title">📦 待點收入庫</div><div class="card-value" style="color:#d84315">${list.filter(r => r.status === '已到貨' && !r.qc_qty).length}</div></div>
+      <div class="card" style="border-left:4px solid #e53935;cursor:pointer" onclick="state.data._purchaseStatus='待指派';renderApp()" title="點擊只看待指派"><div class="card-title">🔔 待指派</div><div class="card-value" style="color:#c62828">${stats.待指派}</div></div>
+      <div class="card" style="cursor:pointer" onclick="state.data._purchaseStatus='待採購';renderApp()" title="點擊只看待採購"><div class="card-title">⏳ 待採購</div><div class="card-value warning">${stats.待採購}</div></div>
+      <div class="card" style="cursor:pointer" onclick="state.data._purchaseStatus='已採購';renderApp()" title="點擊只看已採購"><div class="card-title">📮 已採購</div><div class="card-value accent">${stats.已採購}</div></div>
+      <div class="card" style="border-left:4px solid #d84315;cursor:pointer" onclick="state.data._purchaseStatus='已到貨';renderApp()" title="點擊只看待點收入庫"><div class="card-title">📦 待點收入庫</div><div class="card-value" style="color:#d84315">${list.filter(r => r.status === '已到貨' && !r.qc_qty).length}</div></div>
       ${(() => {
         const abn = (list||[]).filter(r => {
           if (r.status === '結案' || r.status === '暫不採購') return false;
@@ -35385,7 +35394,7 @@ function renderPurchases() {
         }).length;
         return `<div class="card" style="border-left:4px solid #c62828;cursor:pointer" onclick="state.data._purchaseStatus='異常';renderApp()" title="點擊只看異常"><div class="card-title">🚨 異常待處理</div><div class="card-value" style="color:#c62828">${abn}</div></div>`;
       })()}
-      <div class="card"><div class="card-title">✅ 結案</div><div class="card-value success">${stats.結案}</div></div>
+      <div class="card" style="cursor:pointer" onclick="state.data._purchaseStatus='結案';renderApp()" title="點擊只看結案"><div class="card-title">✅ 結案</div><div class="card-value success">${stats.結案}</div></div>
     </div>
     <div class="tabs">
       ${['未結案','異常','全部','待指派','待採購','已採購','已到貨','結案','暫不採購'].map(s => {
@@ -35412,6 +35421,25 @@ function renderPurchases() {
       <button class="btn btn-primary" onclick="window.openPurchaseBatchModal()">+ 新增採購申請</button>
       <button class="btn btn-outline" onclick="window.modalBatchImportPurchases()" style="background:#e8f5e9;color:#1b5e20;border-color:#a5d6a7">📥 批次匯入 (Excel)</button>
       ${isBoss ? `<button class="btn btn-outline" onclick="window.openPurchaseItemsAdmin()">⚙️ 品項庫管理</button>` : ''}
+    </div>
+    <!-- 自訂篩選列 -->
+    <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;padding:8px 10px;background:#fafafa;border:1px solid var(--border);border-radius:6px">
+      <span style="font-size:12px;color:var(--muted);font-weight:600">篩選:</span>
+      <button class="btn btn-sm ${onlyMine?'btn-primary':'btn-outline'}" onclick="state.data._puFilterOnlyMine=${!onlyMine};renderApp()" style="font-size:11px" title="只看我自己送的採購">${onlyMine?'✓ 只看我申請':'👤 只看我申請'}</button>
+      <select onchange="state.data._puFilterRequester=this.value;state.data._puFilterOnlyMine=false;renderApp()" style="padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px" ${onlyMine?'disabled':''}>
+        <option value="">所有申請人</option>
+        ${(state.data.users||[]).filter(u=>u.is_active!==false).map(u => `<option value="${u.id}" ${filterRequester===u.id?'selected':''}>👤 ${u.name}</option>`).join('')}
+      </select>
+      <select onchange="state.data._puFilterPurchaser=this.value;renderApp()" style="padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px">
+        <option value="">所有採購負責人</option>
+        ${(state.data.users||[]).filter(u=>u.is_active!==false).map(u => `<option value="${u.id}" ${filterPurchaser===u.id?'selected':''}>🎯 ${u.name}</option>`).join('')}
+      </select>
+      <select onchange="state.data._puFilterCategory=this.value;renderApp()" style="padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px">
+        <option value="">所有類別</option>
+        ${PURCHASE_CATEGORIES.map(c => `<option value="${c}" ${filterCategory===c?'selected':''}>${c}</option>`).join('')}
+      </select>
+      ${(onlyMine || filterRequester || filterPurchaser || filterCategory) ? `<button class="btn btn-sm btn-outline" style="font-size:11px;color:#c62828;border-color:#ef9a9a" onclick="state.data._puFilterOnlyMine=false;state.data._puFilterRequester='';state.data._puFilterPurchaser='';state.data._puFilterCategory='';renderApp()">✕ 清除</button>` : ''}
+      <span style="font-size:11px;color:var(--muted);margin-left:auto">顯示 ${filtered.length} 筆</span>
     </div>
     ${(state.data._puSel && state.data._puSel.size) ? `
     <div style="background:#fff3e0;border:1px solid #ffb74d;border-radius:8px;padding:10px 14px;margin-bottom:10px;display:flex;align-items:center;gap:10px;flex-wrap:wrap">
