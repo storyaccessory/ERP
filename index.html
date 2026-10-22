@@ -12949,6 +12949,7 @@ function _renderDevDetail(id) {
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="window._devEditProject('${p.id}')">✏️ 編輯專案</button>
+        <button class="btn btn-sm btn-outline" onclick="window._devReflowDates('${p.id}')" style="background:#fff3e0;color:#e65100" title="從某個日期起,未完成任務依模板工作天重排,再手動微調">⚙ 重排未完成日期</button>
         <button class="btn btn-sm btn-outline" onclick="window._devRebuildCalendar('${p.id}')" style="background:#e3f2fd;color:#1565c0">🔄 重建行事曆</button>
         <button class="btn btn-sm" style="background:#ffebee;color:#c62828" onclick="window._devDeleteProject('${p.id}')">🗑 刪除專案</button>
       </div>
@@ -14935,6 +14936,95 @@ window._devEditProject = async function(projectId) {
 };
 
 // 重建行事曆事件(拿掉舊的,並把 dev_tasks 步驟名/is_milestone 從模板同步再重建)
+// 從指定日期起,未完成任務依模板工作天重排(用於中段整頓節奏)
+window._devReflowDates = async function(projectId) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const today = _localToday();
+  // 預設起算日 = 最後一個已完成主線任務的隔天(往下連著),否則今天
+  const doneMain = (p.dev_tasks||[]).filter(t => t.step_group==='main' && t.status==='完成' && t.completed_at);
+  const lastDone = doneMain.sort((a,b)=>b.completed_at.localeCompare(a.completed_at))[0];
+  const defaultStart = lastDone?.completed_at
+    ? _snapToWorkday(_shiftDate(lastDone.completed_at.slice(0,10), 1), 'forward')
+    : _snapToWorkday(today, 'forward');
+
+  const openUndoneMain = (p.dev_tasks||[]).filter(t => t.step_group==='main' && t.status!=='完成' && t.status!=='取消');
+  const openUndoneSide = (p.dev_tasks||[]).filter(t => t.step_group==='side' && t.status!=='完成' && t.status!=='取消');
+  const openUndoneCustom = (p.dev_tasks||[]).filter(t => t.step_group==='custom' && t.status!=='完成' && t.status!=='取消');
+
+  const body = `
+    <div style="font-size:13px;line-height:1.7;margin-bottom:10px">
+      從指定日期起,依模板工作天(扣週末+國定假日)重算每筆**未完成主線**任務的日期。
+      <br>副線 / 自訂任務日期<b>不會動</b>,排完後你再手動微調壓時程以符合上市日。
+    </div>
+    <div class="form-group">
+      <label>起算日</label>
+      <input type="date" id="rfl-start" class="form-control" value="${defaultStart}" style="max-width:200px">
+      <div style="font-size:11px;color:var(--muted);margin-top:4px">預設 = 最後完成任務的隔一個工作日</div>
+    </div>
+    <div class="form-group" style="padding:10px 12px;background:#fff3e0;border-radius:6px">
+      <div style="font-size:12px;line-height:1.7">
+        · 已完成 / 已取消任務:<b>不動</b><br>
+        · 未完成主線:<b>依模板工作天重排 (${openUndoneMain.length} 筆)</b><br>
+        · 未完成副線:<b>不動 (${openUndoneSide.length} 筆)</b><br>
+        · 未完成自訂:<b>不動 (${openUndoneCustom.length} 筆)</b><br>
+        · 基準 (expected_date) <b>一併同步</b>(等於這次重排是新的「原定」)
+      </div>
+    </div>
+    <div class="form-group">
+      <label style="display:flex;gap:6px;align-items:center;cursor:pointer">
+        <input type="checkbox" id="rfl-also-side" style="width:16px;height:16px">
+        <span style="font-size:12px">副線也重排(依主線里程碑連動)</span>
+      </label>
+    </div>
+  `;
+  showModal('⚙ 重排未完成任務日期', body, [
+    { label: '取消', onclick: closeModal },
+    { label: '✓ 執行重排', primary: true, onclick: async () => {
+      const startDate = document.getElementById('rfl-start').value;
+      if (!startDate) { showToast('請選起算日','error'); return; }
+      const alsoSide = document.getElementById('rfl-also-side')?.checked;
+      let count = 0;
+      // 每個 pipeline 分別重算
+      for (const pl of (p.pipelines||[])) {
+        const { dates, stepMap } = _calcMainDates(pl, startDate);
+        // 已完成主線的 step_key 不動,其餘未完成的套新日
+        for (const d of dates) {
+          const task = (p.dev_tasks||[]).find(t => t.pipeline===pl && t.step_group==='main' && t.step_key===d.step_key);
+          if (!task || task.status==='完成' || task.status==='取消') continue;
+          const newDate = d.expected_date;
+          if (newDate === task.due_date && newDate === task.expected_date) continue;
+          await _devApplyDateChange(task.id, task.due_date, newDate, {
+            source: 'reflow',
+            reason: `從 ${startDate} 起依模板重排`,
+            shiftBaseline: true,
+          });
+          count++;
+        }
+        if (alsoSide) {
+          const sideSteps = _calcSideDates(pl, stepMap);
+          for (const ss of sideSteps) {
+            const task = (p.dev_tasks||[]).find(t => t.pipeline===pl && t.step_group==='side' && t.step_key===ss.step_key);
+            if (!task || task.status==='完成' || task.status==='取消') continue;
+            if (ss.expected_date === task.due_date && ss.expected_date === task.expected_date) continue;
+            await _devApplyDateChange(task.id, task.due_date, ss.expected_date, {
+              source: 'reflow',
+              reason: `從 ${startDate} 起依模板重排(副線)`,
+              shiftBaseline: true,
+            });
+            count++;
+          }
+        }
+      }
+      showToast(`✓ 已重排 ${count} 筆任務日期`);
+      closeModal();
+      await loadDev();
+      try { await loadCalendarEvents?.(); } catch(e) {}
+      renderApp();
+    }},
+  ], { width: '560px' });
+};
+
 window._devRebuildCalendar = async function(id) {
   const p = (state.data.dev||[]).find(x => x.id === id);
   if (!p) return;
