@@ -11839,7 +11839,7 @@ function _renderDevDashboard(activeProjects, allProjects) {
             <th style="padding:6px;text-align:center;width:90px">Pipeline</th>
             <th style="padding:6px;text-align:center;width:130px">階段</th>
             <th style="padding:6px;text-align:center;width:110px">進度</th>
-            <th style="padding:6px;text-align:center;width:170px">下個關鍵節點</th>
+            <th style="padding:6px;text-align:center;width:200px">目前進行 / 下個節點</th>
             <th style="padding:6px;text-align:center;width:90px;cursor:pointer;user-select:none" onclick="(function(){const st=state.data;if(st.devListSortKey===&quot;launch&quot;)st.devListSortDir=st.devListSortDir===&quot;asc&quot;?&quot;desc&quot;:&quot;asc&quot;;else{st.devListSortKey=&quot;launch&quot;;st.devListSortDir=&quot;asc&quot;;}renderApp();})()">上市日${_listSortKey==='launch'?(_listSortDir==='asc'?' ▲':' ▼'):' ⇅'}</th>
           </tr>
         </thead>
@@ -11847,6 +11847,12 @@ function _renderDevDashboard(activeProjects, allProjects) {
           ${rows.map(({p, mainOnly, stages, curStage}) => {
             const allDone = stages.every(s => s.gatePassed);
             const plLabels = (p.pipelines||[]).map(pl => (PIPELINE_TEMPLATES[pl]?.label||pl).replace(/^[🥈🥇🎁]\s*/,'')).join('·');
+            // 目前進行 / 下個節點:取最早一筆未完成任務(優先未開始→排 due_date)
+            const _liveTasks = mainOnly
+              .filter(t => t.status !== '完成' && t.status !== '取消')
+              .sort((a,b) => (a.due_date||'9999').localeCompare(b.due_date||'9999'));
+            const curTask = _liveTasks[0] || null;
+            // 下一個里程碑(保留做輔助顯示)
             const nextMile = mainOnly.find(t => {
               const tpl = PIPELINE_TEMPLATES[t.pipeline];
               const step = (tpl?.main||[]).find(s => s.key === t.step_key);
@@ -11891,7 +11897,18 @@ function _renderDevDashboard(activeProjects, allProjects) {
                 <div style="font-size:11px;color:var(--muted);margin-top:2px">${totalDone}/${totalTasks} · ${pct}%</div>
               </td>
               <td style="padding:8px;text-align:center;font-size:11px">
-                ${nextMile ? `<div style="color:#c62828;font-weight:600">🎯 ${nextMile.step_name}</div><div style="color:var(--muted);margin-top:2px">${nextMile.due_date||'—'} · ${nextMile.assignee_name||'未指派'}</div>` : '<span style="color:#2e7d32">✅ 無待辦里程碑</span>'}
+                ${curTask ? (() => {
+                  const _isMile = curTask.is_milestone || (PIPELINE_TEMPLATES[curTask.pipeline]?.main||[]).find(s => s.key === curTask.step_key)?.milestone;
+                  const _overdue = curTask.due_date && curTask.due_date < today;
+                  const _dateCol = _overdue ? '#c62828' : (_isMile ? '#e65100' : 'var(--muted)');
+                  const _mileBadge = _isMile ? '🎯 ' : '';
+                  const _nextMileLine = (nextMile && nextMile.id !== curTask.id)
+                    ? `<div style="font-size:10px;color:var(--muted);margin-top:3px;padding-top:3px;border-top:1px dashed #eee">下個🎯 ${nextMile.step_name} · ${nextMile.due_date||'—'}</div>`
+                    : '';
+                  return `<div style="color:var(--accent-dark);font-weight:600">${_mileBadge}${curTask.step_name}</div>
+                    <div style="color:${_dateCol};margin-top:2px">${curTask.due_date||'—'} · ${curTask.assignee_name||'未指派'}${_overdue?' · ⚠ 逾期':''}</div>
+                    ${_nextMileLine}`;
+                })() : '<span style="color:#2e7d32">✅ 所有任務已完成</span>'}
               </td>
               <td style="padding:8px;text-align:center;font-size:12px;color:${launchOverdue?'#c62828':'var(--text)'};font-weight:${launchOverdue?700:400}">${p.launch_date||'—'}</td>
             </tr>`;
