@@ -13104,8 +13104,10 @@ function _renderDevTaskRow(task, project) {
               // 真的本人晚
               _diffChip = `<span style="font-size:10px;color:#c62828;background:#ffebee;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="原定 ${_base}">⚠ 延 ${_late} 天</span>`;
             }
-          } else if (_late !== null && _late < 0) {
-            _diffChip = `<span style="font-size:10px;color:#1565c0;background:#e3f2fd;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="原定 ${_base}">⚡ 提早 ${-_late} 天</span>`;
+          } else if (_vsDue !== null && _vsDue < 0) {
+            // 真的在 due_date 之前就交 → 顯示提早(用 vs due 不用 vs baseline,
+            // 因為 baseline 可能已被 PM 拉前,chip 顯示比 due 早才有意義)
+            _diffChip = `<span style="font-size:10px;color:#1565c0;background:#e3f2fd;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="比承諾日 ${_due} 早交">⚡ 提早 ${-_vsDue} 天</span>`;
           }
         }
         // 若有延遲原因附註,顯示小字
@@ -13143,19 +13145,20 @@ function _renderDevTaskRow(task, project) {
         //   due_date      = 當前承諾交期(可被 PM 動)
         //   pushed = due_date - baseline → 「被推 N 天」(上游造成,不計 KPI)
         //   late   = completed_at - baseline → 「延 N 天(自己)」(本人造成,算 KPI)
+        // 專案尚未啟動 → 都還在規劃階段,不顯示提早/被推(避免 PM 在排計畫時被噪音干擾)
+        const _notStarted = project?.start_date && project.start_date > _localToday();
         const base = task.expected_date;
         const cur = task.due_date;
         let delayBadge = '';
-        if (base && cur && !isCancelled && !isDone) {
+        if (base && cur && !isCancelled && !isDone && !_notStarted) {
           const pushed = _daysDiff(base, cur);
+          // 只顯示「被推」(放寬),不顯示「拉前」(拉前已被視為基準同步,就是新 deadline,沒有提早)
           if (pushed > 0) {
-            delayBadge = `<div style="font-size:9px;color:#f57c00;background:#fff8e1;padding:1px 5px;border-radius:4px;font-weight:700;margin-top:2px;display:inline-block" title="原定 ${base} · 被上游推遲">🔁 被推 ${pushed} 天</div>`;
-          } else if (pushed < 0) {
-            delayBadge = `<div style="font-size:9px;color:#2e7d32;background:#e8f5e9;padding:1px 5px;border-radius:4px;font-weight:700;margin-top:2px;display:inline-block" title="比原定 ${base} 提早">✨ 提早 ${-pushed} 天</div>`;
+            delayBadge = `<div style="font-size:9px;color:#f57c00;background:#fff8e1;padding:1px 5px;border-radius:4px;font-weight:700;margin-top:2px;display:inline-block" title="原定 ${base} · 被推後">🔁 被推 ${pushed} 天</div>`;
           }
         }
         const borderCol = delayBadge && !isDone && !isCancelled
-          ? (base < cur ? '#f57c00' : '#2e7d32')
+          ? '#f57c00'
           : 'var(--border)';
         const _logCount = Array.isArray(task.date_change_log) ? task.date_change_log.length : 0;
         const _logBtn = _logCount > 0 ? `<button onclick="event.stopPropagation();window._devShowDateLog('${task.id}')" title="日期變更軌跡 (${_logCount} 筆)" style="margin-left:3px;background:none;border:none;cursor:pointer;font-size:11px;padding:0 2px;color:#1565c0">📋${_logCount}</button>` : '';
@@ -13877,15 +13880,28 @@ window._devSetTaskDate = async function(taskId, newDate) {
   const task = p?.dev_tasks?.find(t => t.id === taskId);
   if (!task) return;
   const oldDate = task.due_date;
-  if (!oldDate || !newDate || oldDate === newDate) {
-    // 第一次設定 or 沒變 → 直接寫
-    await _devApplyDateChange(taskId, oldDate, newDate, { source: 'manual', reason: '首次設定或無改動', shiftBaseline: !oldDate });
-    showToast('日期已更新');
+  const _notStarted = p?.start_date && p.start_date > _localToday();
+  const _delta0 = (oldDate && newDate) ? _daysDiff(oldDate, newDate) : 0;
+  // 直接寫,基準同步,不問原因 的情境:
+  //  1) 第一次設定 / 沒變動
+  //  2) 專案還沒啟動(都在規劃)
+  //  3) 把日期「拉前」(deadline 變緊 · 等於要求更早交 · 新日期就是新 deadline · 不是「提早」)
+  if (!oldDate || !newDate || oldDate === newDate || _notStarted || _delta0 < 0) {
+    const reasonTxt = !oldDate ? '首次設定'
+      : oldDate === newDate ? '無變動'
+      : _notStarted ? '規劃階段調整(專案未啟動,基準同步)'
+      : `拉前 ${-_delta0} 天 · 壓縮時程(新日期即新 deadline)`;
+    await _devApplyDateChange(taskId, oldDate, newDate, {
+      source: _notStarted ? 'planning' : (_delta0 < 0 ? 'tighten' : 'manual'),
+      reason: reasonTxt,
+      shiftBaseline: true,
+    });
+    showToast(_notStarted ? '規劃日期已更新(基準同步)' : (_delta0 < 0 ? `已拉前 ${-_delta0} 天 · 基準同步` : '日期已更新'));
     await loadDev(); try { await loadCalendarEvents?.(); } catch(e) {} renderApp();
     return;
   }
-  const delta = _daysDiff(oldDate, newDate);
-  const dir = delta > 0 ? '延後' : '提前';
+  const delta = _delta0;
+  const dir = '延後';
   showModal(`📅 ${task.step_name} ${dir} ${Math.abs(delta)} 天`, `
     <div style="font-size:13px;line-height:1.7;margin-bottom:12px">
       <div><b>負責人:</b> ${task.assignee_name||'—'}</div>
