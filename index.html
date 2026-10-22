@@ -13157,8 +13157,10 @@ function _renderDevTaskRow(task, project) {
         const borderCol = delayBadge && !isDone && !isCancelled
           ? (base < cur ? '#f57c00' : '#2e7d32')
           : 'var(--border)';
-        return `<input type="date" value="${cur||''}" onchange="window._devSetTaskDate('${task.id}',this.value)"
-          style="width:100%;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1.5px solid ${borderCol};border-radius:3px" ${isCancelled?'disabled':''}>${delayBadge}`;
+        const _logCount = Array.isArray(task.date_change_log) ? task.date_change_log.length : 0;
+        const _logBtn = _logCount > 0 ? `<button onclick="event.stopPropagation();window._devShowDateLog('${task.id}')" title="日期變更軌跡 (${_logCount} 筆)" style="margin-left:3px;background:none;border:none;cursor:pointer;font-size:11px;padding:0 2px;color:#1565c0">📋${_logCount}</button>` : '';
+        return `<div style="display:flex;align-items:center;gap:2px"><input type="date" value="${cur||''}" onchange="window._devSetTaskDate('${task.id}',this.value)"
+          style="flex:1;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1.5px solid ${borderCol};border-radius:3px" ${isCancelled?'disabled':''}>${_logBtn}</div>${delayBadge}`;
       })()}
     </td>
     <td style="padding:5px;text-align:center;font-size:11px">
@@ -13838,20 +13840,168 @@ window._devToggleTaskDone = async function(taskId, checked) {
 };
 
 // 改任務日期
-window._devSetTaskDate = async function(taskId, newDate) {
-  await db.from('dev_tasks').update({ due_date: newDate || null }).eq('id', taskId);
-  // 同步行事曆子任務
+// 統一的日期變更寫入 + 軌跡記錄
+// opts = { source, reason, shiftBaseline, inputEl }
+async function _devApplyDateChange(taskId, oldDate, newDate, opts = {}) {
+  const upd = { due_date: newDate || null };
+  if (opts.shiftBaseline) upd.expected_date = newDate || null;
+  // 寫 log 進 date_change_log(jsonb array)
+  try {
+    const { data: row } = await db.from('dev_tasks').select('date_change_log').eq('id', taskId).maybeSingle();
+    const log = Array.isArray(row?.date_change_log) ? row.date_change_log : [];
+    log.push({
+      at: new Date().toISOString(),
+      by: state.user?.id || null,
+      by_name: state.profile?.name || null,
+      old: oldDate,
+      new: newDate || null,
+      source: opts.source || 'manual',
+      reason: opts.reason || null,
+      baseline_shifted: !!opts.shiftBaseline,
+    });
+    upd.date_change_log = log;
+  } catch(e) {}
+  await db.from('dev_tasks').update(upd).eq('id', taskId);
   const p = state.data.dev.find(x => x.dev_tasks?.some(t => t.id === taskId));
   const task = p?.dev_tasks?.find(t => t.id === taskId);
   if (task) {
     task.due_date = newDate;
+    if (opts.shiftBaseline) task.expected_date = newDate;
     await _devSyncCalendarSubtaskDate(task, newDate);
   }
-  showToast('日期已更新');
-  await loadDev();
-  try { await loadCalendarEvents?.(); } catch(e) {}
-  renderApp();
+}
+
+// 使用者在日期格子裡改日 → 彈出理由 modal
+window._devSetTaskDate = async function(taskId, newDate) {
+  const p = state.data.dev.find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (!task) return;
+  const oldDate = task.due_date;
+  if (!oldDate || !newDate || oldDate === newDate) {
+    // 第一次設定 or 沒變 → 直接寫
+    await _devApplyDateChange(taskId, oldDate, newDate, { source: 'manual', reason: '首次設定或無改動', shiftBaseline: !oldDate });
+    showToast('日期已更新');
+    await loadDev(); try { await loadCalendarEvents?.(); } catch(e) {} renderApp();
+    return;
+  }
+  const delta = _daysDiff(oldDate, newDate);
+  const dir = delta > 0 ? '延後' : '提前';
+  showModal(`📅 ${task.step_name} ${dir} ${Math.abs(delta)} 天`, `
+    <div style="font-size:13px;line-height:1.7;margin-bottom:12px">
+      <div><b>負責人:</b> ${task.assignee_name||'—'}</div>
+      <div><b>原日期:</b> ${oldDate} → <b>新日期:</b> ${newDate}</div>
+    </div>
+    <div style="padding:10px 12px;background:#fff8e1;border-radius:6px;margin-bottom:10px;border-left:3px solid #e65100">
+      <div style="font-size:12px;font-weight:700;color:#e65100;margin-bottom:6px">⚖ 這次調整的原因?(事後查 KPI 用)</div>
+      <div style="display:flex;flex-direction:column;gap:4px" id="dc-reason-box">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="dc-reason" value="upstream" checked data-shift="1" style="margin-top:2px">
+          <div><b>上游延遲連帶</b> <span style="color:var(--muted)">(基準同步 · ${task.assignee_name||'此人'} 不被歸責)</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="dc-reason" value="pm_slack" data-shift="1" style="margin-top:2px">
+          <div><b>PM 主動放寬時間</b> <span style="color:var(--muted)">(基準同步 · 不算延遲)</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="dc-reason" value="self" data-shift="0" style="margin-top:2px">
+          <div><b>${task.assignee_name||'此人'} 本人原因</b> <span style="color:var(--muted)">(只動 due_date · 事後顯示延遲 / 提早)</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="dc-reason" value="external" data-shift="1" style="margin-top:2px">
+          <div><b>外部因素</b>(廠商、料件、審查)<span style="color:var(--muted)"> · 基準同步</span></div>
+        </label>
+      </div>
+      <input class="form-control" id="dc-reason-note" placeholder="(選填) 補一句細節…" style="margin-top:8px;font-size:12px">
+    </div>
+  `, [
+    { label: '取消', onclick: () => {
+      // 把 input 恢復原值
+      const inp = document.querySelector(`input[onchange*="${taskId}"]`);
+      if (inp) inp.value = oldDate || '';
+      closeModal();
+    }},
+    { label: '✓ 套用', primary: true, onclick: async () => {
+      const sel = document.querySelector('input[name="dc-reason"]:checked');
+      const sourceKey = sel?.value || 'manual';
+      const shift = sel?.dataset?.shift === '1';
+      const note = document.getElementById('dc-reason-note')?.value?.trim() || null;
+      const sourceLabel = {
+        upstream: '上游延遲連帶', pm_slack: 'PM 主動放寬', self: '本人原因', external: '外部因素(廠商/料件)'
+      }[sourceKey] || '手動調整';
+      await _devApplyDateChange(taskId, oldDate, newDate, {
+        source: sourceKey,
+        reason: note ? `${sourceLabel} · ${note}` : sourceLabel,
+        shiftBaseline: shift,
+      });
+      showToast(`日期已更新 (${sourceLabel})`);
+      closeModal();
+      await loadDev();
+      try { await loadCalendarEvents?.(); } catch(e) {}
+      renderApp();
+    }},
+  ], { width: '540px' });
 };
+
+// 顯示任務的日期變更軌跡
+window._devShowDateLog = function(taskId) {
+  const p = state.data.dev.find(x => x.dev_tasks?.some(t => t.id === taskId));
+  const task = p?.dev_tasks?.find(t => t.id === taskId);
+  if (!task) return;
+  const log = Array.isArray(task.date_change_log) ? task.date_change_log : [];
+  const srcChip = s => {
+    const map = {
+      upstream: { c:'#f57c00', b:'#fff8e1', l:'🔁 上游' },
+      pm_slack: { c:'#1565c0', b:'#e3f2fd', l:'🛠 PM 放寬' },
+      self:     { c:'#c62828', b:'#ffebee', l:'🙋 本人' },
+      external: { c:'#6a1b9a', b:'#f3e5f5', l:'🏭 外部' },
+      pm_decision:{ c:'#2e7d32', b:'#e8f5e9', l:'📋 PM 決策' },
+      manual:   { c:'#616161', b:'#f5f5f5', l:'✍ 手動' },
+    };
+    const m = map[s] || map.manual;
+    return `<span style="background:${m.b};color:${m.c};padding:1px 6px;border-radius:8px;font-size:11px;font-weight:600">${m.l}</span>`;
+  };
+  const body = `
+    <div style="font-size:13px;line-height:1.7;margin-bottom:12px;padding:10px 12px;background:#f5f5f5;border-radius:6px">
+      <div><b>任務:</b> ${task.step_name}</div>
+      <div><b>原始基準 (expected_date):</b> <span style="font-family:monospace">${task.expected_date||'—'}</span></div>
+      <div><b>當前承諾 (due_date):</b> <span style="font-family:monospace">${task.due_date||'—'}</span></div>
+      ${task.completed_at?`<div><b>實際完成:</b> <span style="font-family:monospace;color:#2e7d32">${task.completed_at.slice(0,10)}</span></div>`:''}
+    </div>
+    ${log.length ? `
+    <table style="width:100%;border-collapse:collapse;font-size:12px">
+      <thead style="background:#fafafa">
+        <tr>
+          <th style="padding:6px;text-align:left;width:140px">時間</th>
+          <th style="padding:6px;text-align:center;width:90px">舊</th>
+          <th style="padding:6px;text-align:center;width:90px">新</th>
+          <th style="padding:6px;text-align:center;width:30px">Δ</th>
+          <th style="padding:6px;text-align:center;width:90px">來源</th>
+          <th style="padding:6px;text-align:center;width:60px">基準</th>
+          <th style="padding:6px;text-align:left">理由</th>
+          <th style="padding:6px;text-align:left;width:70px">操作者</th>
+        </tr>
+      </thead>
+      <tbody>${log.slice().reverse().map(e => {
+        const delta = (e.old && e.new) ? _daysDiff(e.old, e.new) : null;
+        const dChip = delta === null ? '—' : (delta > 0 ? `<span style="color:#c62828">+${delta}d</span>` : (delta < 0 ? `<span style="color:#2e7d32">${delta}d</span>` : '0'));
+        return `<tr style="border-top:1px solid #eee">
+          <td style="padding:6px;font-size:11px;color:var(--muted)">${(e.at||'').slice(0,16).replace('T',' ')}</td>
+          <td style="padding:6px;text-align:center;font-family:monospace;font-size:11px">${e.old||'—'}</td>
+          <td style="padding:6px;text-align:center;font-family:monospace;font-size:11px;font-weight:600">${e.new||'—'}</td>
+          <td style="padding:6px;text-align:center;font-size:11px;font-weight:700">${dChip}</td>
+          <td style="padding:6px;text-align:center">${srcChip(e.source)}</td>
+          <td style="padding:6px;text-align:center;font-size:11px">${e.baseline_shifted?'✓ 同步':''}</td>
+          <td style="padding:6px;font-size:11px">${e.reason||'—'}</td>
+          <td style="padding:6px;font-size:11px;color:var(--muted)">${e.by_name||'—'}</td>
+        </tr>`;
+      }).join('')}</tbody>
+    </table>` : '<div style="padding:20px;text-align:center;color:var(--muted);font-size:12px">尚無變更紀錄</div>'}
+  `;
+  showModal('📋 日期變更軌跡', body, [
+    { label: '關閉', primary: true, onclick: closeModal }
+  ], { width: '820px' });
+};
+
 
 // 編輯自訂任務名稱(debounce 存檔避免每次 keystroke 都打 DB)
 window._devEditCustomTaskName = function(taskId, name) {
@@ -14348,10 +14498,11 @@ window._devHandleTimingChange = function(projectId, taskId, deltaDays) {
         const newDate = _shiftDate(t.due_date, deltaDays);
         // 上游造成 → baseline(expected_date)跟著推,等於「赦免」下游
         // 本人造成 → 只動 due_date,下游 baseline 維持(他們之後要加油)
-        const upd = { due_date: newDate };
-        if (blame === 'upstream') upd.expected_date = newDate;
-        await db.from('dev_tasks').update(upd).eq('id', t.id);
-        await _devSyncCalendarSubtaskDate(t, newDate);
+        await _devApplyDateChange(t.id, t.due_date, newDate, {
+          source: 'pm_decision',
+          reason: `${task.step_name} ${word} ${Math.abs(deltaDays)} 天 · 連帶${shiftWord}` + (blame==='upstream'?' (上游歸責 → 一併同步基準)':' (本人歸責 → 不動基準)'),
+          shiftBaseline: blame === 'upstream',
+        });
       }
       await db.from('dev_tasks').update({ notes: null }).eq('id', taskId);
       showToast(toShift.length ? `已${shiftWord} ${toShift.length} 個任務 (${blame==='upstream'?'一併赦免 baseline':'baseline 不動'})` : '已記錄,未順延後續');
