@@ -13846,6 +13846,15 @@ window._devToggleTaskDone = async function(taskId, checked) {
 // 統一的日期變更寫入 + 軌跡記錄
 // opts = { source, reason, shiftBaseline, inputEl }
 async function _devApplyDateChange(taskId, oldDate, newDate, opts = {}) {
+  // 若使用者選到週末 / 國定假日 → 自動 snap 到下一個工作日
+  if (newDate && !_isWorkdayStr(newDate)) {
+    const snapped = _snapToWorkday(newDate, 'forward');
+    if (snapped !== newDate) {
+      const holi = (typeof TW_HOLIDAYS !== 'undefined' && TW_HOLIDAYS[newDate]) ? ` (${TW_HOLIDAYS[newDate]})` : '';
+      showToast(`${newDate}${holi} 非工作日,自動調整到 ${snapped}`, 'info', 3500);
+      newDate = snapped;
+    }
+  }
   const upd = { due_date: newDate || null };
   if (opts.shiftBaseline) upd.expected_date = newDate || null;
   // 寫 log 進 date_change_log(jsonb array)
@@ -15435,10 +15444,35 @@ function _daysDiff(from, to) {
   return Math.round((b - a) / (1000*60*60*24));
 }
 
+// 判斷字串日期是否為工作日(非週末且非 TW_HOLIDAYS)
+function _isWorkdayStr(ds) {
+  if (!ds) return true;
+  const d = new Date(ds + 'T00:00:00');
+  const dow = d.getDay();
+  if (dow === 0 || dow === 6) return false;
+  if (typeof TW_HOLIDAYS !== 'undefined' && TW_HOLIDAYS[ds]) return false;
+  return true;
+}
+// 把日期向前/向後 snap 到最近的工作日
+// direction: 'forward'(預設,延後找下一個) | 'backward'(找前一個)
+function _snapToWorkday(dateStr, direction = 'forward') {
+  if (!dateStr) return dateStr;
+  const d = new Date(dateStr + 'T00:00:00');
+  const step = direction === 'backward' ? -1 : 1;
+  // 最多 14 次避免無窮迴圈(連假最長也不會超過)
+  for (let i = 0; i < 14; i++) {
+    const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (_isWorkdayStr(ds)) return ds;
+    d.setDate(d.getDate() + step);
+  }
+  return dateStr;
+}
 function _shiftDate(dateStr, deltaDays) {
   const d = new Date(dateStr + 'T00:00:00');
   d.setDate(d.getDate() + deltaDays);
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  const raw = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+  // 自動 snap 到工作日(延後 → 下一個工作日;提前 → 上一個工作日)
+  return _snapToWorkday(raw, deltaDays >= 0 ? 'forward' : 'backward');
 }
 
 // 彈性加入自訂任務到某 pipeline
