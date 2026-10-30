@@ -801,7 +801,7 @@ async function loadDashboard() {
   const _mealYmStr = _mealYmDate.getFullYear().toString() + String(_mealYmDate.getMonth()+1).padStart(2,'0');
   const _mealYmLabel = `${_mealYmDate.getFullYear()}年 ${_mealYmDate.getMonth()+1} 月`;
   const _thisYmStr = _mealYmStr; // 保留變數名供其他地方參考
-  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors, myApprovals, pendingApprovalsCount, purchasesPending] = await Promise.all([
+  const [orders, restock, calTodos, cs, repair, dev, bookingPending, overdueAll, mealThis, sdRows, arAll, vendors, myApprovals, pendingApprovalsCount, purchasesPending, inquiriesPending] = await Promise.all([
     db.from('custom_orders').select('*').in('status',['待排圖','排圖製作中','電鍍中']).order('due_date'),
     db.from('restock_orders').select('*, restock_order_items(*, products(name, series(name)))').eq('status','待覆核'),
     _addCalPrivacyFilter(db.from('calendar_events')
@@ -840,6 +840,8 @@ async function loadDashboard() {
       : (myId ? db.from('approval_requests').select('id',{count:'exact',head:true}).eq('status','pending').eq('requested_by', myId) : Promise.resolve({count:0})),
     // 採購申請待指派(給老闆看紅點)
     db.from('purchase_requests').select('id,status').eq('status','待指派'),
+    // 合作洽詢未處理(給側欄 badge · 進來自動顯示)
+    db.from('collaboration_inquiries').select('id',{count:'exact',head:true}).eq('status','未處理'),
   ]);
   // 把最新的 sales_daily 寫進 salesCache,確保首頁業績圖表的數字跟業績儀表板一致
   if (!state.data.salesCache) state.data.salesCache = {};
@@ -875,6 +877,7 @@ async function loadDashboard() {
     myApprovals: myApprovals?.data || [],
     pendingApprovalsCount: pendingApprovalsCount?.count || 0,
     purchasesPendingCount: (purchasesPending?.data || []).length,
+    inquiriesPendingCount: inquiriesPending?.count || 0,
     ym: _thisYmStr,
     mealYmLabel: _mealYmLabel,
     today,
@@ -1610,7 +1613,7 @@ function renderSidebar() {
     cs: d.cs?.length || 0,
     repair: d.repair?.filter(r => !['已完成','已寄回','取消'].includes(r.status)).length || 0,
     approvals: pendingApprovals || 0,
-    inquiries: (state.data.inquiries||[]).filter(i => i.status === '未處理').length || 0,
+    inquiries: (state.data.inquiries||[]).filter(i => i.status === '未處理').length || d.inquiriesPendingCount || 0,
     purchases: (state.data.purchases||[]).filter(p => p.status === '待指派').length || d.purchasesPendingCount || 0,
   };
 
