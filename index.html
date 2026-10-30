@@ -1092,15 +1092,68 @@ window.modalViewInquiry = async function(id) {
   const sub = INQ_SUBTYPE[rec.subtype];
   const users = state.data.users || [];
   const fd = rec.form_data || {};
-  const rows = Object.entries(fd).map(([k,v]) => {
-    let display = v;
-    if (Array.isArray(v)) display = v.join('、');
-    else if (typeof v === 'object' && v) display = JSON.stringify(v);
-    return `<tr>
-      <td style="padding:6px 10px;font-size:12px;color:var(--muted);white-space:nowrap">${k}</td>
-      <td style="padding:6px 10px;font-size:13px">${display||'—'}</td>
-    </tr>`;
-  }).join('');
+  // 洽詢表單欄位的中文對應(跟 cooperation 表單同步)
+  const FD_LABELS = {
+    // 商品開發共通
+    products: '想開發的商品',
+    products_other: '其他商品描述',
+    quantity: '預計首批數量',
+    budget: '預算範圍 (NT$)',
+    launch_time: '期望上市時間',
+    expected_launch_time: '期望上市時間',
+    design_status: '設計狀態',
+    // 授權 IP
+    ip_name: '授權 IP 名稱',
+    ip_links: 'IP 參考連結',
+    authorization_status: '授權狀態',
+    shared_investment: '期望 STORY 投入',
+    profit_model: '期望分潤模式',
+    // ODM / 品牌
+    brand_name: '品牌 / IP / 戲劇名稱',
+    brand_positioning: '品牌定位描述',
+    purpose: '商品用途',
+    customization_focus: '客製化重點',
+    // 異業聯名
+    party_role: '您的身份',
+    industry: '產業別 / IP 類型',
+    ip_market_status: 'IP 目前市場狀態',
+    license_scope: '期望授權範圍',
+    license_model: '授權模式',
+    prior_experience: '過去合作經驗',
+    target_market: '目標市場',
+    target_audience: '目標客群',
+    concept: '合作構想 / 說明',
+    description: '補充說明',
+    // 通路合作
+    channel_name: '通路名稱',
+    website: '網站 / 連結',
+    location: '門市地點 / 地區',
+    cooperation_model: '合作模式',
+    first_order_qty: '首單數量',
+    restock_frequency: '補貨頻率',
+    event_timing: '活動 / 檔期',
+  };
+  const _fdLabel = k => FD_LABELS[k] || k;
+  // 排序:讓重要欄位(IP、品牌、商品、數量、預算、時間)在上面
+  const _order = ['ip_name','brand_name','channel_name','party_role','industry',
+    'authorization_status','ip_market_status','license_scope','license_model',
+    'products','products_other','purpose','customization_focus',
+    'quantity','first_order_qty','budget','launch_time','expected_launch_time','design_status',
+    'target_market','target_audience','concept','description',
+    'shared_investment','profit_model','brand_positioning','prior_experience',
+    'cooperation_model','restock_frequency','event_timing','location','website','ip_links'];
+  const _rank = k => { const i = _order.indexOf(k); return i < 0 ? 999 : i; };
+  const rows = Object.entries(fd)
+    .sort((a,b) => _rank(a[0]) - _rank(b[0]))
+    .map(([k,v]) => {
+      let display = v;
+      if (Array.isArray(v)) display = v.join('、');
+      else if (typeof v === 'object' && v) display = JSON.stringify(v);
+      return `<tr>
+        <td style="padding:6px 10px;font-size:12px;color:var(--muted);white-space:nowrap;vertical-align:top">${_fdLabel(k)}</td>
+        <td style="padding:6px 10px;font-size:13px">${display||'—'}</td>
+      </tr>`;
+    }).join('');
   const atts = Array.isArray(rec.attachments) ? rec.attachments : [];
 
   showModal('合作洽詢詳細', `
@@ -10107,12 +10160,11 @@ function renderCS() {
 
   const statusColor = { '未回覆':'tag-red','處理中':'tag-orange','已回覆':'tag-blue','已結案':'tag-grey' };
   const platformColor = { 'Instagram DM':'tag-purple','LINE':'tag-green','蝦皮':'tag-orange','PINKOI':'tag-blue','官網-聯絡表單':'tag-teal','官網-信箱':'tag-teal','官網-聊天':'tag-teal','門市':'tag-grey' };
-  // 主管/管理員可刪除
+  // 只有管理者(admin / 老闆)可刪除客服記錄
   const _ep = effectiveProfile() || {};
-  const isAdmin = ['admin','manager','management'].includes(_ep.role)
+  const isAdmin = _ep.role === 'admin'
     || _ep.email === 'cailing0516@gmail.com'
-    || state.user?.email === 'cailing0516@gmail.com'
-    || _ep.name === '蔡采玲';
+    || state.user?.email === 'cailing0516@gmail.com';
 
   return `
     <div class="tabs">
@@ -33850,11 +33902,10 @@ async function handleAction(action, id, dataset) {
 
     case 'delete-cs': {
       const _ep = effectiveProfile() || {};
-      const _isAdmin = ['admin','manager','management'].includes(_ep.role)
+      const _isAdmin = _ep.role === 'admin'
         || _ep.email === 'cailing0516@gmail.com'
-        || state.user?.email === 'cailing0516@gmail.com'
-        || _ep.name === '蔡采玲';
-      if (!_isAdmin) { showToast('只有主管/管理員可以刪除客服記錄', 'error'); return; }
+        || state.user?.email === 'cailing0516@gmail.com';
+      if (!_isAdmin) { showToast('只有管理者可以刪除客服記錄', 'error'); return; }
       const summary = (dataset && dataset.summary) || '';
       if (!confirm(`確定要刪除這筆客服記錄?\n${summary?`「${summary}」\n`:''}刪除後不可復原。`)) return;
       const { error } = await db.from('cs_records').delete().eq('id', id);
