@@ -37894,9 +37894,16 @@ window.acctPrint = function(tabType) {
   });
   const totalAll = rows.reduce((s,r)=>s+(r.amount||0), 0);
 
-  // 小結名單 = grouped ∪ 有預算 > 0 的員工(餐費才加,只補到小結,不建空白明細)
+  // 小結名單 = grouped ∪ 所有在職員工(即使金額 0 也要印)+ 有預算 > 0 的歷史員工
   const summaryMap = { ...grouped };
   if (isMeal) {
+    // 1) 所有在職員工都要列
+    (state.data.users||[]).filter(u => u.is_active !== false).forEach(u => {
+      if (u.name && !summaryMap[u.name]) {
+        summaryMap[u.name] = { rows: [], total: 0 };
+      }
+    });
+    // 2) 有預算但不在在職名單的,也補上(例如歷史員工)
     try {
       const budgetsRaw = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}');
       Object.entries(budgetsRaw).forEach(([name, budget]) => {
