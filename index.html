@@ -37894,23 +37894,19 @@ window.acctPrint = function(tabType) {
   });
   const totalAll = rows.reduce((s,r)=>s+(r.amount||0), 0);
 
-  // 小結名單規則(餐費):
-  //   · 有實際支出 → 必列(無論預算)
-  //   · 在職員工 + 餐費預算 > 0 → 必列(即使 0 金額,方便看未用額度)
-  //   · 預算 = 0 的員工 → 不列(視為不在餐費方案)
+  // 小結名單規則(對齊側邊餐費統計):
+  //   名單 = profiles 全員 ∪ 預算 map 所有 key,再篩選 budget > 0
+  //   有實際支出但 budget=0 的仍列(避免漏掉歷史資料)
   const summaryMap = { ...grouped };
   if (isMeal) {
-    let budgetsRaw = {};
-    try { budgetsRaw = JSON.parse(localStorage.getItem('meal_budgets_per_employee') || '{}'); } catch (e) {}
-    // 在職員工 + 預算>0 才補進去
-    (state.data.users||[]).filter(u => u.is_active !== false).forEach(u => {
-      if (u.name && !summaryMap[u.name] && (budgetsRaw[u.name]||0) > 0) {
-        summaryMap[u.name] = { rows: [], total: 0 };
-      }
-    });
-    // 歷史員工(不在在職名單)但預算>0 也補
-    Object.entries(budgetsRaw).forEach(([name, budget]) => {
-      if ((budget||0) > 0 && !summaryMap[name]) {
+    const _allNames = Array.from(new Set([
+      ...((state.data.users||[]).map(u => u.name).filter(Boolean)),
+      ...Object.keys(state.data.mealBudgets || {}),
+    ]));
+    _allNames.forEach(name => {
+      if (summaryMap[name]) return;   // 已有支出的就不動
+      const budget = (typeof getMealBudgetForEmployee === 'function') ? getMealBudgetForEmployee(name) : 0;
+      if (budget > 0) {
         summaryMap[name] = { rows: [], total: 0 };
       }
     });
