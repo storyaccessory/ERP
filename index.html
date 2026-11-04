@@ -1976,7 +1976,7 @@ function renderDashboard() {
             // 主事項過期(沒有子任務的單純過期任務) → 跟過期子任務一樣顯示紅字
             // 讓「單人沒子任務的過期任務」一眼看到名字是紅的,跟子任務過期視覺一致
             const eventOverdueChip = (eventOv && overdueSubs.length === 0 && names)
-              ? `<span style="font-size:11px;color:#e53935;font-weight:600">⚠ 逾期 ${dueLabel}${names?` · ${names}`:''}</span>`
+              ? `<span style="font-size:11px;color:#e53935">⚠ 逾期 ${dueLabel}${names?` · ${names}`:''}</span>`
               : '';
             const namesChip = (eventOverdueChip || overdueSubs.length)
               ? ''  // 已經在紅字裡顯示過了,不再重複
