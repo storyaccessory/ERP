@@ -1973,12 +1973,21 @@ function renderDashboard() {
             }).join('　');
             const onclick = isCs ? `modalEditCS('${t.id}')` : `calViewEvent('${t.id}')`;
             const icon = isCs ? '<span style="font-size:11px;flex-shrink:0">💬</span>' : '';
+            // 主事項過期(沒有子任務的單純過期任務) → 跟過期子任務一樣顯示紅字
+            // 讓「單人沒子任務的過期任務」一眼看到名字是紅的,跟子任務過期視覺一致
+            const eventOverdueChip = (eventOv && overdueSubs.length === 0 && names)
+              ? `<span style="font-size:11px;color:#e53935;font-weight:600">⚠ 逾期 ${dueLabel}${names?` · ${names}`:''}</span>`
+              : '';
+            const namesChip = (eventOverdueChip || overdueSubs.length)
+              ? ''  // 已經在紅字裡顯示過了,不再重複
+              : (names ? `<span style="font-size:11px;color:var(--muted)">👤 ${names}</span>` : '');
             return `<div style="display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid #f0f0f0;cursor:pointer" onclick="${onclick}">
               <span style="width:8px;height:8px;border-radius:50%;background:${pColor};flex-shrink:0"></span>
               <span style="font-size:11px;font-weight:700;color:var(--danger);min-width:50px;white-space:nowrap;flex-shrink:0">${dueLabel}</span>
               <div style="flex:1;min-width:0;display:flex;align-items:baseline;gap:6px;flex-wrap:wrap">
                 ${icon}<span style="font-size:13px;font-weight:700;color:#1a1a1a;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${title}</span>
-                ${names ? `<span style="font-size:11px;color:var(--muted)">👤 ${names}</span>` : ''}
+                ${eventOverdueChip}
+                ${namesChip}
                 ${subsHtml ? `<span style="font-size:11px">${subsHtml}</span>` : ''}
               </div>
             </div>`;
