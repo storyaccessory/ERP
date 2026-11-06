@@ -13243,9 +13243,12 @@ function _renderDevTaskRow(task, project) {
           ? '#f57c00'
           : 'var(--border)';
         const _logCount = Array.isArray(task.date_change_log) ? task.date_change_log.length : 0;
-        const _logBtn = _logCount > 0 ? `<button onclick="event.stopPropagation();window._devShowDateLog('${task.id}')" title="日期變更軌跡 (${_logCount} 筆)" style="margin-left:3px;background:none;border:none;cursor:pointer;font-size:11px;padding:0 2px;color:#1565c0">📋${_logCount}</button>` : '';
+        // 固定佔位,讓有無 log 的欄位寬度一致
+        const _logBtn = _logCount > 0
+          ? `<button onclick="event.stopPropagation();window._devShowDateLog('${task.id}')" title="日期變更軌跡 (${_logCount} 筆)" style="background:none;border:none;cursor:pointer;font-size:10px;padding:0;color:#1565c0;width:22px;flex-shrink:0;text-align:center">📋${_logCount}</button>`
+          : `<span style="width:22px;flex-shrink:0"></span>`;
         return `<div style="display:flex;align-items:center;gap:2px"><input type="date" value="${cur||''}" onchange="window._devSetTaskDate('${task.id}',this.value)"
-          style="flex:1;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1.5px solid ${borderCol};border-radius:3px" ${isCancelled?'disabled':''}>${_logBtn}</div>${delayBadge}`;
+          style="flex:1;min-width:0;padding:2px;font-size:11px;font-family:monospace;color:${dateColor};font-weight:${isMilestone?600:400};border:1.5px solid ${borderCol};border-radius:3px" ${isCancelled?'disabled':''}>${_logBtn}</div>${delayBadge}`;
       })()}
     </td>
     <td style="padding:5px;text-align:center;font-size:11px">
@@ -13977,27 +13980,34 @@ window._devSetTaskDate = async function(taskId, newDate) {
   //  1) 第一次設定 / 沒變動
   //  2) 專案還沒啟動(都在規劃)
   //  3) 把日期「拉前」(deadline 變緊 · 等於要求更早交 · 新日期就是新 deadline · 不是「提早」)
-  if (!oldDate || !newDate || oldDate === newDate || _notStarted || _delta0 < 0) {
+  if (!oldDate || !newDate || oldDate === newDate || _notStarted) {
     const reasonTxt = !oldDate ? '首次設定'
       : oldDate === newDate ? '無變動'
-      : _notStarted ? '規劃階段調整(專案未啟動,基準同步)'
-      : `拉前 ${-_delta0} 天 · 壓縮時程(新日期即新 deadline)`;
+      : '規劃階段調整(專案未啟動,基準同步)';
     await _devApplyDateChange(taskId, oldDate, newDate, {
-      source: _notStarted ? 'planning' : (_delta0 < 0 ? 'tighten' : 'manual'),
+      source: _notStarted ? 'planning' : 'manual',
       reason: reasonTxt,
       shiftBaseline: true,
     });
-    showToast(_notStarted ? '規劃日期已更新(基準同步)' : (_delta0 < 0 ? `已拉前 ${-_delta0} 天 · 基準同步` : '日期已更新'));
+    showToast(_notStarted ? '規劃日期已更新(基準同步)' : '日期已更新');
     await loadDev(); try { await loadCalendarEvents?.(); } catch(e) {} renderApp();
     return;
   }
   const delta = _delta0;
-  const dir = '延後';
+  const dir = delta > 0 ? '延後' : '拉前';
+  const isLate = delta > 0;
+  // 找出後面「未完成」且在這之後排序的任務,預覽數量
+  const laterOpen = (p.dev_tasks||[]).filter(t =>
+    (t.order_num||0) > (task.order_num||0) &&
+    t.step_group !== 'custom' &&
+    t.status !== '完成' && t.status !== '取消'
+  );
   showModal(`📅 ${task.step_name} ${dir} ${Math.abs(delta)} 天`, `
     <div style="font-size:13px;line-height:1.7;margin-bottom:12px">
       <div><b>負責人:</b> ${task.assignee_name||'—'}</div>
       <div><b>原日期:</b> ${oldDate} → <b>新日期:</b> ${newDate}</div>
     </div>
+    ${isLate ? `
     <div style="padding:10px 12px;background:#fff8e1;border-radius:6px;margin-bottom:10px;border-left:3px solid #e65100">
       <div style="font-size:12px;font-weight:700;color:#e65100;margin-bottom:6px">⚖ 這次調整的原因?(事後查 KPI 用)</div>
       <div style="display:flex;flex-direction:column;gap:4px" id="dc-reason-box">
@@ -14019,34 +14029,85 @@ window._devSetTaskDate = async function(taskId, newDate) {
         </label>
       </div>
       <input class="form-control" id="dc-reason-note" placeholder="(選填) 補一句細節…" style="margin-top:8px;font-size:12px">
+    </div>` : ''}
+    <!-- 後續任務處理方式 -->
+    <div style="padding:10px 12px;background:#e3f2fd;border-radius:6px;border-left:3px solid #1565c0">
+      <div style="font-size:12px;font-weight:700;color:#1565c0;margin-bottom:6px">🔗 後面 ${laterOpen.length} 筆未完成任務怎麼辦?</div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="dc-cascade" value="none" checked style="margin-top:2px">
+          <div><b>只動這一筆</b> <span style="color:var(--muted)">(後面維持原日期)</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="dc-cascade" value="shift" style="margin-top:2px">
+          <div><b>保留原本間隔</b> <span style="color:var(--muted)">(後面每筆同樣 ${isLate?'+':'-'}${Math.abs(delta)} 天)</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="dc-cascade" value="reflow" style="margin-top:2px">
+          <div><b>依模板工作天重排</b> <span style="color:var(--muted)">(從這筆的新日期往下,扣週末+國定假日重算)</span></div>
+        </label>
+      </div>
     </div>
   `, [
     { label: '取消', onclick: () => {
-      // 把 input 恢復原值
       const inp = document.querySelector(`input[onchange*="${taskId}"]`);
       if (inp) inp.value = oldDate || '';
       closeModal();
     }},
     { label: '✓ 套用', primary: true, onclick: async () => {
-      const sel = document.querySelector('input[name="dc-reason"]:checked');
-      const sourceKey = sel?.value || 'manual';
-      const shift = sel?.dataset?.shift === '1';
-      const note = document.getElementById('dc-reason-note')?.value?.trim() || null;
-      const sourceLabel = {
-        upstream: '上游延遲連帶', pm_slack: 'PM 主動放寬', self: '本人原因', external: '外部因素(廠商/料件)'
-      }[sourceKey] || '手動調整';
+      // 1. 本筆
+      let sourceKey, shift, note, sourceLabel;
+      if (isLate) {
+        const sel = document.querySelector('input[name="dc-reason"]:checked');
+        sourceKey = sel?.value || 'manual';
+        shift = sel?.dataset?.shift === '1';
+        note = document.getElementById('dc-reason-note')?.value?.trim() || null;
+        sourceLabel = { upstream:'上游延遲連帶', pm_slack:'PM 主動放寬', self:'本人原因', external:'外部因素(廠商/料件)' }[sourceKey] || '手動調整';
+      } else {
+        sourceKey = 'tighten'; shift = true; note = null; sourceLabel = `拉前 ${-delta} 天 · 壓縮時程`;
+      }
       await _devApplyDateChange(taskId, oldDate, newDate, {
-        source: sourceKey,
-        reason: note ? `${sourceLabel} · ${note}` : sourceLabel,
-        shiftBaseline: shift,
+        source: sourceKey, reason: note ? `${sourceLabel} · ${note}` : sourceLabel, shiftBaseline: shift,
       });
-      showToast(`日期已更新 (${sourceLabel})`);
+      // 2. 後續
+      const cascade = document.querySelector('input[name="dc-cascade"]:checked')?.value || 'none';
+      let cascadeCount = 0;
+      if (cascade === 'shift') {
+        for (const t of laterOpen) {
+          const newD = _shiftDate(t.due_date, delta);
+          await _devApplyDateChange(t.id, t.due_date, newD, {
+            source: isLate ? 'pm_decision' : 'tighten',
+            reason: `隨 ${task.step_name} ${dir} ${Math.abs(delta)} 天 · 保留原間隔`,
+            shiftBaseline: shift,
+          });
+          cascadeCount++;
+        }
+      } else if (cascade === 'reflow') {
+        // 從這筆的新日期開始,依模板工作天重算下游主線
+        // 每個 pipeline 分別算,但起點是這筆的新日
+        for (const pl of (p.pipelines||[])) {
+          const { dates } = _calcMainDates(pl, newDate);
+          for (const d of dates) {
+            const dt = (p.dev_tasks||[]).find(x => x.pipeline===pl && x.step_group==='main' && x.step_key===d.step_key);
+            if (!dt || dt.id === taskId || dt.status==='完成' || dt.status==='取消') continue;
+            if ((dt.order_num||0) <= (task.order_num||0)) continue;
+            if (d.expected_date === dt.due_date) continue;
+            await _devApplyDateChange(dt.id, dt.due_date, d.expected_date, {
+              source: 'reflow',
+              reason: `隨 ${task.step_name} 調整 · 依模板重排`,
+              shiftBaseline: true,
+            });
+            cascadeCount++;
+          }
+        }
+      }
+      showToast(`✓ 本筆已更新` + (cascadeCount ? ` · 連動 ${cascadeCount} 筆` : ''));
       closeModal();
       await loadDev();
       try { await loadCalendarEvents?.(); } catch(e) {}
       renderApp();
     }},
-  ], { width: '540px' });
+  ], { width: '560px' });
 };
 
 // 顯示任務的日期變更軌跡
