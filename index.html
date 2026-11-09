@@ -13013,6 +13013,7 @@ function _renderDevDetail(id) {
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="window._devEditProject('${p.id}')">✏️ 編輯專案</button>
+        <button class="btn btn-sm btn-outline" onclick="window._devUndoBatch('${p.id}')" style="background:#fce4ec;color:#c2185b" title="還原最近一批日期變更">⟲ 復原最近變更</button>
         <button class="btn btn-sm btn-outline" onclick="window._devReflowDates('${p.id}')" style="background:#fff3e0;color:#e65100" title="從某個日期起,未完成任務依模板工作天重排,再手動微調">⚙ 重排未完成日期</button>
         <button class="btn btn-sm btn-outline" onclick="window._devRebuildCalendar('${p.id}')" style="background:#e3f2fd;color:#1565c0">🔄 重建行事曆</button>
         <button class="btn btn-sm" style="background:#ffebee;color:#c62828" onclick="window._devDeleteProject('${p.id}')">🗑 刪除專案</button>
@@ -14040,7 +14041,7 @@ window._devSetTaskDate = async function(taskId, newDate) {
         </label>
         <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
           <input type="radio" name="dc-cascade" value="shift" style="margin-top:2px">
-          <div><b>保留原本間隔</b> <span style="color:var(--muted)">(後面每筆同樣 ${isLate?'+':'-'}${Math.abs(delta)} 天)</span></div>
+          <div><b>保留原本間隔</b> <span style="color:var(--muted)">(後面每筆同樣 ${isLate?'+':'-'}${Math.abs(_workdaysDiff(oldDate, newDate))} 工作天 · 扣週末+國定假日)</span></div>
         </label>
         <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
           <input type="radio" name="dc-cascade" value="reflow" style="margin-top:2px">
@@ -14073,11 +14074,13 @@ window._devSetTaskDate = async function(taskId, newDate) {
       const cascade = document.querySelector('input[name="dc-cascade"]:checked')?.value || 'none';
       let cascadeCount = 0;
       if (cascade === 'shift') {
+        // 用「工作天」位移:算這筆的日曆天 delta 對應幾個工作天,下游用同樣的工作天位移
+        const workdayDelta = _workdaysDiff(oldDate, newDate);
         for (const t of laterOpen) {
-          const newD = _shiftDate(t.due_date, delta);
+          const newD = _shiftWorkdays(t.due_date, workdayDelta);
           await _devApplyDateChange(t.id, t.due_date, newD, {
             source: isLate ? 'pm_decision' : 'tighten',
-            reason: `隨 ${task.step_name} ${dir} ${Math.abs(delta)} 天 · 保留原間隔`,
+            reason: `隨 ${task.step_name} ${dir} ${Math.abs(workdayDelta)} 工作天 · 保留原間隔`,
             shiftBaseline: shift,
           });
           cascadeCount++;
@@ -14101,7 +14104,7 @@ window._devSetTaskDate = async function(taskId, newDate) {
           }
         }
       }
-      showToast(`✓ 本筆已更新` + (cascadeCount ? ` · 連動 ${cascadeCount} 筆` : ''));
+      showToast(`✓ 本筆已更新` + (cascadeCount ? ` · 連動 ${cascadeCount} 筆` : '') + ' · 行事曆已自動同步');
       closeModal();
       await loadDev();
       try { await loadCalendarEvents?.(); } catch(e) {}
@@ -15062,6 +15065,99 @@ window._devEditProject = async function(projectId) {
 
 // 重建行事曆事件(拿掉舊的,並把 dev_tasks 步驟名/is_milestone 從模板同步再重建)
 // 從指定日期起,未完成任務依模板工作天重排(用於中段整頓節奏)
+// 復原最近一批日期變更(以 60 秒時間窗聚合)
+window._devUndoBatch = async function(projectId) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  // 蒐集所有 tasks 的 log,列出來給你挑哪一批
+  const allEntries = [];
+  (p.dev_tasks||[]).forEach(t => {
+    const log = Array.isArray(t.date_change_log) ? t.date_change_log : [];
+    log.forEach((e, idx) => {
+      // 略過本來就是「首次設定 / 無變動」這類沒意義的記錄
+      if (!e.at || !e.old || !e.new || e.old === e.new) return;
+      allEntries.push({ task: t, entry: e, idx });
+    });
+  });
+  if (!allEntries.length) { showToast('沒有可復原的日期變更', 'info'); return; }
+  allEntries.sort((a,b) => b.entry.at.localeCompare(a.entry.at));
+
+  // 以 60 秒為一批
+  const batches = [];
+  let cur = null;
+  allEntries.forEach(x => {
+    const t = new Date(x.entry.at).getTime();
+    if (!cur || Math.abs(cur.ts - t) > 60*1000) {
+      cur = { ts: t, at: x.entry.at, items: [x], sources: new Set([x.entry.source||'manual']), by: x.entry.by_name||'' };
+      batches.push(cur);
+    } else {
+      cur.items.push(x);
+      cur.sources.add(x.entry.source||'manual');
+    }
+  });
+
+  const srcLabel = s => ({ upstream:'上游延遲', pm_slack:'PM 放寬', self:'本人原因', external:'外部', pm_decision:'PM 決策', manual:'手動', tighten:'拉前壓縮', reflow:'模板重排', planning:'規劃階段' }[s] || s);
+  const body = `
+    <div style="font-size:12px;line-height:1.7;margin-bottom:10px;color:var(--muted)">
+      勾選要還原的批次(每個批次是 60 秒內的連動變更),按「還原」會把那批 task 的 due_date 回到變更前。
+    </div>
+    <div style="max-height:50vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="background:#fafafa;position:sticky;top:0">
+          <tr>
+            <th style="padding:6px;width:30px"></th>
+            <th style="padding:6px;text-align:left;width:140px">時間</th>
+            <th style="padding:6px;text-align:center;width:50px">筆數</th>
+            <th style="padding:6px;text-align:center;width:100px">來源</th>
+            <th style="padding:6px;text-align:left">內容</th>
+          </tr>
+        </thead>
+        <tbody>
+          ${batches.slice(0, 20).map((b, i) => {
+            const preview = b.items.slice(0,3).map(x => x.task.step_name).join(', ') + (b.items.length>3?` … 共 ${b.items.length}`:'');
+            const sourceDisplay = [...b.sources].map(srcLabel).join(' / ');
+            return `<tr style="border-top:1px solid #eee">
+              <td style="padding:6px;text-align:center"><input type="radio" name="undo-batch" value="${i}" ${i===0?'checked':''}></td>
+              <td style="padding:6px;font-size:11px;color:var(--muted)">${b.at.slice(0,16).replace('T',' ')}</td>
+              <td style="padding:6px;text-align:center;font-weight:600">${b.items.length}</td>
+              <td style="padding:6px;text-align:center;font-size:11px">${sourceDisplay}</td>
+              <td style="padding:6px;font-size:11px">${preview}</td>
+            </tr>`;
+          }).join('')}
+        </tbody>
+      </table>
+    </div>
+    <div style="font-size:11px;color:var(--muted);margin-top:8px">
+      · 預設勾最新那一批 · 只還原 due_date,不碰已完成的任務
+    </div>
+  `;
+  showModal('⟲ 復原最近日期變更', body, [
+    { label: '取消', onclick: closeModal },
+    { label: '✓ 還原這一批', primary: true, onclick: async () => {
+      const sel = document.querySelector('input[name="undo-batch"]:checked');
+      const idx = sel ? parseInt(sel.value) : 0;
+      const batch = batches[idx];
+      if (!batch) { showToast('請選要還原的批次', 'error'); return; }
+      let ok = 0, skipped = 0;
+      for (const x of batch.items) {
+        const t = x.task;
+        if (t.status === '完成' || t.status === '取消') { skipped++; continue; }
+        await _devApplyDateChange(t.id, t.due_date, x.entry.old, {
+          source: 'undo',
+          reason: `還原 ${x.entry.at.slice(0,16).replace('T',' ')} 的變更 (原因:${srcLabel(x.entry.source)})`,
+          shiftBaseline: !!x.entry.baseline_shifted,
+        });
+        ok++;
+      }
+      showToast(`✓ 已還原 ${ok} 筆` + (skipped?` · 略過 ${skipped} 筆已完成/取消`:''));
+      closeModal();
+      await loadDev();
+      try { await loadCalendarEvents?.(); } catch(e) {}
+      renderApp();
+    }}
+  ], { width: '640px' });
+};
+
 window._devReflowDates = async function(projectId) {
   const p = (state.data.dev||[]).find(x => x.id === projectId);
   if (!p) return;
@@ -15705,6 +15801,36 @@ function _shiftDate(dateStr, deltaDays) {
   const raw = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
   // 自動 snap 到工作日(延後 → 下一個工作日;提前 → 上一個工作日)
   return _snapToWorkday(raw, deltaDays >= 0 ? 'forward' : 'backward');
+}
+// 以工作天為單位推移日期(扣週末 + 國定假日)
+// deltaWorkdays > 0 → 往後 N 個工作天;< 0 → 往前 N 個工作天
+function _shiftWorkdays(dateStr, deltaWorkdays) {
+  if (!dateStr || !deltaWorkdays) return dateStr;
+  const d = new Date(dateStr + 'T00:00:00');
+  const step = deltaWorkdays > 0 ? 1 : -1;
+  let need = Math.abs(deltaWorkdays);
+  while (need > 0) {
+    d.setDate(d.getDate() + step);
+    const ds = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (_isWorkdayStr(ds)) need--;
+  }
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+}
+// 算兩個日期間的工作天數(含方向)
+function _workdaysDiff(fromStr, toStr) {
+  if (!fromStr || !toStr) return 0;
+  const a = new Date(fromStr + 'T00:00:00');
+  const b = new Date(toStr + 'T00:00:00');
+  if (a.getTime() === b.getTime()) return 0;
+  const step = a < b ? 1 : -1;
+  let count = 0;
+  const cur = new Date(a);
+  while (cur.getTime() !== b.getTime()) {
+    cur.setDate(cur.getDate() + step);
+    const ds = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
+    if (_isWorkdayStr(ds)) count += step;
+  }
+  return count;
 }
 
 // 彈性加入自訂任務到某 pipeline
