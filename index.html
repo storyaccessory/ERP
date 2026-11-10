@@ -17060,7 +17060,7 @@ function renderAccounting() {
               <div style="font-size:11px;color:var(--muted);margin-top:1px">統編：${info.tax_id}</div>` : ''}
               <!-- 會計 Mail -->
               ${info.email ? `
-              <div style="font-size:11px;color:var(--muted);margin-top:1px">📧 <a href="mailto:${info.email}" style="color:var(--accent);word-break:break-all">${info.email}</a></div>` : ''}
+              <div style="font-size:11px;color:var(--muted);margin-top:1px"><a href="mailto:${info.email}" style="color:var(--accent);word-break:break-all">${info.email}</a></div>` : ''}
               <!-- 已開票明細 -->
               ${info.invoiceAmounts.length ? `
               <div style="margin-top:5px;padding:5px 8px;background:#f0f4ff;border-radius:5px;font-size:11px">
