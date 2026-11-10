@@ -8424,7 +8424,7 @@ async function modalAddAR(existing) {
 
       <!-- 上傳請款單 -->
       <div class="form-group">
-        <label>📎 上傳請款單 / 對帳單（AI 解析請款月份、金額、品項）</label>
+        <label>📎 上傳請款單（AI 解析請款月份、金額、品項）</label>
         ${existing?.attachment_url ? `
         <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
           <span style="font-size:18px">📎</span>
@@ -8435,6 +8435,20 @@ async function modalAddAR(existing) {
         </div>` : ''}
         <input class="form-control" id="ar-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px">
         <div id="ar-parse-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
+      </div>
+
+      <!-- 上傳對帳單(獨立檔案) -->
+      <div class="form-group">
+        <label>📋 上傳對帳單</label>
+        ${existing?.statement_url ? `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
+          <span style="font-size:18px">📋</span>
+          <a href="${existing.statement_url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1">${existing.statement_name||'目前對帳單'}</a>
+          <label style="cursor:pointer;font-size:11px;color:#fff;background:var(--accent-dark);padding:3px 8px;border-radius:4px;white-space:nowrap">
+            🔄 替換<input type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="display:none" onchange="document.getElementById('ar-statement-file').files=this.files">
+          </label>
+        </div>` : ''}
+        <input class="form-control" id="ar-statement-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px">
       </div>
 
       <!-- 上傳發票檔案(可多張)— 上傳後 AI 自動辨識,把號碼/日期/金額帶到上面的發票區 -->
@@ -8638,6 +8652,21 @@ async function modalAddAR(existing) {
           payload.attachment_url = urlData.publicUrl;
           payload.attachment_name = file.name;
         }
+      }
+
+      // 對帳單(獨立檔案)
+      const stmtInput = document.getElementById('ar-statement-file');
+      const stmtFile = stmtInput?.files?.[0];
+      if (stmtFile) {
+        progressEl.style.display = 'block';
+        progressEl.textContent = '上傳對帳單中…';
+        const ext2 = ((stmtFile.name||'').split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g,'') || 'bin';
+        const fileName2 = `ar/stmt_${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext2}`;
+        const { error: upErr2 } = await db.storage.from('ar-attachments').upload(fileName2, stmtFile, { upsert: true });
+        if (upErr2) { showToast('對帳單上傳失敗:' + upErr2.message, 'error'); progressEl.style.display='none'; return; }
+        const { data: urlData2 } = db.storage.from('ar-attachments').getPublicUrl(fileName2, { download: stmtFile.name });
+        payload.statement_url = urlData2.publicUrl;
+        payload.statement_name = stmtFile.name;
       }
 
       // 發票檔案已經在每列的上傳時就直接 upload + 存隱藏欄位,這裡只要把第一張同步到舊欄位做向後相容
@@ -13013,6 +13042,7 @@ function _renderDevDetail(id) {
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="window._devEditProject('${p.id}')">✏️ 編輯專案</button>
+        <button class="btn btn-sm btn-outline" onclick="window._devShowAllReviewHistory('${p.id}')" style="background:#e1f5fe;color:#0277bd" title="看全專案所有品項的審查歷程">🔍 審查歷程總覽</button>
         <button class="btn btn-sm btn-outline" onclick="window._devShowAllDateLog('${p.id}')" style="background:#f3e5f5;color:#6a1b9a" title="看全專案每筆任務的日期變動歷程">📜 日期變動總覽</button>
         <button class="btn btn-sm btn-outline" onclick="window._devUndoBatch('${p.id}')" style="background:#fce4ec;color:#c2185b" title="還原最近一批日期變更">⟲ 復原最近變更</button>
         <button class="btn btn-sm btn-outline" onclick="window._devReflowDates('${p.id}')" style="background:#fff3e0;color:#e65100" title="從某個日期起,未完成任務依模板工作天重排,再手動微調">⚙ 重排未完成日期</button>
@@ -15234,6 +15264,68 @@ window._devEditProject = async function(projectId) {
 // 重建行事曆事件(拿掉舊的,並把 dev_tasks 步驟名/is_milestone 從模板同步再重建)
 // 從指定日期起,未完成任務依模板工作天重排(用於中段整頓節奏)
 // 復原最近一批日期變更(以 60 秒時間窗聚合)
+// 全專案審查歷程總覽 — 彙整所有品項的 review_history,方便 PM 回顧每一輪送審結果
+window._devShowAllReviewHistory = function(projectId) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const entries = [];
+  (p.dev_variants||[]).forEach(v => {
+    const hist = Array.isArray(v.review_history) ? v.review_history : [];
+    hist.forEach(e => entries.push({ variant: v, entry: e }));
+  });
+  // 排序:日期新→舊
+  entries.sort((a,b) => (b.entry.date||'').localeCompare(a.entry.date||''));
+  // 以「審查步驟 + 日期」分批
+  const batchKey = x => `${x.entry.date||''}__${x.entry.step_key||''}`;
+  const batches = {};
+  entries.forEach(x => {
+    const k = batchKey(x);
+    if (!batches[k]) batches[k] = { date: x.entry.date, step_name: x.entry.step_name, step_key: x.entry.step_key, reviewer: x.entry.reviewer_name, items: [] };
+    batches[k].items.push(x);
+  });
+  const sortedBatches = Object.values(batches).sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+  const batchesHtml = sortedBatches.length ? sortedBatches.map(b => {
+    const passCount = b.items.filter(x => x.entry.decision === 'pass').length;
+    const rejectCount = b.items.filter(x => x.entry.decision === 'reject').length;
+    const rowsHtml = b.items.map(x => {
+      const isReject = x.entry.decision === 'reject';
+      const badge = isReject
+        ? `<span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap">✕ 需校正</span>`
+        : `<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:10px;font-size:11px;font-weight:600;white-space:nowrap">✓ 通過</span>`;
+      return `<tr style="border-top:1px solid #f0f0f0">
+        <td style="padding:5px 8px;text-align:center">${badge}</td>
+        <td style="padding:5px 8px;font-size:12px">${x.variant.name}${x.variant.design_number?`<span style="color:var(--muted);font-family:monospace;margin-left:6px">🔢 ${x.variant.design_number}</span>`:''}</td>
+        <td style="padding:5px 8px;font-size:11px;color:#c62828">${x.entry.reason||'—'}</td>
+      </tr>`;
+    }).join('');
+    return `
+      <div style="border:1px solid var(--border);border-radius:8px;margin-bottom:10px;overflow:hidden">
+        <div style="padding:8px 12px;background:#f5f5f5;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:8px">
+          <div>
+            <b style="color:var(--accent-dark)">${b.date||'—'}</b>
+            <span style="color:var(--muted);margin-left:6px">· ${b.step_name||'審查'}</span>
+            ${b.reviewer?`<span style="color:var(--muted);font-size:11px;margin-left:6px">· 審查人 ${b.reviewer}</span>`:''}
+          </div>
+          <div style="display:flex;gap:6px;font-size:11px">
+            ${passCount?`<span style="background:#e8f5e9;color:#2e7d32;padding:2px 8px;border-radius:10px;font-weight:600">✓ 通過 ${passCount}</span>`:''}
+            ${rejectCount?`<span style="background:#ffebee;color:#c62828;padding:2px 8px;border-radius:10px;font-weight:600">✕ 校正 ${rejectCount}</span>`:''}
+          </div>
+        </div>
+        <table style="width:100%;border-collapse:collapse">${rowsHtml}</table>
+      </div>`;
+  }).join('') : '<div style="padding:30px;text-align:center;color:var(--muted);font-size:12px">尚無任何審查紀錄</div>';
+
+  showModal(`🔍 ${p.name} · 審查歷程總覽`, `
+    <div style="padding:8px 12px;background:#f5f5f5;border-radius:6px;font-size:12px;margin-bottom:10px;line-height:1.6">
+      每一次送審依「日期 + 步驟」彙整 · 列出每個品項是通過 ✓ 還是需校正 ✕,以及校正原因
+    </div>
+    <div style="max-height:60vh;overflow-y:auto">${batchesHtml}</div>
+  `, [
+    { label: '關閉', primary: true, onclick: closeModal }
+  ], { width: '760px' });
+};
+
 // 全專案日期變動總覽 — 一覽每筆任務「最初日 → 現在日」,以及變動次數
 window._devShowAllDateLog = function(projectId) {
   const p = (state.data.dev||[]).find(x => x.id === projectId);
@@ -16942,9 +17034,15 @@ function renderAccounting() {
                       })()}</td>
                       <td style="font-size:12px;color:var(--muted)">${r.invoice_date?.slice?.(0,10)||'—'}</td>
                       <td style="text-align:center">
-                        ${r.attachment_url
-                          ? `<a href="${r.attachment_url}" target="_blank" title="${r.attachment_name||'請款單'}" style="font-size:16px;color:var(--accent)">📎</a>`
-                          : `<span style="color:var(--muted);font-size:11px">—</span>`}
+                        <div style="display:flex;gap:4px;justify-content:center;align-items:center">
+                          ${r.attachment_url
+                            ? `<a href="${r.attachment_url}" target="_blank" title="請款單: ${r.attachment_name||''}" style="font-size:16px;color:var(--accent)">📎</a>`
+                            : ''}
+                          ${r.statement_url
+                            ? `<a href="${r.statement_url}" target="_blank" title="對帳單: ${r.statement_name||''}" style="font-size:16px;color:#7b1fa2">📋</a>`
+                            : ''}
+                          ${!r.attachment_url && !r.statement_url ? `<span style="color:var(--muted);font-size:11px">—</span>` : ''}
+                        </div>
                       </td>
                       <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.subject||'').replace(/"/g,'&quot;')}">${r.subject||'—'}</td>
                       <td><span class="tag ${SC[statusNorm]||'tag-grey'}">${statusNorm}</span></td>
