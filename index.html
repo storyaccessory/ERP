@@ -8422,42 +8422,27 @@ async function modalAddAR(existing) {
 
       <hr style="border:none;border-top:1px solid var(--border);margin:2px 0">
 
-      <!-- 📎 上傳請款單 / 對帳單(可多檔) -->
+      <!-- 📎 請款單(可多檔) -->
       <div class="form-group">
-        <label>📎 請款單 / 對帳單 <span style="font-size:11px;color:var(--muted)">(可留一份或多份;第一份會跑 AI 解析)</span></label>
-        <input type="hidden" id="ar-remove-invoice" value="0">
-        <input type="hidden" id="ar-remove-statement" value="0">
-        ${existing?.attachment_url ? `
-        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
-          <span style="font-size:18px">📎</span>
-          <a href="${existing.attachment_url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.attachment_name||'檔案 1'}</a>
-          <label style="cursor:pointer;font-size:11px;color:#fff;background:var(--accent-dark);padding:3px 8px;border-radius:4px;white-space:nowrap">
-            🔄 替換<input type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="display:none" onchange="document.getElementById('ar-file').files=this.files;document.getElementById('ar-remove-invoice').value='0'">
-          </label>
-          <button type="button" onclick="if(confirm('確定清除此檔案?')){document.getElementById('ar-remove-invoice').value='1';this.parentElement.style.display='none'}" style="background:#ffebee;color:#c62828;border:none;padding:3px 8px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap">✕ 清除</button>
+        <label>📎 請款單 <span style="font-size:11px;color:var(--muted)">(可留一份或多份 · 第一份會跑 AI 解析)</span></label>
+        <!-- 既有檔案清單(從 attachments 讀;舊資料從 attachment_url 補) -->
+        <div id="ar-attach-list" style="display:flex;flex-direction:column;gap:6px;margin-bottom:6px">
+          ${(() => {
+            const list = Array.isArray(existing?.attachments) && existing.attachments.length
+              ? existing.attachments
+              : (existing?.attachment_url ? [{ url: existing.attachment_url, name: existing.attachment_name || '請款單' }] : []);
+            return list.map((f, i) => `
+              <div class="ar-attach-row" data-idx="${i}" data-url="${f.url}" data-name="${(f.name||'').replace(/"/g,'&quot;')}" style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
+                <span style="font-size:18px">📎</span>
+                <a href="${f.url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${f.name||'檔案'}</a>
+                <button type="button" onclick="if(confirm('確定清除此檔案?')){this.closest('.ar-attach-row').remove()}" style="background:#ffebee;color:#c62828;border:none;padding:3px 8px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap">✕ 清除</button>
+              </div>
+            `).join('');
+          })()}
         </div>
-        <input class="form-control" id="ar-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px;display:none">
-        ` : `
-        <input class="form-control" id="ar-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px">
-        `}
-        ${existing?.statement_url ? `
-        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
-          <span style="font-size:18px">📎</span>
-          <a href="${existing.statement_url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.statement_name||'檔案 2'}</a>
-          <label style="cursor:pointer;font-size:11px;color:#fff;background:var(--accent-dark);padding:3px 8px;border-radius:4px;white-space:nowrap">
-            🔄 替換<input type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="display:none" onchange="document.getElementById('ar-statement-file').files=this.files;document.getElementById('ar-remove-statement').value='0'">
-          </label>
-          <button type="button" onclick="if(confirm('確定清除此檔案?')){document.getElementById('ar-remove-statement').value='1';this.parentElement.style.display='none'}" style="background:#ffebee;color:#c62828;border:none;padding:3px 8px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap">✕ 清除</button>
-        </div>
-        <input class="form-control" id="ar-statement-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px;margin-top:6px;display:none">
-        ` : `
-        ${existing?.attachment_url ? `
-        <div style="margin-top:6px;font-size:11px;color:var(--muted)">↓ 再加一份(選填)</div>
-        <input class="form-control" id="ar-statement-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px;margin-top:4px">
-        ` : `
-        <input type="hidden" id="ar-statement-file">
-        `}
-        `}
+        <!-- 新增檔案(可一次選多個) -->
+        <input class="form-control" id="ar-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" multiple style="padding:6px">
+        <div style="font-size:11px;color:var(--muted);margin-top:4px">按住 Cmd/Ctrl 可一次選多檔</div>
         <div id="ar-parse-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
       </div>
 
@@ -8633,59 +8618,30 @@ async function modalAddAR(existing) {
       const progressEl = document.getElementById('ar-upload-progress');
       const safeCustomer = customer.replace(/[^a-zA-Z0-9]/g, '').slice(0, 12) || 'customer';
 
-      // 上傳請款單附件:路徑用安全 ASCII;下載時透過 ?download=原檔名 參數讓檔名保持原始中文
+      // 多檔請款單:從介面上還保留的 .ar-attach-row 讀 keep list;再把 input[multiple] 新選的檔案上傳 append
+      const keptRows = [...document.querySelectorAll('#ar-attach-list .ar-attach-row')];
+      const attachments = keptRows.map(r => ({ url: r.dataset.url, name: r.dataset.name }));
       const fileInput = document.getElementById('ar-file');
-      const file = fileInput?.files?.[0];
-      if (file) {
+      const newFiles = fileInput?.files ? [...fileInput.files] : [];
+      const file = newFiles[0]; // 給下方 AI 解析用
+      for (const f of newFiles) {
         progressEl.style.display = 'block';
-        progressEl.textContent = '檢查重複中…';
-        // 先查 DB 看有沒有相同檔名的紀錄(同月或全部)
-        const { data: dupRows } = await db.from('accounts_receivable')
-          .select('id, customer_name, year_month').eq('attachment_name', file.name).limit(3);
-        let _skipUpdate = false;
-        if (dupRows && dupRows.length > 0 && (!existing || !dupRows.every(r => r.id === existing.id))) {
-          const dupSample = dupRows.filter(r => !existing || r.id !== existing.id)
-            .map(r => `${r.customer_name||'(無客戶)'} / ${r.year_month||''}`).slice(0,3).join('\n');
-          if (!confirm(`已有同名檔案「${file.name}」用過:\n\n${dupSample}\n\n要繼續上傳嗎?\n(按確定繼續,按取消跳過這次檔案但其他欄位仍會儲存)`)) {
-            _skipUpdate = true;
-            showToast('已保留原本的請款單', 'info');
-          }
-        }
-        if (!_skipUpdate) {
-          progressEl.textContent = '上傳請款單中…';
-          // 安全 ASCII 路徑(不放中文,避免 Invalid key);原檔名靠 download 參數還原
-          const ext = ((file.name||'').split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g,'') || 'bin';
-          const fileName = `ar/${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
-          const { error: upErr } = await db.storage.from('ar-attachments').upload(fileName, file, { upsert: true });
-          if (upErr) { showToast('請款單上傳失敗：' + upErr.message, 'error'); progressEl.style.display='none'; return; }
-          const { data: urlData } = db.storage.from('ar-attachments').getPublicUrl(fileName, { download: file.name });
-          payload.attachment_url = urlData.publicUrl;
-          payload.attachment_name = file.name;
-        }
+        progressEl.textContent = `上傳 ${f.name}…`;
+        const ext = ((f.name||'').split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g,'') || 'bin';
+        const fileName = `ar/${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext}`;
+        const { error: upErr } = await db.storage.from('ar-attachments').upload(fileName, f, { upsert: true });
+        if (upErr) { showToast(`${f.name} 上傳失敗:` + upErr.message, 'error'); progressEl.style.display='none'; return; }
+        const { data: urlData } = db.storage.from('ar-attachments').getPublicUrl(fileName, { download: f.name });
+        attachments.push({ url: urlData.publicUrl, name: f.name });
       }
-
-      // 對帳單(獨立檔案)
-      const stmtInput = document.getElementById('ar-statement-file');
-      const stmtFile = stmtInput?.files?.[0];
-      if (stmtFile) {
-        progressEl.style.display = 'block';
-        progressEl.textContent = '上傳對帳單中…';
-        const ext2 = ((stmtFile.name||'').split('.').pop() || 'bin').toLowerCase().replace(/[^a-z0-9]/g,'') || 'bin';
-        const fileName2 = `ar/stmt_${Date.now()}_${Math.random().toString(36).slice(2,8)}.${ext2}`;
-        const { error: upErr2 } = await db.storage.from('ar-attachments').upload(fileName2, stmtFile, { upsert: true });
-        if (upErr2) { showToast('對帳單上傳失敗:' + upErr2.message, 'error'); progressEl.style.display='none'; return; }
-        const { data: urlData2 } = db.storage.from('ar-attachments').getPublicUrl(fileName2, { download: stmtFile.name });
-        payload.statement_url = urlData2.publicUrl;
-        payload.statement_name = stmtFile.name;
-      }
-      // 使用者按「✕ 清除」→ 把檔案欄位設為 null
-      if (document.getElementById('ar-remove-invoice')?.value === '1' && !file) {
+      payload.attachments = attachments;
+      // 向後相容:第一個檔案同步到 attachment_url / attachment_name
+      if (attachments.length) {
+        payload.attachment_url = attachments[0].url;
+        payload.attachment_name = attachments[0].name;
+      } else {
         payload.attachment_url = null;
         payload.attachment_name = null;
-      }
-      if (document.getElementById('ar-remove-statement')?.value === '1' && !stmtFile) {
-        payload.statement_url = null;
-        payload.statement_name = null;
       }
 
       // 發票檔案已經在每列的上傳時就直接 upload + 存隱藏欄位,這裡只要把第一張同步到舊欄位做向後相容
@@ -17053,15 +17009,13 @@ function renderAccounting() {
                       })()}</td>
                       <td style="font-size:12px;color:var(--muted)">${r.invoice_date?.slice?.(0,10)||'—'}</td>
                       <td style="text-align:center">
-                        <div style="display:flex;gap:4px;justify-content:center;align-items:center">
-                          ${r.attachment_url
-                            ? `<a href="${r.attachment_url}" target="_blank" title="請款單: ${r.attachment_name||''}" style="font-size:16px;color:var(--accent)">📎</a>`
-                            : ''}
-                          ${r.statement_url
-                            ? `<a href="${r.statement_url}" target="_blank" title="對帳單: ${r.statement_name||''}" style="font-size:16px;color:#7b1fa2">📋</a>`
-                            : ''}
-                          ${!r.attachment_url && !r.statement_url ? `<span style="color:var(--muted);font-size:11px">—</span>` : ''}
-                        </div>
+                        ${(() => {
+                          const atts = Array.isArray(r.attachments) && r.attachments.length
+                            ? r.attachments
+                            : (r.attachment_url ? [{url:r.attachment_url, name:r.attachment_name||'請款單'}] : []);
+                          if (!atts.length) return `<span style="color:var(--muted);font-size:11px">—</span>`;
+                          return atts.map(a => `<a href="${a.url}" target="_blank" title="${(a.name||'').replace(/"/g,'&quot;')}" style="font-size:16px;color:var(--accent);margin-right:3px">📎</a>`).join('') + (atts.length>1?`<span style="font-size:10px;color:var(--muted)">×${atts.length}</span>`:'');
+                        })()}
                       </td>
                       <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.subject||'').replace(/"/g,'&quot;')}">${r.subject||'—'}</td>
                       <td><span class="tag ${SC[statusNorm]||'tag-grey'}">${statusNorm}</span></td>
