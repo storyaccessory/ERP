@@ -13013,6 +13013,7 @@ function _renderDevDetail(id) {
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="window._devEditProject('${p.id}')">✏️ 編輯專案</button>
+        <button class="btn btn-sm btn-outline" onclick="window._devShowAllDateLog('${p.id}')" style="background:#f3e5f5;color:#6a1b9a" title="看全專案每筆任務的日期變動歷程">📜 日期變動總覽</button>
         <button class="btn btn-sm btn-outline" onclick="window._devUndoBatch('${p.id}')" style="background:#fce4ec;color:#c2185b" title="還原最近一批日期變更">⟲ 復原最近變更</button>
         <button class="btn btn-sm btn-outline" onclick="window._devReflowDates('${p.id}')" style="background:#fff3e0;color:#e65100" title="從某個日期起,未完成任務依模板工作天重排,再手動微調">⚙ 重排未完成日期</button>
         <button class="btn btn-sm btn-outline" onclick="window._devRebuildCalendar('${p.id}')" style="background:#e3f2fd;color:#1565c0">🔄 重建行事曆</button>
@@ -15233,6 +15234,66 @@ window._devEditProject = async function(projectId) {
 // 重建行事曆事件(拿掉舊的,並把 dev_tasks 步驟名/is_milestone 從模板同步再重建)
 // 從指定日期起,未完成任務依模板工作天重排(用於中段整頓節奏)
 // 復原最近一批日期變更(以 60 秒時間窗聚合)
+// 全專案日期變動總覽 — 一覽每筆任務「最初日 → 現在日」,以及變動次數
+window._devShowAllDateLog = function(projectId) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const tasks = (p.dev_tasks||[])
+    .filter(t => t.step_group !== 'custom' || Array.isArray(t.date_change_log))
+    .sort((a,b) => (a.order_num||0) - (b.order_num||0));
+  const rows = tasks.map(t => {
+    const log = Array.isArray(t.date_change_log) ? t.date_change_log : [];
+    // 第一次 old 就是原始日(忽略 old===new 的紀錄)
+    const first = log.find(e => e.old && e.new && e.old !== e.new);
+    const origDate = first ? first.old : (t.expected_date || t.due_date || '');
+    const cur = t.due_date || '';
+    const diff = (origDate && cur) ? _daysDiff(origDate, cur) : 0;
+    const diffCell = diff === 0 ? '<span style="color:var(--muted)">—</span>'
+      : diff > 0 ? `<span style="color:#c62828">+${diff}d</span>`
+      : `<span style="color:#2e7d32">${diff}d</span>`;
+    const changeCount = log.filter(e => e.old && e.new && e.old !== e.new).length;
+    const statusTag = t.status === '完成' ? '<span style="color:#2e7d32">✓完成</span>'
+      : t.status === '取消' ? '<span style="color:#999">⊘取消</span>'
+      : '<span style="color:var(--muted)">待辦</span>';
+    const grp = t.step_group === 'main' ? '主' : t.step_group === 'side' ? '副' : '自';
+    return `<tr style="border-top:1px solid #eee">
+      <td style="padding:5px 6px;text-align:center;font-size:11px;color:var(--muted)">${grp}</td>
+      <td style="padding:5px 6px;font-size:12px">${t.step_name}</td>
+      <td style="padding:5px 6px;text-align:center;font-family:monospace;font-size:11px">${origDate||'—'}</td>
+      <td style="padding:5px 6px;text-align:center;font-family:monospace;font-size:11px;font-weight:600">${cur||'—'}</td>
+      <td style="padding:5px 6px;text-align:center;font-size:11px;font-weight:700">${diffCell}</td>
+      <td style="padding:5px 6px;text-align:center;font-size:11px">${changeCount?`<button style="background:none;border:none;cursor:pointer;color:#1565c0;font-size:11px" onclick="closeModal();setTimeout(()=>window._devShowDateLog('${t.id}'),200)" title="看明細">📋 ${changeCount}</button>`:'0'}</td>
+      <td style="padding:5px 6px;text-align:center">${statusTag}</td>
+    </tr>`;
+  }).join('');
+  showModal(`📜 ${p.name} · 日期變動總覽`, `
+    <div style="padding:8px 12px;background:#f5f5f5;border-radius:6px;font-size:12px;margin-bottom:10px;line-height:1.6">
+      · <b>原始日</b> = 這筆任務第一次 due_date (建案時或你第一次手動改之前的值)<br>
+      · <b>現在日</b> = 當前 due_date <br>
+      · <b>Δ</b> = 現在日 − 原始日(紅 = 延後,綠 = 提前)<br>
+      · 點 📋 可看該筆完整變動歷程
+    </div>
+    <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="background:#fafafa;position:sticky;top:0">
+          <tr>
+            <th style="padding:6px;width:30px">線</th>
+            <th style="padding:6px;text-align:left">步驟</th>
+            <th style="padding:6px;text-align:center;width:95px">原始日</th>
+            <th style="padding:6px;text-align:center;width:95px">現在日</th>
+            <th style="padding:6px;text-align:center;width:55px">Δ</th>
+            <th style="padding:6px;text-align:center;width:60px">變動</th>
+            <th style="padding:6px;text-align:center;width:70px">狀態</th>
+          </tr>
+        </thead>
+        <tbody>${rows || '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--muted)">無資料</td></tr>'}</tbody>
+      </table>
+    </div>
+  `, [
+    { label: '關閉', primary: true, onclick: closeModal }
+  ], { width: '860px' });
+};
+
 window._devUndoBatch = async function(projectId) {
   const p = (state.data.dev||[]).find(x => x.id === projectId);
   if (!p) return;
