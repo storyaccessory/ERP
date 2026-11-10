@@ -17015,7 +17015,7 @@ function renderAccounting() {
                             ? r.attachments
                             : (r.attachment_url ? [{url:r.attachment_url, name:r.attachment_name||'請款單'}] : []);
                           if (!atts.length) return `<span style="color:var(--muted);font-size:11px">—</span>`;
-                          return atts.map(a => `<a href="${a.url}" target="_blank" title="${(a.name||'').replace(/"/g,'&quot;')}" style="font-size:16px;color:var(--accent);margin-right:3px">📎</a>`).join('') + (atts.length>1?`<span style="font-size:10px;color:var(--muted)">×${atts.length}</span>`:'');
+                          return `<div style="display:inline-flex;gap:4px;justify-content:center">${atts.map(a => `<a href="${a.url}" target="_blank" title="${(a.name||'').replace(/"/g,'&quot;')}" style="font-size:16px;color:var(--accent);line-height:1" onclick="event.stopPropagation()">📎</a>`).join('')}</div>`;
                         })()}
                       </td>
                       <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.subject||'').replace(/"/g,'&quot;')}">${r.subject||'—'}</td>
