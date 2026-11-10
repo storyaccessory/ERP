@@ -8422,41 +8422,42 @@ async function modalAddAR(existing) {
 
       <hr style="border:none;border-top:1px solid var(--border);margin:2px 0">
 
-      <!-- 📎 附件(請款單 + 對帳單 二合一) -->
+      <!-- 📎 上傳請款單 / 對帳單(可多檔) -->
       <div class="form-group">
-        <label>📎 附件 <span style="font-size:11px;color:var(--muted)">(可留請款單、對帳單,擇一或兩個都留 · 請款單會跑 AI 解析)</span></label>
+        <label>📎 請款單 / 對帳單 <span style="font-size:11px;color:var(--muted)">(可留一份或多份;第一份會跑 AI 解析)</span></label>
         <input type="hidden" id="ar-remove-invoice" value="0">
         <input type="hidden" id="ar-remove-statement" value="0">
-        <div style="border:1px solid var(--border);border-radius:8px;padding:10px 12px;background:#fafafa">
-          <!-- 請款單 slot -->
-          <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px 10px;background:#fff;border-radius:6px;border:1px solid var(--border)">
-            <span style="font-size:16px">📎</span>
-            <span style="font-size:12px;font-weight:600;color:var(--accent-dark);min-width:56px">請款單</span>
-            ${existing?.attachment_url ? `
-              <a href="${existing.attachment_url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.attachment_name||'目前請款單'}</a>
-              <label style="cursor:pointer;font-size:11px;color:#fff;background:var(--accent-dark);padding:3px 8px;border-radius:4px;white-space:nowrap">
-                🔄 替換<input type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="display:none" onchange="document.getElementById('ar-file').files=this.files;document.getElementById('ar-remove-invoice').value='0'">
-              </label>
-              <button type="button" onclick="if(confirm('確定清除請款單?')){document.getElementById('ar-remove-invoice').value='1';const inp=document.getElementById('ar-file');if(inp)inp.value='';this.parentElement.innerHTML='<span style=&quot;font-size:16px&quot;>📎</span><span style=&quot;font-size:12px;font-weight:600;color:var(--accent-dark);min-width:56px&quot;>請款單</span><input class=&quot;form-control&quot; id=&quot;ar-file&quot; type=&quot;file&quot; accept=&quot;.pdf,.xlsx,.xls,.csv,image/*&quot; style=&quot;padding:4px;font-size:12px;flex:1&quot;>'}" style="background:#ffebee;color:#c62828;border:none;padding:3px 8px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap">✕ 清除</button>
-            ` : `
-              <input class="form-control" id="ar-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:4px;font-size:12px;flex:1">
-            `}
-          </div>
-          <!-- 對帳單 slot -->
-          <div style="display:flex;align-items:center;gap:8px;padding:8px 10px;background:#fff;border-radius:6px;border:1px solid var(--border)">
-            <span style="font-size:16px">📋</span>
-            <span style="font-size:12px;font-weight:600;color:#7b1fa2;min-width:56px">對帳單</span>
-            ${existing?.statement_url ? `
-              <a href="${existing.statement_url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.statement_name||'目前對帳單'}</a>
-              <label style="cursor:pointer;font-size:11px;color:#fff;background:#7b1fa2;padding:3px 8px;border-radius:4px;white-space:nowrap">
-                🔄 替換<input type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="display:none" onchange="document.getElementById('ar-statement-file').files=this.files;document.getElementById('ar-remove-statement').value='0'">
-              </label>
-              <button type="button" onclick="if(confirm('確定清除對帳單?')){document.getElementById('ar-remove-statement').value='1';const inp=document.getElementById('ar-statement-file');if(inp)inp.value='';this.parentElement.innerHTML='<span style=&quot;font-size:16px&quot;>📋</span><span style=&quot;font-size:12px;font-weight:600;color:#7b1fa2;min-width:56px&quot;>對帳單</span><input class=&quot;form-control&quot; id=&quot;ar-statement-file&quot; type=&quot;file&quot; accept=&quot;.pdf,.xlsx,.xls,.csv,image/*&quot; style=&quot;padding:4px;font-size:12px;flex:1&quot;>'}" style="background:#ffebee;color:#c62828;border:none;padding:3px 8px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap">✕ 清除</button>
-            ` : `
-              <input class="form-control" id="ar-statement-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:4px;font-size:12px;flex:1">
-            `}
-          </div>
+        ${existing?.attachment_url ? `
+        <div style="display:flex;align-items:center;gap:8px;margin-bottom:6px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
+          <span style="font-size:18px">📎</span>
+          <a href="${existing.attachment_url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.attachment_name||'檔案 1'}</a>
+          <label style="cursor:pointer;font-size:11px;color:#fff;background:var(--accent-dark);padding:3px 8px;border-radius:4px;white-space:nowrap">
+            🔄 替換<input type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="display:none" onchange="document.getElementById('ar-file').files=this.files;document.getElementById('ar-remove-invoice').value='0'">
+          </label>
+          <button type="button" onclick="if(confirm('確定清除此檔案?')){document.getElementById('ar-remove-invoice').value='1';this.parentElement.style.display='none'}" style="background:#ffebee;color:#c62828;border:none;padding:3px 8px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap">✕ 清除</button>
         </div>
+        <input class="form-control" id="ar-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px;display:none">
+        ` : `
+        <input class="form-control" id="ar-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px">
+        `}
+        ${existing?.statement_url ? `
+        <div style="display:flex;align-items:center;gap:8px;margin-top:6px;padding:8px 10px;background:#f0fafa;border-radius:6px;border:1px solid var(--border)">
+          <span style="font-size:18px">📎</span>
+          <a href="${existing.statement_url}" target="_blank" style="color:var(--accent);font-size:12px;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${existing.statement_name||'檔案 2'}</a>
+          <label style="cursor:pointer;font-size:11px;color:#fff;background:var(--accent-dark);padding:3px 8px;border-radius:4px;white-space:nowrap">
+            🔄 替換<input type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="display:none" onchange="document.getElementById('ar-statement-file').files=this.files;document.getElementById('ar-remove-statement').value='0'">
+          </label>
+          <button type="button" onclick="if(confirm('確定清除此檔案?')){document.getElementById('ar-remove-statement').value='1';this.parentElement.style.display='none'}" style="background:#ffebee;color:#c62828;border:none;padding:3px 8px;font-size:11px;border-radius:4px;cursor:pointer;white-space:nowrap">✕ 清除</button>
+        </div>
+        <input class="form-control" id="ar-statement-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px;margin-top:6px;display:none">
+        ` : `
+        ${existing?.attachment_url ? `
+        <div style="margin-top:6px;font-size:11px;color:var(--muted)">↓ 再加一份(選填)</div>
+        <input class="form-control" id="ar-statement-file" type="file" accept=".pdf,.xlsx,.xls,.csv,image/*" style="padding:6px;margin-top:4px">
+        ` : `
+        <input type="hidden" id="ar-statement-file">
+        `}
+        `}
         <div id="ar-parse-status" style="display:none;margin-top:6px;padding:8px 12px;border-radius:6px;font-size:12px"></div>
       </div>
 
