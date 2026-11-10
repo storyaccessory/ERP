@@ -13883,24 +13883,25 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults, opts =
   if (opts.rerunTasks && opts.rerunTasks.length && rejectedCount > 0) {
     const rerunDays = Math.max(1, parseInt(opts.rerunDays)||5);
     for (const rt of opts.rerunTasks) {
-      // 計算新的 due_date:以今天為基礎 + rerunDays 工作天
       const d0 = new Date(today + 'T00:00:00');
       const newDueD = addWorkdays(d0, rerunDays);
       const newDue = `${newDueD.getFullYear()}-${String(newDueD.getMonth()+1).padStart(2,'0')}-${String(newDueD.getDate()).padStart(2,'0')}`;
+      // 先寫日期變更 log(供日後⟲復原),再改其他欄位
+      await _devApplyDateChange(rt.id, rt.due_date, newDue, {
+        source: 'reset',
+        reason: `因 ${task?.step_name||'審查'} 退回打樣 · 重設為未開始`,
+        shiftBaseline: true,
+      });
       await db.from('dev_tasks').update({
         status: '未開始',
         completed_at: null,
         completed_by: null,
-        due_date: newDue,
-        expected_date: newDue,
         gate_passed_at: null,
         gate_passed_by: null,
         gate_passed_note: null,
       }).eq('id', rt.id);
-      // 同步行事曆子任務:取消打勾 + 更新日期
       try {
         await _devSyncCalendarSubtask({ ...rt, status: '未開始', calendar_event_id: rt.calendar_event_id }, false);
-        await _devSyncCalendarSubtaskDate({ ...rt, calendar_event_id: rt.calendar_event_id }, newDue);
       } catch(e) {}
       rerunCount++;
     }
@@ -32481,8 +32482,16 @@ window.calViewEvent = async function(id) {
 
           window._editRecurChoice = async function(scope, evId) {
             closeModal();
-            const target = (state.data.calEvents||[]).find(e=>e.id===evId);
-            if (!target) return;
+            // 先從現有 state 找;找不到(例如從儀表板進來,calEvents 尚未載入)就直接查 DB
+            let target = (state.data.calEvents||[]).find(e=>e.id===evId);
+            if (!target) {
+              try {
+                const { data } = await db.from('calendar_events').select('*').eq('id', evId).maybeSingle();
+                if (data) target = data;
+              } catch (e) {}
+            }
+            // 再不行就用當初 calViewEvent 收到的那個 event(至少 id 存在)
+            if (!target) target = { id: evId };
             if (scope === 'one') {
               modalCalEvent(target);
             } else if (scope === 'rebuild') {
