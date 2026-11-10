@@ -16936,6 +16936,7 @@ function renderAccounting() {
           total: 0, received: 0, invoiced: 0, invoiceAmounts: [],
           company_name: vinfo?.company_name || '',
           tax_id: vinfo?.tax_id || '',
+          email: vinfo?.email || '',   // 會計 / 電子發票 Mail
         };
         custMap[k].total += r.amount||0;
         if (r.status==='已收款') custMap[k].received += r.amount||0;
@@ -17057,6 +17058,9 @@ function renderAccounting() {
               <!-- 統編 -->
               ${info.tax_id ? `
               <div style="font-size:11px;color:var(--muted);margin-top:1px">統編：${info.tax_id}</div>` : ''}
+              <!-- 會計 Mail -->
+              ${info.email ? `
+              <div style="font-size:11px;color:var(--muted);margin-top:1px">📧 <a href="mailto:${info.email}" style="color:var(--accent);word-break:break-all">${info.email}</a></div>` : ''}
               <!-- 已開票明細 -->
               ${info.invoiceAmounts.length ? `
               <div style="margin-top:5px;padding:5px 8px;background:#f0f4ff;border-radius:5px;font-size:11px">
