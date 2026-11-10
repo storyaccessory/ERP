@@ -15241,7 +15241,7 @@ window._devEditProject = async function(projectId) {
 // 重建行事曆事件(拿掉舊的,並把 dev_tasks 步驟名/is_milestone 從模板同步再重建)
 // 從指定日期起,未完成任務依模板工作天重排(用於中段整頓節奏)
 // 復原最近一批日期變更(以 60 秒時間窗聚合)
-// 撤銷最近一次校正退回:清掉最新那批 review_history、恢復任務完成狀態、清校正 notes
+// 撤銷最近一次校正退回 + 用模板從專案起始日重算 due_date / completed_at(= 原本預定完成日)
 window._devUndoLastReview = async function(projectId) {
   const p = (state.data.dev||[]).find(x => x.id === projectId);
   if (!p) return;
@@ -15261,7 +15261,6 @@ window._devUndoLastReview = async function(projectId) {
   const stepKey = latest.entry.step_key;
   const stepName = latest.entry.step_name || '審查';
   const pipeline = toUndo[0].variant.pipeline;
-  // 審查任務本體 + 上游 same-stage tasks(被 reset 的候選)
   const reviewTask = (p.dev_tasks||[]).find(t => t.step_key === stepKey && t.pipeline === pipeline && t.step_group === 'main');
   const stageDef = _findStepDef(pipeline, stepKey);
   const curStage = stageDef?.stage;
@@ -15273,49 +15272,71 @@ window._devUndoLastReview = async function(projectId) {
     if (t.status === '取消') return false;
     const sd = _findStepDef(t.pipeline, t.step_key);
     return sd?.stage === curStage;
-  }).sort((a,b)=>(a.order_num||0)-(b.order_num||0));
+  });
 
-  // 讓使用者確認每個上游 task 的完成日(預設 = 審查日往前推 N 工作天)
-  let cursor = new Date(reviewDate + 'T00:00:00');
-  const upstreamRows = upstreamTasks.slice().reverse().map(t => {
-    const sd = _findStepDef(t.pipeline, t.step_key);
-    const days = Math.max(1, sd?.days||1);
-    cursor = addWorkdays(cursor, -days);
-    const est = `${cursor.getFullYear()}-${String(cursor.getMonth()+1).padStart(2,'0')}-${String(cursor.getDate()).padStart(2,'0')}`;
-    return { task: t, estimated: est };
-  }).reverse();
+  // 從 date_change_log 找「reset 之前」最後一次設的日期(= 你當時真實填的日期)
+  //   reset 時間 ≈ 審查日,所以找 at < reviewDate 的最新一筆
+  const findLastManualDate = (task) => {
+    const log = Array.isArray(task.date_change_log) ? task.date_change_log : [];
+    if (!log.length) return null;
+    const cutoff = reviewDate + 'T23:59:59';
+    const before = log.filter(e => e.at && e.at <= cutoff && e.new).sort((a,b) => b.at.localeCompare(a.at));
+    // 取 at 最晚、來源不是 reset / undo / pm_decision(都是程式自動覆蓋)的那一筆
+    const manual = before.find(e => !['reset','undo','pm_decision','reflow'].includes(e.source));
+    return (manual && manual.new) || (before[0] && before[0].new) || null;
+  };
 
+  const allToFix = [...upstreamTasks];
+  if (reviewTask) allToFix.push(reviewTask);
   const rejectedCount = toUndo.filter(x => x.entry.decision === 'reject').length;
-  const passCount = toUndo.length - rejectedCount;
+
+  const rows = allToFix.map((t, i) => {
+    const fromLog = findLastManualDate(t);
+    // 審查任務的完成日用審查那天(100% 準)
+    const defaultDate = (t.id === reviewTask?.id) ? reviewDate : (fromLog || '');
+    return { task: t, defaultDate, hasLog: !!fromLog };
+  });
+
+  const rowsHtml = rows.map((r,i) => `<tr style="border-top:1px solid #eee">
+    <td style="padding:5px 8px;font-size:12px">${r.task.step_name}${r.task.id === reviewTask?.id ? ' <span style="font-size:10px;color:#1565c0">(審查任務)</span>' : ''}</td>
+    <td style="padding:5px 8px;text-align:center">
+      <input type="date" id="undo-d-${i}" value="${r.defaultDate}" style="font-size:12px;padding:3px;border:1px solid var(--border);border-radius:3px">
+    </td>
+    <td style="padding:5px 8px;font-size:10px;color:${r.hasLog || r.task.id === reviewTask?.id ? '#2e7d32' : '#c62828'}">
+      ${r.task.id === reviewTask?.id ? '從審查紀錄' : (r.hasLog ? '從變更歷程找到' : '⚠ 找不到,請手動輸入')}
+    </td>
+  </tr>`).join('');
+
   const body = `
     <div style="padding:10px 12px;background:#fff3e0;border-radius:6px;font-size:12px;margin-bottom:12px;line-height:1.7">
-      將撤銷 <b style="color:#c62828">${reviewDate}</b> 的 <b>${stepName}</b> 審查:<br>
-      · 清掉 ${toUndo.length} 個品項的這次審查紀錄(通過 ${passCount} / 校正 ${rejectedCount})<br>
-      · 校正品項的 revision / needs_revision 回到校正前<br>
-      · 審查任務本體(${reviewTask?.step_name||'—'}):狀態 → 完成,完成日 = ${reviewDate}<br>
-      · 上游 ${upstreamRows.length} 個任務(${curStage||'—'} 階段內)也恢復完成
+      <b>會做:</b><br>
+      · 清 ${toUndo.length} 筆品項的 <b>${reviewDate} ${stepName}</b> 審查紀錄<br>
+      · ${rejectedCount} 個校正品項 revision -1、needs_revision 清掉<br>
+      · 審查任務的 [校正...] notes 清掉<br>
+      · 下列任務設為完成,<b>預定完成 + 實際完成 = 下方日期</b>
     </div>
-    ${upstreamRows.length ? `
-    <div style="font-size:12px;font-weight:600;margin-bottom:6px">上游任務的完成日期(預設用審查日往回推算模板工作天,你可以改):</div>
+    <div style="font-size:12px;margin-bottom:6px">
+      <b>日期來源</b>:系統從「日期變更歷程」找到你 reset 之前最後一次手動設的日期(綠字),找不到的要手動填(紅字)
+    </div>
     <table style="width:100%;border-collapse:collapse;font-size:12px;margin-bottom:10px">
       <thead style="background:#fafafa">
         <tr>
           <th style="padding:6px;text-align:left">任務</th>
-          <th style="padding:6px;text-align:center;width:140px">完成日</th>
+          <th style="padding:6px;text-align:center;width:130px">日期</th>
+          <th style="padding:6px;text-align:left;width:140px">來源</th>
         </tr>
       </thead>
-      <tbody>
-        ${upstreamRows.map((r,i) => `<tr style="border-top:1px solid #eee">
-          <td style="padding:6px">${r.task.step_name}</td>
-          <td style="padding:6px;text-align:center"><input type="date" id="undo-up-${i}" value="${r.estimated}" style="font-size:12px;padding:3px;border:1px solid var(--border);border-radius:3px"></td>
-        </tr>`).join('')}
-      </tbody>
-    </table>` : ''}
+      <tbody>${rowsHtml}</tbody>
+    </table>
   `;
   showModal(`↶ 撤銷 ${reviewDate} 校正退回`, body, [
     { label: '取消', onclick: closeModal },
     { label: '✓ 執行撤銷', primary: true, onclick: async () => {
-      // 1) 清掉每個 variant 的最新那筆 review_history + 還原 revision
+      // 檢查每個日期都有填
+      const chosen = rows.map((r,i) => ({ ...r, date: document.getElementById(`undo-d-${i}`)?.value }));
+      const missing = chosen.filter(c => !c.date);
+      if (missing.length) { showToast(`還有 ${missing.length} 個任務日期沒填`, 'error'); return; }
+      // 1) 清 variants
       for (const x of toUndo) {
         const v = x.variant;
         const newHist = (v.review_history||[]).filter((_, i) => i !== x.idx);
@@ -15327,34 +15348,31 @@ window._devUndoLastReview = async function(projectId) {
         }
         await db.from('dev_variants').update(vUpd).eq('id', v.id);
       }
-      // 2) 審查任務本體 → 完成 於 reviewDate
-      if (reviewTask) {
-        await db.from('dev_tasks').update({
-          status: '完成',
-          completed_at: reviewDate + 'T00:00:00+08:00',
-          completed_by: state.user?.id || null,
-          notes: (reviewTask.notes||'').replace(/\[校正[^\]]*\][^[]*/g, '').trim() || null,
-        }).eq('id', reviewTask.id);
-        try { await _devSyncCalendarSubtask({ ...reviewTask, status:'完成', calendar_event_id: reviewTask.calendar_event_id }, true); } catch(e){}
-      }
-      // 3) 上游任務 → 完成 於使用者確認的日期
-      for (let i = 0; i < upstreamRows.length; i++) {
-        const d = document.getElementById(`undo-up-${i}`)?.value || upstreamRows[i].estimated;
-        const t = upstreamRows[i].task;
-        await db.from('dev_tasks').update({
+      // 2) 每個任務依使用者填的日期還原
+      for (const c of chosen) {
+        const t = c.task;
+        const d = c.date;
+        const upd = {
           status: '完成',
           completed_at: d + 'T00:00:00+08:00',
           completed_by: state.user?.id || null,
-        }).eq('id', t.id);
+          due_date: d,
+          expected_date: d,
+        };
+        if (t.id === reviewTask?.id) {
+          upd.notes = (t.notes||'').replace(/\[校正[^\]]*\][^[]*/g, '').trim() || null;
+        }
+        await db.from('dev_tasks').update(upd).eq('id', t.id);
         try { await _devSyncCalendarSubtask({ ...t, status:'完成', calendar_event_id: t.calendar_event_id }, true); } catch(e){}
+        try { await _devSyncCalendarSubtaskDate({ ...t, calendar_event_id: t.calendar_event_id }, d); } catch(e){}
       }
-      showToast(`✓ 已撤銷 ${reviewDate} 的 ${stepName} 校正,共還原 ${toUndo.length + upstreamRows.length + 1} 筆`, 'success', 4000);
+      showToast(`✓ 已撤銷 · 還原 ${chosen.length} 個任務`, 'success', 4000);
       closeModal();
       await loadDev();
       try { await loadCalendarEvents?.(); } catch(e){}
       renderApp();
     }}
-  ], { width: '640px' });
+  ], { width: '680px' });
 };
 
 // 全專案審查歷程總覽 — 彙整所有品項的 review_history,方便 PM 回顧每一輪送審結果
