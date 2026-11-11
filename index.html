@@ -13017,6 +13017,7 @@ function _renderDevDetail(id) {
       </div>
       <div style="margin-top:10px;display:flex;gap:6px;flex-wrap:wrap">
         <button class="btn btn-sm btn-outline" onclick="window._devEditProject('${p.id}')">✏️ 編輯專案</button>
+        <button class="btn btn-sm btn-outline" onclick="window._devShowDelayReport('${p.id}')" style="background:#fff3e0;color:#e65100" title="誰造成延遲 + 卡在哪個階段">📊 延遲歸責分析</button>
         <button class="btn btn-sm btn-outline" onclick="window._devShowAllReviewHistory('${p.id}')" style="background:#e1f5fe;color:#0277bd" title="看全專案所有品項的審查歷程">🔍 審查歷程總覽</button>
         <button class="btn btn-sm btn-outline" onclick="window._devUndoLastReview('${p.id}')" style="background:#fff3e0;color:#c62828;border-color:#ef9a9a" title="撤銷最近一次送審退回(清校正紀錄 + 恢復任務完成狀態)">↶ 撤銷最近校正</button>
         <button class="btn btn-sm btn-outline" onclick="window._devShowAllDateLog('${p.id}')" style="background:#f3e5f5;color:#6a1b9a" title="看全專案每筆任務的日期變動歷程">📜 日期變動總覽</button>
@@ -15377,6 +15378,192 @@ window._devUndoLastReview = async function(projectId) {
       renderApp();
     }}
   ], { width: '680px' });
+};
+
+// 📊 延遲歸責分析:誰拖了幾天、每階段滯留多久、延遲事件 timeline
+window._devShowDelayReport = function(projectId) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const today = _localToday();
+  const SELF_SOURCES = ['self','manual'];      // 本人造成的
+  const EXCUSE_SOURCES = ['upstream','pm_slack','external','pm_decision','tighten','planning','reflow','reset','undo'];
+
+  // ─── 1. 人員延遲排名(sum self-caused delays from date_change_log) ───
+  const personAgg = {}; // name → { days, tasks:[] }
+  // + 實際完成 vs 預定承諾 = 本人延遲
+  (p.dev_tasks||[]).forEach(t => {
+    if (t.status !== '完成' || !t.completed_at || !t.due_date || t.step_group === 'custom') return;
+    const cd = t.completed_at.slice(0,10);
+    const delta = _daysDiff(t.due_date, cd);
+    if (delta <= 0) return;  // 準時或提早
+    const name = t.assignee_name || '(未指派)';
+    if (!personAgg[name]) personAgg[name] = { days: 0, tasks: [] };
+    personAgg[name].days += delta;
+    personAgg[name].tasks.push({ step_name: t.step_name, days: delta, src: '實際完成晚' });
+  });
+  // + 日期變更 log 裡 source=self 的推後
+  (p.dev_tasks||[]).forEach(t => {
+    const log = Array.isArray(t.date_change_log) ? t.date_change_log : [];
+    log.forEach(e => {
+      if (!SELF_SOURCES.includes(e.source)) return;
+      if (!e.old || !e.new) return;
+      const delta = _daysDiff(e.old, e.new);
+      if (delta <= 0) return;
+      const name = t.assignee_name || e.by_name || '(未指派)';
+      if (!personAgg[name]) personAgg[name] = { days: 0, tasks: [] };
+      personAgg[name].days += delta;
+      personAgg[name].tasks.push({ step_name: t.step_name, days: delta, src: '手動延後' });
+    });
+  });
+  const personRows = Object.entries(personAgg).sort((a,b) => b[1].days - a[1].days);
+
+  // ─── 2. 階段滯留時間 ───
+  const stageAgg = {}; // stageKey → { label, actualDays, templateDays, start, end }
+  DEV_STAGES.forEach(st => {
+    stageAgg[st.key] = { label: st.label, color: st.color, actualDays: 0, templateDays: 0, start: null, end: null, inProgress: false };
+  });
+  (p.pipelines||[]).forEach(pl => {
+    const tpl = PIPELINE_TEMPLATES[pl];
+    if (!tpl) return;
+    DEV_STAGES.forEach(st => {
+      const stageSteps = (tpl.main||[]).filter(s => s.stage === st.key);
+      const tplSum = stageSteps.reduce((sum, s) => sum + (s.days||0), 0);
+      if (tplSum > stageAgg[st.key].templateDays) stageAgg[st.key].templateDays = tplSum;
+      const stageTasks = (p.dev_tasks||[]).filter(t =>
+        t.pipeline === pl && t.step_group === 'main' && t.status !== '取消' &&
+        stageSteps.some(s => s.key === t.step_key)
+      );
+      if (!stageTasks.length) return;
+      const completed = stageTasks.filter(t => t.completed_at);
+      const earliestStart = stageTasks.map(t => t.due_date).filter(Boolean).sort()[0];
+      const latestComplete = completed.length ? completed.map(t => t.completed_at.slice(0,10)).sort().reverse()[0] : null;
+      if (earliestStart && (!stageAgg[st.key].start || earliestStart < stageAgg[st.key].start)) {
+        stageAgg[st.key].start = earliestStart;
+      }
+      if (latestComplete && (!stageAgg[st.key].end || latestComplete > stageAgg[st.key].end)) {
+        stageAgg[st.key].end = latestComplete;
+      }
+      if (completed.length < stageTasks.length) stageAgg[st.key].inProgress = true;
+    });
+  });
+  // 算 actualDays
+  DEV_STAGES.forEach(st => {
+    const a = stageAgg[st.key];
+    if (a.start) {
+      const endD = a.end || today;
+      a.actualDays = Math.max(0, _daysDiff(a.start, endD));
+    }
+  });
+
+  // ─── 3. 延遲事件 timeline ───
+  const events = [];
+  (p.dev_tasks||[]).forEach(t => {
+    const log = Array.isArray(t.date_change_log) ? t.date_change_log : [];
+    log.forEach(e => {
+      if (!e.old || !e.new) return;
+      const delta = _daysDiff(e.old, e.new);
+      if (delta === 0) return;
+      events.push({
+        date: (e.at||'').slice(0,10),
+        task: t.step_name,
+        delta,
+        source: e.source,
+        reason: e.reason,
+        by: e.by_name || '',
+      });
+    });
+  });
+  events.sort((a,b) => (b.date||'').localeCompare(a.date||''));
+
+  const srcLabel = s => ({ self:'🙋 本人', manual:'✍ 手動', upstream:'🔁 上游', pm_slack:'🛠 PM 放寬', external:'🏭 外部', pm_decision:'📋 PM 決策', tighten:'⚡ 拉前', planning:'🧭 規劃', reflow:'🔄 重排', reset:'↺ 重設', undo:'↶ 復原' }[s] || s);
+
+  const personHtml = personRows.length ? personRows.map(([name, info]) => `
+    <tr style="border-top:1px solid #eee">
+      <td style="padding:6px 8px;font-weight:600">${name}</td>
+      <td style="padding:6px 8px;text-align:center"><span style="color:#c62828;font-weight:700">延 ${info.days} 天</span></td>
+      <td style="padding:6px 8px;font-size:11px;color:var(--muted)">${info.tasks.slice(0,3).map(x => `${x.step_name} (+${x.days}d)`).join(' · ')}${info.tasks.length>3?` …共 ${info.tasks.length} 筆`:''}</td>
+    </tr>
+  `).join('') : '<tr><td colspan="3" style="padding:16px;text-align:center;color:var(--muted);font-size:12px">沒有本人造成的延遲</td></tr>';
+
+  const stageHtml = DEV_STAGES.map(st => {
+    const a = stageAgg[st.key];
+    const diff = a.actualDays - a.templateDays;
+    const diffCell = a.start ? (
+      diff > 0 ? `<span style="color:#c62828">+${diff} 天</span>`
+      : diff < 0 ? `<span style="color:#2e7d32">${diff} 天</span>`
+      : `<span style="color:var(--muted)">準時</span>`
+    ) : '<span style="color:var(--muted)">未開始</span>';
+    return `<tr style="border-top:1px solid #eee">
+      <td style="padding:6px 8px"><span style="color:${a.color};font-weight:700">${a.label}</span></td>
+      <td style="padding:6px 8px;text-align:center;font-family:monospace;font-size:11px">${a.start||'—'} → ${a.end || (a.inProgress?'進行中':'—')}</td>
+      <td style="padding:6px 8px;text-align:center">${a.actualDays || '—'}</td>
+      <td style="padding:6px 8px;text-align:center;color:var(--muted)">${a.templateDays || '—'}</td>
+      <td style="padding:6px 8px;text-align:center;font-weight:700">${diffCell}</td>
+    </tr>`;
+  }).join('');
+
+  const timelineHtml = events.slice(0, 50).map(e => `
+    <tr style="border-top:1px solid #eee">
+      <td style="padding:5px 8px;font-size:11px;color:var(--muted);font-family:monospace">${e.date||'—'}</td>
+      <td style="padding:5px 8px;font-size:12px">${e.task}</td>
+      <td style="padding:5px 8px;text-align:center;font-size:11px;font-weight:700;color:${e.delta>0?'#c62828':'#2e7d32'}">${e.delta>0?'+':''}${e.delta}d</td>
+      <td style="padding:5px 8px;font-size:11px">${srcLabel(e.source)}</td>
+      <td style="padding:5px 8px;font-size:11px;color:var(--muted)">${e.by||'—'}</td>
+    </tr>
+  `).join('');
+
+  const body = `
+    <div style="padding:10px 12px;background:#f5f5f5;border-radius:6px;font-size:12px;margin-bottom:12px;line-height:1.6">
+      · <b>本人延遲</b>:實際完成日比當時的預定完成日晚 + date_change_log 裡 source=self/manual 的推後<br>
+      · <b>階段滯留</b>:階段內最早任務 due_date → 最晚任務完成日的日曆天數<br>
+      · <b>延遲事件</b>:所有 due_date 變動紀錄,照時間新到舊
+    </div>
+    <!-- 人員延遲 -->
+    <div style="margin-bottom:16px">
+      <div style="font-weight:700;color:#e65100;margin-bottom:6px">🙋 人員延遲排名(本人造成)</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+        <thead style="background:#fff3e0"><tr>
+          <th style="padding:6px 8px;text-align:left;width:100px">負責人</th>
+          <th style="padding:6px 8px;text-align:center;width:90px">總延遲</th>
+          <th style="padding:6px 8px;text-align:left">明細</th>
+        </tr></thead>
+        <tbody>${personHtml}</tbody>
+      </table>
+    </div>
+    <!-- 階段滯留 -->
+    <div style="margin-bottom:16px">
+      <div style="font-weight:700;color:#1565c0;margin-bottom:6px">⏳ 階段滯留時間</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;border:1px solid var(--border);border-radius:6px;overflow:hidden">
+        <thead style="background:#e3f2fd"><tr>
+          <th style="padding:6px 8px;text-align:left;width:80px">階段</th>
+          <th style="padding:6px 8px;text-align:center">起訖</th>
+          <th style="padding:6px 8px;text-align:center;width:65px">實際</th>
+          <th style="padding:6px 8px;text-align:center;width:65px">模板</th>
+          <th style="padding:6px 8px;text-align:center;width:80px">差距</th>
+        </tr></thead>
+        <tbody>${stageHtml}</tbody>
+      </table>
+    </div>
+    <!-- Timeline -->
+    <div>
+      <div style="font-weight:700;color:#6a1b9a;margin-bottom:6px">📅 延遲事件 timeline(最新 50 筆)</div>
+      <div style="max-height:300px;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
+        <table style="width:100%;border-collapse:collapse;font-size:11px">
+          <thead style="background:#f3e5f5;position:sticky;top:0"><tr>
+            <th style="padding:6px;text-align:left;width:85px">時間</th>
+            <th style="padding:6px;text-align:left">任務</th>
+            <th style="padding:6px;text-align:center;width:50px">Δ</th>
+            <th style="padding:6px;text-align:left;width:90px">來源</th>
+            <th style="padding:6px;text-align:left;width:70px">操作者</th>
+          </tr></thead>
+          <tbody>${timelineHtml || '<tr><td colspan="5" style="padding:16px;text-align:center;color:var(--muted)">無變動紀錄</td></tr>'}</tbody>
+        </table>
+      </div>
+    </div>
+  `;
+  showModal(`📊 ${p.name} · 延遲歸責分析`, body, [
+    { label: '關閉', primary: true, onclick: closeModal }
+  ], { width: '860px' });
 };
 
 // 全專案審查歷程總覽 — 彙整所有品項的 review_history,方便 PM 回顧每一輪送審結果
