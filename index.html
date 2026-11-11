@@ -15000,18 +15000,107 @@ window._devCreateProductsPrompt = async function(projectId, pipeline) {
 // PM 編輯完成日期(可補登歷史)
 window._devEditCompletedDate = async function(taskId, newDate) {
   if (!newDate) return;
-  // 保留原本時間部分,只改日期
   const task = state.data.dev.flatMap(p => p.dev_tasks||[]).find(t => t.id === taskId);
   if (!task) return;
   const oldDate = task.completed_at ? new Date(task.completed_at) : new Date();
   const [y, m, d] = newDate.split('-').map(Number);
-  oldDate.setFullYear(y);
-  oldDate.setMonth(m-1);
-  oldDate.setDate(d);
-  await db.from('dev_tasks').update({ completed_at: oldDate.toISOString() }).eq('id', taskId);
-  showToast('✓ 完成日期已更新');
-  await loadDev();
-  // 不重新渲染全頁(避免輸入焦點跳掉)
+  oldDate.setFullYear(y); oldDate.setMonth(m-1); oldDate.setDate(d);
+  const isoStr = oldDate.toISOString();
+
+  // 延遲判斷:新完成日 vs 當時 due_date
+  const due = task.due_date;
+  const delta = due ? _daysDiff(due, newDate) : 0;
+
+  const doSimpleSave = async () => {
+    await db.from('dev_tasks').update({ completed_at: isoStr }).eq('id', taskId);
+    showToast('✓ 完成日期已更新');
+    await loadDev();
+  };
+
+  if (delta <= 0) {
+    // 沒延遲 → 直接存,清掉舊的 [等 PM] / [校正責任]
+    const cleanNotes = (task.notes||'').replace(/延遲 \d+ 天完成\(等 PM[^)]*\)\s*/, '').trim() || null;
+    await db.from('dev_tasks').update({ completed_at: isoStr, notes: cleanNotes }).eq('id', taskId);
+    showToast('✓ 完成日期已更新');
+    await loadDev();
+    return;
+  }
+
+  // 延遲 → 問歸責
+  showModal(`⚠ ${task.step_name} 延 ${delta} 天`, `
+    <div style="font-size:13px;line-height:1.7;margin-bottom:10px">
+      <div><b>負責人:</b> ${task.assignee_name||'—'}</div>
+      <div><b>預定:</b> ${due} · <b>實際完成:</b> ${newDate} <span style="color:#c62828">(延 ${delta} 天)</span></div>
+    </div>
+    <div style="padding:10px 12px;background:#fff8e1;border-radius:6px;border-left:3px solid #e65100">
+      <div style="font-size:12px;font-weight:700;color:#e65100;margin-bottom:6px">⚖ 這 ${delta} 天要算在誰身上?</div>
+      <div style="display:flex;flex-direction:column;gap:4px">
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px;margin:0">
+          <input type="radio" name="ec-blame" value="self" checked style="margin-top:2px">
+          <div><b>${task.assignee_name||'此人'} 本人原因</b> <span style="color:var(--muted)">(計入 KPI)</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;font-size:12px;margin:0">
+          <input type="radio" name="ec-blame" value="upstream" style="margin-top:2px">
+          <div><b>上游延遲連帶</b> <span style="color:var(--muted)">(不計 KPI)</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="ec-blame" value="pm_slack" style="margin-top:2px">
+          <div><b>PM 主動放寬</b> <span style="color:var(--muted)">(不計 KPI)</span></div>
+        </label>
+        <label style="display:flex;align-items:flex-start;gap:8px;cursor:pointer;margin:0;font-size:12px">
+          <input type="radio" name="ec-blame" value="external" style="margin-top:2px">
+          <div><b>外部因素</b>(廠商 / 料件 / 審查)<span style="color:var(--muted)"> · 不計 KPI</span></div>
+        </label>
+      </div>
+      <input class="form-control" id="ec-note" placeholder="(選填) 細節…" style="margin-top:8px;font-size:12px">
+    </div>
+    <div style="margin-top:10px;font-size:11px;color:var(--muted)">
+      ⚠ 這次歸責會寫進 date_change_log,📊 延遲分析會依此計算
+    </div>
+  `, [
+    { label: '取消', onclick: () => {
+      const inp = document.querySelector(`input[onchange*="_devEditCompletedDate('${taskId}'"]`);
+      if (inp && task.completed_at) inp.value = task.completed_at.slice(0,10);
+      closeModal();
+    }},
+    { label: '✓ 套用', primary: true, onclick: async () => {
+      const blame = document.querySelector('input[name="ec-blame"]:checked')?.value || 'self';
+      const note = document.getElementById('ec-note')?.value?.trim() || null;
+      const label = { self:'本人原因', upstream:'上游延遲連帶', pm_slack:'PM 主動放寬', external:'外部因素(廠商/料件)' }[blame];
+      // 寫到 date_change_log(讓 📊 延遲分析抓得到)
+      try {
+        const { data: row } = await db.from('dev_tasks').select('date_change_log').eq('id', taskId).maybeSingle();
+        const log = Array.isArray(row?.date_change_log) ? row.date_change_log : [];
+        log.push({
+          at: new Date().toISOString(),
+          by: state.user?.id || null,
+          by_name: state.profile?.name || null,
+          old: due, new: newDate,
+          source: blame, // self / upstream / pm_slack / external
+          reason: `完成日 ${newDate} · ${label}${note?' · '+note:''}`,
+          baseline_shifted: false,
+        });
+        const notePM = (blame === 'self')
+          ? `延遲 ${delta} 天完成(等 PM 決定要不要順延後續)`
+          : null;
+        const cleanNotes = (task.notes||'').replace(/延遲 \d+ 天完成\(等 PM[^)]*\)\s*/, '').trim();
+        const newNotes = notePM
+          ? (notePM + (cleanNotes ? ' | ' + cleanNotes : ''))
+          : (cleanNotes || null);
+        await db.from('dev_tasks').update({
+          completed_at: isoStr,
+          date_change_log: log,
+          notes: newNotes,
+        }).eq('id', taskId);
+      } catch (e) {
+        await doSimpleSave();
+      }
+      showToast(`✓ 完成日期已更新 · 延遲算在 ${label}`);
+      closeModal();
+      await loadDev();
+      renderApp();
+    }}
+  ], { width: '540px' });
 };
 
 // 詳情頁彈性加自訂任務到某 pipeline
