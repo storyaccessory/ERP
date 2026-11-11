@@ -13875,7 +13875,11 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults, opts =
       });
     }
     if (inserts.length) {
-      await db.from('dev_tasks').insert(inserts);
+      const { error: insErr } = await db.from('dev_tasks').insert(inserts);
+      if (insErr) {
+        console.error('[append v2] insert failed:', insErr, inserts);
+        showToast('新增重做步驟失敗:' + insErr.message, 'error', 6000);
+      }
     }
   }
 
@@ -15444,12 +15448,15 @@ window._devShowAllDateLog = function(projectId) {
   const tasks = (p.dev_tasks||[])
     .filter(t => t.step_group !== 'custom' || Array.isArray(t.date_change_log))
     .sort((a,b) => (a.order_num||0) - (b.order_num||0));
+  const AUTO_SOURCES = ['reset','undo','reflow','pm_decision','tighten','planning'];
   const rows = tasks.map(t => {
     const log = Array.isArray(t.date_change_log) ? t.date_change_log : [];
-    // 第一次 old 就是原始日(忽略 old===new 的紀錄)
     const first = log.find(e => e.old && e.new && e.old !== e.new);
     const origDate = first ? first.old : (t.expected_date || t.due_date || '');
     const cur = t.due_date || '';
+    // 最後一筆「人工設的」日期(忽略系統自動連動)
+    const manualLog = log.filter(e => e.new && !AUTO_SOURCES.includes(e.source)).sort((a,b) => (b.at||'').localeCompare(a.at||''));
+    const lastManual = manualLog[0]?.new || '';
     const diff = (origDate && cur) ? _daysDiff(origDate, cur) : 0;
     const diffCell = diff === 0 ? '<span style="color:var(--muted)">—</span>'
       : diff > 0 ? `<span style="color:#c62828">+${diff}d</span>`
@@ -15459,11 +15466,15 @@ window._devShowAllDateLog = function(projectId) {
       : t.status === '取消' ? '<span style="color:#999">⊘取消</span>'
       : '<span style="color:var(--muted)">待辦</span>';
     const grp = t.step_group === 'main' ? '主' : t.step_group === 'side' ? '副' : '自';
+    const lastManualCell = lastManual && lastManual !== cur
+      ? `<span style="color:#1565c0;font-weight:600;font-family:monospace">${lastManual}</span>`
+      : (lastManual ? `<span style="color:var(--muted);font-family:monospace">${lastManual}</span>` : '<span style="color:#ccc">—</span>');
     return `<tr style="border-top:1px solid #eee">
       <td style="padding:5px 6px;text-align:center;font-size:11px;color:var(--muted)">${grp}</td>
       <td style="padding:5px 6px;font-size:12px">${t.step_name}</td>
       <td style="padding:5px 6px;text-align:center;font-family:monospace;font-size:11px">${origDate||'—'}</td>
       <td style="padding:5px 6px;text-align:center;font-family:monospace;font-size:11px;font-weight:600">${cur||'—'}</td>
+      <td style="padding:5px 6px;text-align:center;font-size:11px">${lastManualCell}</td>
       <td style="padding:5px 6px;text-align:center;font-size:11px;font-weight:700">${diffCell}</td>
       <td style="padding:5px 6px;text-align:center;font-size:11px">${changeCount?`<button style="background:none;border:none;cursor:pointer;color:#1565c0;font-size:11px" onclick="closeModal();setTimeout(()=>window._devShowDateLog('${t.id}'),200)" title="看明細">📋 ${changeCount}</button>`:'0'}</td>
       <td style="padding:5px 6px;text-align:center">${statusTag}</td>
@@ -15471,10 +15482,10 @@ window._devShowAllDateLog = function(projectId) {
   }).join('');
   showModal(`📜 ${p.name} · 日期變動總覽`, `
     <div style="padding:8px 12px;background:#f5f5f5;border-radius:6px;font-size:12px;margin-bottom:10px;line-height:1.6">
-      · <b>原始日</b> = 這筆任務第一次 due_date (建案時或你第一次手動改之前的值)<br>
+      · <b>原始日</b> = 建案時或第一次手動改之前的值<br>
       · <b>現在日</b> = 當前 due_date <br>
-      · <b>Δ</b> = 現在日 − 原始日(紅 = 延後,綠 = 提前)<br>
-      · 點 📋 可看該筆完整變動歷程
+      · <b>最後手動</b> = 你最後一次手動設的日期(藍色 = 跟現在日不同,可以參考回填)<br>
+      · <b>Δ</b> = 現在日 − 原始日 · 點 📋 看明細
     </div>
     <div style="max-height:60vh;overflow-y:auto;border:1px solid var(--border);border-radius:6px">
       <table style="width:100%;border-collapse:collapse;font-size:12px">
@@ -15484,12 +15495,13 @@ window._devShowAllDateLog = function(projectId) {
             <th style="padding:6px;text-align:left">步驟</th>
             <th style="padding:6px;text-align:center;width:95px">原始日</th>
             <th style="padding:6px;text-align:center;width:95px">現在日</th>
+            <th style="padding:6px;text-align:center;width:95px">最後手動</th>
             <th style="padding:6px;text-align:center;width:55px">Δ</th>
             <th style="padding:6px;text-align:center;width:60px">變動</th>
             <th style="padding:6px;text-align:center;width:70px">狀態</th>
           </tr>
         </thead>
-        <tbody>${rows || '<tr><td colspan="7" style="padding:20px;text-align:center;color:var(--muted)">無資料</td></tr>'}</tbody>
+        <tbody>${rows || '<tr><td colspan="8" style="padding:20px;text-align:center;color:var(--muted)">無資料</td></tr>'}</tbody>
       </table>
     </div>
   `, [
