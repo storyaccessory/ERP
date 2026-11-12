@@ -37796,8 +37796,10 @@ window.openPurchaseItemsAdmin = async function() {
     return `
       <div style="margin-bottom:8px;display:flex;gap:8px;align-items:center">
         <input class="form-control" id="pi-search" placeholder="搜尋名稱 / 類別…" autocomplete="off"
+          value="${(window._puItemsFilter||'').replace(/"/g,'&quot;')}"
           oninput="window._puItemsFilter=this.value;window._renderPuItemsRows();window._renderPuItemsBodyRefresh();"
           oncompositionend="window._puItemsFilter=this.value;window._renderPuItemsRows();window._renderPuItemsBodyRefresh();">
+        ${window._puItemsFilter ? `<button class="btn btn-sm" onclick="window._puItemsFilter='';window.openPurchaseItemsAdmin();" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a">✕ 清除</button>` : ''}
         <button class="btn btn-primary btn-sm" onclick="window._puItemNew()">+ 新增品項</button>
         <span id="pi-count" style="font-size:12px;color:var(--muted);white-space:nowrap">共 ${(state.data.purchaseItems||[]).length} 項</span>
       </div>
@@ -37824,10 +37826,15 @@ window.openPurchaseItemsAdmin = async function() {
   showModal('⚙️ 採購品項庫管理', `<div id="pi-body">${window._renderPuItemsBody()}</div>`, [
     { label:'關閉', onclick: closeModal },
   ], { wide: true });
-  // 還原捲動位置
+  // 還原捲動位置 + 把游標放回搜尋框尾端
   setTimeout(() => {
     const wrap = document.querySelector('#pi-body > div:nth-child(2)');
     if (wrap && window._puItemsScrollY) wrap.scrollTop = window._puItemsScrollY;
+    const si = document.getElementById('pi-search');
+    if (si && window._puItemsFilter) {
+      si.focus();
+      si.setSelectionRange(si.value.length, si.value.length);
+    }
   }, 60);
 };
 
