@@ -37884,9 +37884,31 @@ window._puItemEditRaw = function(it) {
       };
       if (!payload.name) { showToast('請填品項名稱','error'); return; }
       if (it.id) {
+        const oldCat = it.category;
+        const newCat = payload.category;
         const { error } = await db.from('purchase_items').update(payload).eq('id', it.id);
         if (error) { showToast('儲存失敗:'+error.message,'error'); return; }
-        showToast('已更新');
+        // 類別改了 → 問要不要一併更新採購申請清單
+        if (oldCat && newCat && oldCat !== newCat) {
+          const { data: affected } = await db.from('purchase_requests')
+            .select('id', { count: 'exact', head: false })
+            .or(`part_id.eq.${it.id},item_name.eq.${payload.name.replace(/"/g,'\\"')}`);
+          const n = affected?.length || 0;
+          if (n > 0) {
+            if (confirm(`類別由「${oldCat}」改為「${newCat}」\n\n這個品項共有 ${n} 筆採購申請紀錄,是否要一併更新類別?\n\n(按確定更新全部,按取消只改品項庫)`)) {
+              await db.from('purchase_requests').update({ category: newCat })
+                .or(`part_id.eq.${it.id},item_name.eq.${payload.name.replace(/"/g,'\\"')}`);
+              showToast(`✓ 品項庫 + ${n} 筆採購申請 已更新`, 'success', 4000);
+              try { await loadPurchases?.(); } catch(e){}
+            } else {
+              showToast('已更新品項庫(採購申請維持舊類別)');
+            }
+          } else {
+            showToast('已更新');
+          }
+        } else {
+          showToast('已更新');
+        }
       } else {
         payload.is_active = true;
         payload.usage_count = 0;
