@@ -37753,7 +37753,8 @@ window._puMoveStatus = async function(id, existing, newStatus) {
 window.openPurchaseItemsAdmin = async function() {
   const { data } = await db.from('purchase_items').select('*').order('name');
   state.data.purchaseItems = (data || []).sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-TW'));
-  window._puItemsFilter = '';
+  // 保留上次的搜尋字(若還沒定義才初始化為空)
+  if (typeof window._puItemsFilter !== 'string') window._puItemsFilter = '';
   // 只重繪表格內容(不動搜尋框,避免注音輸入被中斷)
   window._renderPuItemsRows = function() {
     const items = state.data.purchaseItems || [];
