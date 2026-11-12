@@ -33692,6 +33692,8 @@ function renderApp() {
   if (state.page !== 'dashboard' && !canAccessPage(state.page)) {
     state.page = 'dashboard';
   }
+  // 保留捲動位置(避免編輯 modal 關掉後畫面跳回頂)
+  const _savedScroll = { win: window.scrollY, content: document.querySelector('.main .content')?.scrollTop || 0 };
   const pageContent = pageRenderers[state.page] ? pageRenderers[state.page]() : '<div class="empty"><p>頁面建構中…</p></div>';
   root.innerHTML = `
     ${renderSidebar()}
@@ -33704,8 +33706,13 @@ function renderApp() {
   bindEvents();
   if (window.bindDragRows) window.bindDragRows();
   if (state.page === 'sales') requestAnimationFrame(salesInitCharts);
-  // Restore sidebar collapsed state after every render
   requestAnimationFrame(applySidebarState);
+  // 還原捲動位置
+  requestAnimationFrame(() => {
+    if (_savedScroll.win) window.scrollTo(0, _savedScroll.win);
+    const c = document.querySelector('.main .content');
+    if (c && _savedScroll.content) c.scrollTop = _savedScroll.content;
+  });
 }
 
 function bindLoginEvents() {
