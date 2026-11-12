@@ -36979,9 +36979,29 @@ window.openPurchaseBatchModal = function() {
     if (!drop) return;
     const items = state.data.purchaseItems || [];
     const qs = (q||'').toLowerCase().trim();
-    const filtered = qs
-      ? items.filter(it => (it.name||'').toLowerCase().includes(qs) || (it.category||'').toLowerCase().includes(qs)).sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-TW')).slice(0, 30)
-      : [...items].sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-TW')).slice(0, 20);
+    let filtered;
+    if (qs) {
+      // 相關性排序:name 開頭命中 > name 內部命中 > category 命中
+      filtered = items
+        .map(it => {
+          const name = (it.name||'').toLowerCase();
+          const cat = (it.category||'').toLowerCase();
+          const nameIdx = name.indexOf(qs);
+          const catIdx = cat.indexOf(qs);
+          if (nameIdx < 0 && catIdx < 0) return null;
+          // 分數:越小越前面
+          let score = 999;
+          if (nameIdx === 0) score = 0;          // 名稱從開頭命中
+          else if (nameIdx > 0) score = 10 + nameIdx;  // 名稱內部命中,位置越前越好
+          else if (catIdx >= 0) score = 100;     // 只命中類別
+          return { it, score };
+        })
+        .filter(Boolean)
+        .sort((a,b) => a.score - b.score || (a.it.name||'').localeCompare(b.it.name||'','zh-TW'))
+        .map(x => x.it);
+    } else {
+      filtered = [...items].sort((a,b)=>(a.name||'').localeCompare(b.name||'','zh-TW'));
+    }
     if (!filtered.length) { drop.style.display = 'none'; return; }
     drop.innerHTML = filtered.map(it => `<div style="padding:6px 10px;cursor:pointer;border-bottom:1px solid #f0f0f0;display:flex;justify-content:space-between;align-items:center;font-size:12px"
       onmouseover="this.style.background='#e0f2f1'" onmouseout="this.style.background=''"
