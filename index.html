@@ -37594,12 +37594,16 @@ async function _puSyncCalendar(purchaseRow) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
     const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
     if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
-    // 更新 assignee_ids = 所有子任務負責人聯集(去重)
     const assigneeIds = [...new Set(subs.map(s => s.assignee_id).filter(Boolean))];
     const title = `外購品採購需求`;
-    await db.from('calendar_events').update({ subtasks: subs, title, assignee_ids: assigneeIds }).eq('id', existing.id);
+    // 若全部子任務都打勾 → 自動標母事件完成
+    const allDone = subs.length > 0 && subs.every(s => s.done);
+    const upd = { subtasks: subs, title, assignee_ids: assigneeIds };
+    upd.completed_at = allDone ? new Date().toISOString() : null;
+    await db.from('calendar_events').update(upd).eq('id', existing.id);
     return existing.id;
   } else {
+    // 建新事件時,若子任務已完成 → 直接標完成(避免剛建就出現在待辦)
     const payload = {
       title: `外購品採購需求`,
       event_type: 'purchase',
@@ -37608,9 +37612,10 @@ async function _puSyncCalendar(purchaseRow) {
       end_date: dueDate,
       priority: '中',
       description: `⏰ 採購截止日 ${dueDate},每項打勾表示完成(各項負責人可能不同)`,
-      assigned_to: null, // 不再指派給單一人,靠 subtask 各自的 assignee_id
+      assigned_to: null,
       assignee_ids: [purchaseRow.purchaser_id],
       subtasks: [newSub],
+      completed_at: newSub.done ? new Date().toISOString() : null,
       created_by: state.user?.id || null,
     };
     const { data } = await db.from('calendar_events').insert(payload).select().single();
