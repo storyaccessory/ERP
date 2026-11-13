@@ -37476,10 +37476,61 @@ window._puRebuildAllCalendar = async function() {
   renderApp();
 };
 
+// 待指派事件(status=待指派 時建):給 PM 看,2 工作天內要指派
+async function _puSyncAssignCalendar(purchaseRow) {
+  // 找 PM/老闆(給事件 assignee_ids 用)
+  const pmUser = (state.data.users||[]).find(u =>
+    u.email === 'cailing0516@gmail.com' || u.role === 'admin' || u.name === '蔡采玲'
+  );
+  const pmId = pmUser?.id || null;
+  const today = _localToday();
+  // 申請日 + 2 工作天
+  const base = purchaseRow.request_date || today;
+  const _dueD = addWorkdays(new Date(base + 'T00:00:00'), 2);
+  const dueDate = `${_dueD.getFullYear()}-${String(_dueD.getMonth()+1).padStart(2,'0')}-${String(_dueD.getDate()).padStart(2,'0')}`;
+  const subtaskText = `${purchaseRow.item_name}${purchaseRow.expected_qty?` × ${purchaseRow.expected_qty}`:''} · 申請人 ${purchaseRow.requester_name||'—'}`;
+  const newSub = {
+    id: `assign_${purchaseRow.id}`,
+    text: subtaskText,
+    done: false,
+    due_date: dueDate,
+    purchase_id: purchaseRow.id,
+    assignee_id: pmId,
+  };
+  // 清舊事件子任務(可能狀態來回切)
+  if (purchaseRow.assign_event_id) {
+    await _puRemoveSubtaskFromEvent(purchaseRow.assign_event_id, purchaseRow.id);
+  }
+  const { data: existing } = await db.from('calendar_events').select('*')
+    .eq('event_type','purchase_assign').eq('event_date', dueDate).is('completed_at', null).maybeSingle();
+  if (existing) {
+    const subs = existing.subtasks || [];
+    const idx = subs.findIndex(s => s.purchase_id === purchaseRow.id);
+    if (idx >= 0) subs[idx] = newSub; else subs.push(newSub);
+    const assigneeIds = [...new Set(subs.map(s => s.assignee_id).filter(Boolean))];
+    await db.from('calendar_events').update({ subtasks: subs, assignee_ids: assigneeIds, title: '採購申請待指派' }).eq('id', existing.id);
+    return existing.id;
+  }
+  const { data } = await db.from('calendar_events').insert({
+    title: '採購申請待指派',
+    event_type: 'purchase_assign',
+    event_date: dueDate,
+    start_date: dueDate,
+    end_date: dueDate,
+    priority: '中',
+    description: `⏰ 指派截止日 ${dueDate},PM 需在今日前指派採購負責人`,
+    assignee_ids: pmId ? [pmId] : [],
+    subtasks: [newSub],
+    created_by: state.user?.id || null,
+  }).select().single();
+  return data?.id || null;
+}
+
 async function _puSyncCalendar(purchaseRow) {
   if (!purchaseRow.purchaser_id) return null;
   const today = _localToday();
-  const _dueD = addWorkdays(new Date(today + 'T00:00:00'), 3);
+  // 指派當日 + 2 工作天(共 3 個工作天內要完成採購)
+  const _dueD = addWorkdays(new Date(today + 'T00:00:00'), 2);
   const dueDate = `${_dueD.getFullYear()}-${String(_dueD.getMonth()+1).padStart(2,'0')}-${String(_dueD.getDate()).padStart(2,'0')}`;
   const subtaskText = `${purchaseRow.item_name}${purchaseRow.expected_qty?` × ${purchaseRow.expected_qty}`:''}${purchaseRow.reference_link?` 🔗`:''}`;
   // 已採購 / 已到貨 / 結案 → 採購子任務已完成(自動打勾)
