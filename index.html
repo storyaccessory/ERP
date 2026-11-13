@@ -37564,9 +37564,8 @@ async function _puSyncCalendar(purchaseRow) {
     base = purchaseRow.request_date;
   }
   const _dueD = addWorkdays(new Date(base + 'T00:00:00'), 2);
-  let dueDate = `${_dueD.getFullYear()}-${String(_dueD.getMonth()+1).padStart(2,'0')}-${String(_dueD.getDate()).padStart(2,'0')}`;
-  // 若算出的日期已過期,snap 到今天(別把事件丟過去)
-  if (dueDate < today) dueDate = today;
+  const dueDate = `${_dueD.getFullYear()}-${String(_dueD.getMonth()+1).padStart(2,'0')}-${String(_dueD.getDate()).padStart(2,'0')}`;
+  // 不 snap 到今天:讓過期單呈現在原本該到期的那天(便於看逾期)
   const subtaskText = `${purchaseRow.item_name}${purchaseRow.expected_qty?` × ${purchaseRow.expected_qty}`:''}${purchaseRow.reference_link?` 🔗`:''}`;
   // 已採購 / 已到貨 / 結案 → 採購子任務已完成(自動打勾)
   const subDone = ['已採購','已到貨','結案'].includes(purchaseRow.status);
