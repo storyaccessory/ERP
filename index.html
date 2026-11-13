@@ -36428,6 +36428,7 @@ function renderPurchases() {
       <button class="btn btn-primary" onclick="window.openPurchaseBatchModal()">+ 新增採購申請</button>
       <button class="btn btn-outline" onclick="window.modalBatchImportPurchases()" style="background:#e8f5e9;color:#1b5e20;border-color:#a5d6a7">📥 批次匯入 (Excel)</button>
       ${isBoss ? `<button class="btn btn-outline" onclick="window.openPurchaseItemsAdmin()">⚙️ 品項庫管理</button>` : ''}
+      ${isAdminOnly ? `<button class="btn btn-outline" onclick="window._puRebuildAllCalendar()" style="background:#fce4ec;color:#c2185b;border-color:#f8bbd0" title="重建所有未結案採購單的行事曆事件">🔧 重建所有行事曆</button>` : ''}
     </div>
     <!-- 自訂篩選列 -->
     <div style="display:flex;gap:8px;align-items:center;margin-bottom:10px;flex-wrap:wrap;padding:8px 10px;background:#fafafa;border:1px solid var(--border);border-radius:6px">
@@ -37401,6 +37402,70 @@ window._puCollect = function(existing) {
 
 // 建立/更新行事曆事件(採購提醒)
 // 同一天同負責人 → 合併為一個事件,多品項各為子任務
+// 🔧 批次重建所有未結案採購的行事曆事件(給 admin 用)
+window._puRebuildAllCalendar = async function() {
+  const _ep = effectiveProfile() || {};
+  const isAdmin = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com';
+  if (!isAdmin) { showToast('僅老闆可執行','error'); return; }
+
+  const { data: all } = await db.from('purchase_requests').select('*')
+    .not('status','in','("結案","暫不採購")')
+    .not('purchaser_id','is',null);
+  if (!all?.length) { showToast('沒有需要重建的採購單','info'); return; }
+
+  if (!confirm(`將重建 ${all.length} 筆採購單的行事曆事件 (已採購 / 待採購 / 已到貨)。繼續?`)) return;
+
+  let rebuilt = 0, qcRebuilt = 0, errs = 0;
+  showToast(`重建中… 0/${all.length}`, 'info', 2000);
+
+  for (let i = 0; i < all.length; i++) {
+    const r = all[i];
+    try {
+      // 1) 清舊的 purchase 事件 subtask
+      if (r.calendar_event_id) {
+        const { data: oldEv } = await db.from('calendar_events').select('*').eq('id', r.calendar_event_id).maybeSingle();
+        if (oldEv) {
+          const newSubs = (oldEv.subtasks||[]).filter(s => s.purchase_id !== r.id);
+          if (!newSubs.length) await db.from('calendar_events').delete().eq('id', oldEv.id);
+          else await db.from('calendar_events').update({ subtasks: newSubs }).eq('id', oldEv.id);
+        }
+      }
+      // 2) 重建 purchase 事件(採購進行中的)
+      if (r.status !== '已到貨') {
+        const calId = await _puSyncCalendar({ ...r, calendar_event_id: null });
+        if (calId) {
+          await db.from('purchase_requests').update({ calendar_event_id: calId }).eq('id', r.id);
+          rebuilt++;
+        }
+      }
+      // 3) 若狀態=已到貨 → 清舊 QC 事件,重建 QC 提醒
+      if (r.status === '已到貨') {
+        if (r.qc_event_id) {
+          const { data: oldQc } = await db.from('calendar_events').select('*').eq('id', r.qc_event_id).maybeSingle();
+          if (oldQc) {
+            const newSubs = (oldQc.subtasks||[]).filter(s => s.purchase_id !== r.id);
+            if (!newSubs.length) await db.from('calendar_events').delete().eq('id', oldQc.id);
+            else await db.from('calendar_events').update({ subtasks: newSubs }).eq('id', oldQc.id);
+          }
+        }
+        const qcId = await _puCreateQcReminder({ ...r, qc_event_id: null });
+        if (qcId) {
+          await db.from('purchase_requests').update({ qc_event_id: qcId, calendar_event_id: null }).eq('id', r.id);
+          qcRebuilt++;
+        }
+      }
+    } catch (e) {
+      console.warn('[rebuild] failed', r.request_no, e);
+      errs++;
+    }
+  }
+
+  showToast(`✓ 完成 · 採購事件 ${rebuilt} · QC 事件 ${qcRebuilt}${errs?` · 失敗 ${errs}`:''}`, 'success', 5000);
+  await loadPurchases();
+  try { await loadCalendarEvents?.(); } catch(e){}
+  renderApp();
+};
+
 async function _puSyncCalendar(purchaseRow) {
   if (!purchaseRow.purchaser_id) return null;
   const today = _localToday();
