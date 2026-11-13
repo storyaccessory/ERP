@@ -37039,8 +37039,7 @@ window.openPurchaseBatchModal = function() {
           if (!_isAdmin) {
             // 一般員工:鎖定自己,不能改
             return `<span style="padding:4px 8px;background:#fff;border:1px solid var(--border);border-radius:4px;font-size:13px;font-weight:600">${_meName||'(未設定)'}</span>
-              <input type="hidden" id="pub-requester" value="${state.user?.id||''}" data-name="${_meName}">
-              <span style="font-size:11px;color:var(--muted)">🔒 僅老闆可代填</span>`;
+              <input type="hidden" id="pub-requester" value="${state.user?.id||''}" data-name="${_meName}">`;
           }
           // 老闆/admin:下拉可選所有人
           return `<select id="pub-requester" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" title="老闆可代填或匯入舊資料">
@@ -37052,7 +37051,15 @@ window.openPurchaseBatchModal = function() {
         })()}
         <span style="color:#ccc">·</span>
         <strong>申請日期</strong>:
-        <input type="date" id="pub-date" value="${_localToday()}" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" title="臨時可修改,匯入舊資料用">
+        ${(() => {
+          const _ep = effectiveProfile() || {};
+          const _isAdmin = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com';
+          if (!_isAdmin) {
+            return `<span style="padding:4px 8px;background:#fff;border:1px solid var(--border);border-radius:4px;font-size:13px;font-weight:600">${_localToday()}</span>
+              <input type="hidden" id="pub-date" value="${_localToday()}">`;
+          }
+          return `<input type="date" id="pub-date" value="${_localToday()}" style="padding:4px 8px;border:1px solid var(--border);border-radius:4px;font-size:13px" title="老闆可代填/匯入舊資料用">`;
+        })()}
       </div>
       <span class="tag tag-red">送出後每一項各自成為「待指派」事件</span>
     </div>
@@ -37155,7 +37162,22 @@ window.openPurchaseModal = async function(id) {
   const _ep = effectiveProfile() || {};
   const isBoss = ['admin','manager'].includes(_ep.role) || _ep.email === 'cailing0516@gmail.com';
   const isAdminOnly = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com' || state.user?.email === 'cailing0516@gmail.com';
-  const canEdit = !r.id || isBoss || r.requester_id === state.user?.id || r.purchaser_id === state.user?.id;
+  // 編輯權限:
+  //   · 新單 → 可編
+  //   · 老闆/admin → 永遠可編
+  //   · 我是申請人 且 單子還在「待指派」(沒指派負責人)→ 可編
+  //   · 我是指派的負責人 → 可編(處理這張單)
+  //   · 其他 → 唯讀
+  const amRequester = r.requester_id === state.user?.id;
+  const amPurchaser = r.purchaser_id === state.user?.id;
+  const hasPurchaser = !!r.purchaser_id;
+  const canEdit = !r.id || isBoss
+    || (amRequester && !hasPurchaser)   // 申請人 + 還沒指派
+    || amPurchaser;                      // 自己是負責人
+  const lockAttr = canEdit ? '' : 'disabled style="background:#f5f5f5;cursor:not-allowed"';
+  const readOnlyNotice = (!canEdit && amRequester && hasPurchaser)
+    ? `<div style="padding:8px 12px;background:#fff8e1;border-left:3px solid #e65100;border-radius:4px;margin-bottom:12px;font-size:12px;color:#e65100">已指派無法再修改申請內容。如需變更請主管協助</div>`
+    : '';
   // 負責人選單:蔡采玲/劉怡汝 排最上面,再列其他人
   const purchaserOpts = (() => {
     const active = users.filter(u => u.is_active !== false);
@@ -37169,6 +37191,7 @@ window.openPurchaseModal = async function(id) {
       <div><strong>${r.request_no}</strong></div>
       <span class="tag ${{ '待採購':'tag-orange','已採購':'tag-blue','已到貨':'tag-teal','結案':'tag-green','暫不採購':'tag-grey' }[r.status]||'tag-grey'}">${r.status}</span>
     </div>
+    ${readOnlyNotice}
 
     <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin-bottom:6px">📝 申請資訊</div>
     <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px">
@@ -37179,7 +37202,7 @@ window.openPurchaseModal = async function(id) {
         <input type="date" class="form-control" id="pu-date" value="${r.request_date||_localToday()}" ${isAdminOnly?'':'disabled style="background:#f5f5f5;cursor:not-allowed"'}>
       </div>
       <div class="form-group"><label>類別</label>
-        <select class="form-control" id="pu-category">
+        <select class="form-control" id="pu-category" ${lockAttr}>
           <option value="">— 選擇 —</option>
           ${PURCHASE_CATEGORIES.map(c=>`<option ${r.category===c?'selected':''}>${c}</option>`).join('')}
         </select>
@@ -37187,7 +37210,7 @@ window.openPurchaseModal = async function(id) {
     </div>
 
     <div class="form-group" style="position:relative"><label>品項名稱 * <span style="font-size:11px;color:var(--muted);font-weight:400">(輸入關鍵字即時搜尋品項庫)</span></label>
-      <input class="form-control" id="pu-item" autocomplete="off" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱 / 絨布 / K金" oninput="window._puSearchItems(this.value);window._puUpdateSpecHint(this.value)" onfocus="window._puSearchItems(this.value)" onblur="setTimeout(()=>{const d=document.getElementById('pu-item-drop');if(d) d.style.display='none';},200)">
+      <input class="form-control" id="pu-item" autocomplete="off" value="${(r.item_name||'').replace(/"/g,'&quot;')}" placeholder="例:紙箱 / 絨布 / K金" ${lockAttr} oninput="window._puSearchItems(this.value);window._puUpdateSpecHint(this.value)" onfocus="window._puSearchItems(this.value)" onblur="setTimeout(()=>{const d=document.getElementById('pu-item-drop');if(d) d.style.display='none';},200)">
       <div id="pu-item-drop" style="display:none;position:absolute;z-index:200;left:0;right:0;top:100%;background:#fff;border:1px solid var(--border);border-radius:6px;max-height:280px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,.15);margin-top:2px"></div>
       <div id="pu-spec-hint" style="font-size:11px;color:#999;margin-top:4px;padding-left:2px">${(() => {
         const matched = (state.data.purchaseItems||[]).find(x => x.name === r.item_name);
@@ -37196,17 +37219,17 @@ window.openPurchaseModal = async function(id) {
     </div>
     <div style="display:grid;grid-template-columns:1fr 1fr;gap:10px">
       <div class="form-group"><label>預計採購數量</label>
-        <input class="form-control" id="pu-expected" value="${(r.expected_qty||'').replace(/"/g,'&quot;')}" placeholder="支援文字,如 100 或 藍*5 粉*3">
+        <input class="form-control" id="pu-expected" value="${(r.expected_qty||'').replace(/"/g,'&quot;')}" placeholder="支援文字,如 100 或 藍*5 粉*3" ${lockAttr}>
       </div>
       <div class="form-group"><label>目前庫存</label>
-        <input class="form-control" id="pu-stock" value="${(r.current_stock||'').replace(/"/g,'&quot;')}" placeholder="支援文字">
+        <input class="form-control" id="pu-stock" value="${(r.current_stock||'').replace(/"/g,'&quot;')}" placeholder="支援文字" ${lockAttr}>
       </div>
     </div>
     <div class="form-group"><label>參考連結(選填)</label>
-      <input class="form-control" id="pu-link" value="${r.reference_link||''}" placeholder="https://...">
+      <input class="form-control" id="pu-link" value="${r.reference_link||''}" placeholder="https://..." ${lockAttr}>
     </div>
     <div class="form-group"><label>備註(選填)</label>
-      <textarea class="form-control" id="pu-notes" rows="2">${r.notes||''}</textarea>
+      <textarea class="form-control" id="pu-notes" rows="2" ${lockAttr}>${r.notes||''}</textarea>
     </div>
 
     <div style="font-weight:700;font-size:12px;color:var(--accent-dark);margin:14px 0 6px">🎯 指派採購負責人</div>
@@ -37807,7 +37830,6 @@ window.openPurchaseItemsAdmin = async function() {
           value="${(window._puItemsFilter||'').replace(/"/g,'&quot;')}"
           oninput="window._puItemsFilter=this.value;window._renderPuItemsRows();window._renderPuItemsBodyRefresh();"
           oncompositionend="window._puItemsFilter=this.value;window._renderPuItemsRows();window._renderPuItemsBodyRefresh();">
-        ${window._puItemsFilter ? `<button class="btn btn-sm" onclick="window._puItemsFilter='';window.openPurchaseItemsAdmin();" style="background:#ffebee;color:#c62828;border:1px solid #ef9a9a">✕ 清除</button>` : ''}
         <button class="btn btn-primary btn-sm" onclick="window._puItemNew()">+ 新增品項</button>
         <span id="pi-count" style="font-size:12px;color:var(--muted);white-space:nowrap">共 ${(state.data.purchaseItems||[]).length} 項</span>
       </div>
