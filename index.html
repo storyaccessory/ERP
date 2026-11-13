@@ -38373,21 +38373,28 @@ window._puInlinePurchaser = async function(id, sel) {
   const r = (state.data.purchases||[]).find(x=>x.id===id);
   if (!r) return;
   const upd = { purchaser_id: purId, purchaser_name: purName };
-  // 有指派 + 目前是待指派 → 改為待採購,並建行事曆
+  // 有指派 + 目前是待指派 → 改為待採購
   if (purId && r.status === '待指派') {
     upd.status = '待採購';
   }
   if (purId) {
+    // 清掉待指派事件
+    if (r.assign_event_id) {
+      await _puRemoveSubtaskFromEvent(r.assign_event_id, r.id);
+      upd.assign_event_id = null;
+    }
+    // 建採購事件
     const calId = await _puSyncCalendar({ ...r, ...upd });
     upd.calendar_event_id = calId;
   } else {
-    // 取消指派 → 若有行事曆事件,刪掉
+    // 取消指派 → 移除採購事件子任務 + 回建「待指派」事件
     if (r.calendar_event_id) {
-      await db.from('calendar_events').delete().eq('id', r.calendar_event_id);
+      await _puRemoveSubtaskFromEvent(r.calendar_event_id, r.id);
       upd.calendar_event_id = null;
     }
-    // 狀態退回待指派
     if (r.status === '待採購') upd.status = '待指派';
+    const assignId = await _puSyncAssignCalendar({ ...r, ...upd });
+    upd.assign_event_id = assignId;
   }
   const { error } = await db.from('purchase_requests').update(upd).eq('id', id);
   if (error) { showToast('更新失敗:'+error.message,'error'); return; }
