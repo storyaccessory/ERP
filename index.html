@@ -37583,12 +37583,24 @@ async function _puSyncCalendar(purchaseRow) {
     await _puRemoveSubtaskFromEvent(purchaseRow.calendar_event_id, purchaseRow.id);
   }
 
-  // 找同截止日既有的採購事件(不再限定負責人 → 同天所有負責人共用一個事件)
-  const { data: existing } = await db.from('calendar_events').select('*')
+  // 找同截止日既有的採購事件(同天所有負責人共用一個事件,包含已標完成的 — 以便合併回來)
+  const { data: existingList } = await db.from('calendar_events').select('*')
     .eq('event_type', 'purchase')
     .eq('event_date', dueDate)
-    .is('completed_at', null)
-    .maybeSingle();
+    .order('created_at', { ascending: true });
+  let existing = existingList && existingList[0];
+  // 如果同天有多顆事件,合併:把後面的 subs 全部塞進第一顆,刪掉其他
+  if (existingList && existingList.length > 1) {
+    const allSubs = [...(existing.subtasks||[])];
+    const seenIds = new Set(allSubs.map(s => s.id));
+    for (let k = 1; k < existingList.length; k++) {
+      for (const s of (existingList[k].subtasks||[])) {
+        if (!seenIds.has(s.id)) { allSubs.push(s); seenIds.add(s.id); }
+      }
+    }
+    await db.from('calendar_events').delete().in('id', existingList.slice(1).map(e => e.id));
+    existing = { ...existing, subtasks: allSubs };
+  }
 
   if (existing) {
     const subs = Array.isArray(existing.subtasks) ? existing.subtasks : [];
