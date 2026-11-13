@@ -32005,8 +32005,12 @@ async function modalCalEvent(existing=null) {
           <label style="font-size:13px;font-weight:600;white-space:nowrap">重複到</label>
           <input class="form-control" id="cal-recur-end" type="date" style="width:auto"
             value="${(() => { const d = new Date(today+'T00:00:00'); d.setFullYear(d.getFullYear()+5); return d.toISOString().slice(0,10); })()}">
-          <span style="font-size:12px;color:var(--muted)">（預設五年後）</span>
+          <span style="font-size:12px;color:var(--muted)">(預設五年後)</span>
         </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:13px;margin-top:10px;padding:6px 8px;background:#e3f2fd;border-radius:4px;cursor:pointer">
+          <input type="checkbox" id="cal-recur-snap" checked style="width:16px;height:16px">
+          <span>遇到週末 / 國定假日時,自動順延到下一個工作日</span>
+        </label>
       </div>
     </div>` : ''}
   `, [
@@ -32370,14 +32374,25 @@ async function _createRecurringEvents(base, recurType, recurEndDate) {
 
   if (!dates.length) { showToast('找不到符合的日期，請確認設定','error'); return; }
 
-  // 建立母事項（不顯示在行事曆，只作為識別）
+  // 遇假日順延到下一個工作日(勾選開關)
+  const snapOn = document.getElementById('cal-recur-snap')?.checked;
+  let finalDates = dates;
+  if (snapOn && typeof _snapToWorkday === 'function') {
+    const seen = new Set();
+    finalDates = dates.map(d => {
+      const snapped = _snapToWorkday(d, 'forward');
+      return snapped <= recurEndDate ? snapped : null;
+    }).filter(d => d && !seen.has(d) && seen.add(d));
+  }
+
+  // 建立母事項(不顯示在行事曆,只作為識別)
   const { data: tmpl } = await db.from('calendar_events')
     .insert({ ...base, created_by: state.user?.id, is_template: true })
     .select().single();
   const templateId = tmpl?.id;
 
   // 批次寫入所有實例
-  const rows = dates.map(d => ({
+  const rows = finalDates.map(d => ({
     ...base,
     start_date: d, end_date: d,
     created_by: state.user?.id,
