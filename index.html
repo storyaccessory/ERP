@@ -37556,8 +37556,17 @@ async function _puSyncCalendar(purchaseRow) {
   if (!purchaseRow.purchaser_id) return null;
   const today = _localToday();
   // 指派當日 + 2 工作天(共 3 個工作天內要完成採購)
-  const _dueD = addWorkdays(new Date(today + 'T00:00:00'), 2);
-  const dueDate = `${_dueD.getFullYear()}-${String(_dueD.getMonth()+1).padStart(2,'0')}-${String(_dueD.getDate()).padStart(2,'0')}`;
+  // 基準:優先用 assigned_at(真正指派日)→ fallback request_date → 今天
+  let base = today;
+  if (purchaseRow.assigned_at) {
+    base = purchaseRow.assigned_at.slice(0,10);
+  } else if (purchaseRow.request_date) {
+    base = purchaseRow.request_date;
+  }
+  const _dueD = addWorkdays(new Date(base + 'T00:00:00'), 2);
+  let dueDate = `${_dueD.getFullYear()}-${String(_dueD.getMonth()+1).padStart(2,'0')}-${String(_dueD.getDate()).padStart(2,'0')}`;
+  // 若算出的日期已過期,snap 到今天(別把事件丟過去)
+  if (dueDate < today) dueDate = today;
   const subtaskText = `${purchaseRow.item_name}${purchaseRow.expected_qty?` × ${purchaseRow.expected_qty}`:''}${purchaseRow.reference_link?` 🔗`:''}`;
   // 已採購 / 已到貨 / 結案 → 採購子任務已完成(自動打勾)
   const subDone = ['已採購','已到貨','結案'].includes(purchaseRow.status);
@@ -38406,6 +38415,8 @@ window._puInlinePurchaser = async function(id, sel) {
     upd.status = '待採購';
   }
   if (purId) {
+    // 記錄指派時間(作為採購 2 工作天倒數的起算日)
+    upd.assigned_at = new Date().toISOString();
     // 清掉待指派事件
     if (r.assign_event_id) {
       await _puRemoveSubtaskFromEvent(r.assign_event_id, r.id);
@@ -38415,7 +38426,8 @@ window._puInlinePurchaser = async function(id, sel) {
     const calId = await _puSyncCalendar({ ...r, ...upd });
     upd.calendar_event_id = calId;
   } else {
-    // 取消指派 → 移除採購事件子任務 + 回建「待指派」事件
+    // 取消指派 → 清指派時間 + 移除採購事件 + 建待指派事件
+    upd.assigned_at = null;
     if (r.calendar_event_id) {
       await _puRemoveSubtaskFromEvent(r.calendar_event_id, r.id);
       upd.calendar_event_id = null;
