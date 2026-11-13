@@ -37130,8 +37130,15 @@ window.openPurchaseBatchModal = function() {
         status: '待指派',
         part_id: r.part_id || null,   // ← 從零件庫挑的會帶 part_id
       }));
-      const { error } = await db.from('purchase_requests').insert(inserts);
+      const { data: insertedRows, error } = await db.from('purchase_requests').insert(inserts).select();
       if (error) { showToast('送出失敗:'+error.message,'error'); return; }
+      // 建待指派事件(新單都是「待指派」狀態)
+      for (const r of (insertedRows||[])) {
+        try {
+          const aid = await _puSyncAssignCalendar(r);
+          if (aid) await db.from('purchase_requests').update({ assign_event_id: aid }).eq('id', r.id);
+        } catch(e) { console.warn('[assign event] failed', e); }
+      }
       // 品項庫維護
       for (const row of inserts) {
         const existing = (state.data.purchaseItems||[]).find(it => it.name === row.item_name);
@@ -37409,18 +37416,37 @@ window._puRebuildAllCalendar = async function() {
   if (!isAdmin) { showToast('僅老闆可執行','error'); return; }
 
   const { data: all } = await db.from('purchase_requests').select('*')
-    .not('status','in','("結案","暫不採購")')
-    .not('purchaser_id','is',null);
+    .not('status','in','("結案","暫不採購")');
   if (!all?.length) { showToast('沒有需要重建的採購單','info'); return; }
 
-  if (!confirm(`將重建 ${all.length} 筆採購單的行事曆事件 (已採購 / 待採購 / 已到貨)。繼續?`)) return;
+  if (!confirm(`將重建 ${all.length} 筆採購單的行事曆事件 (待指派 / 待採購 / 已採購 / 已到貨)。繼續?`)) return;
 
-  let rebuilt = 0, qcRebuilt = 0, errs = 0;
+  let rebuilt = 0, qcRebuilt = 0, assignRebuilt = 0, errs = 0;
   showToast(`重建中… 0/${all.length}`, 'info', 2000);
 
   for (let i = 0; i < all.length; i++) {
     const r = all[i];
     try {
+      // 0) 清舊的「待指派事件」subtask(所有狀態都先清)
+      if (r.assign_event_id) {
+        const { data: oldA } = await db.from('calendar_events').select('*').eq('id', r.assign_event_id).maybeSingle();
+        if (oldA) {
+          const newSubs = (oldA.subtasks||[]).filter(s => s.purchase_id !== r.id);
+          if (!newSubs.length) await db.from('calendar_events').delete().eq('id', oldA.id);
+          else await db.from('calendar_events').update({ subtasks: newSubs }).eq('id', oldA.id);
+        }
+        await db.from('purchase_requests').update({ assign_event_id: null }).eq('id', r.id);
+        r.assign_event_id = null;
+      }
+      // 1) 待指派:只建待指派事件,不建採購事件
+      if (r.status === '待指派' || !r.purchaser_id) {
+        const aid = await _puSyncAssignCalendar(r);
+        if (aid) {
+          await db.from('purchase_requests').update({ assign_event_id: aid }).eq('id', r.id);
+          assignRebuilt++;
+        }
+        continue;
+      }
       // 1) 清舊的 purchase 事件 subtask
       if (r.calendar_event_id) {
         const { data: oldEv } = await db.from('calendar_events').select('*').eq('id', r.calendar_event_id).maybeSingle();
@@ -37470,7 +37496,7 @@ window._puRebuildAllCalendar = async function() {
     }
   }
 
-  showToast(`✓ 完成 · 採購事件 ${rebuilt} · QC 事件 ${qcRebuilt}${errs?` · 失敗 ${errs}`:''}`, 'success', 5000);
+  showToast(`✓ 完成 · 待指派 ${assignRebuilt} · 採購 ${rebuilt} · QC ${qcRebuilt}${errs?` · 失敗 ${errs}`:''}`, 'success', 5000);
   await loadPurchases();
   try { await loadCalendarEvents?.(); } catch(e){}
   renderApp();
@@ -37594,7 +37620,9 @@ async function _puRemoveSubtaskFromEvent(eventId, purchaseId) {
     await db.from('calendar_events').delete().eq('id', eventId);
   } else {
     // 依 event_type 決定標題(不寫死)
-    const title = ev.event_type === 'qc' ? '外購品點數量入庫' : '外購品採購需求';
+    const title = ev.event_type === 'qc' ? '外購品點數量入庫'
+      : ev.event_type === 'purchase_assign' ? '採購申請待指派'
+      : '外購品採購需求';
     await db.from('calendar_events').update({ subtasks: subs, title }).eq('id', eventId);
   }
 }
@@ -38445,6 +38473,22 @@ window._puInlineStatus = async function(id, newStatus) {
     await _puRemoveSubtaskFromEvent(r.qc_event_id, r.id);
     upd.qc_event_id = null;
     upd.arrival_date = null;
+  }
+  // 退回 待指派 → 清採購事件 + 清採購人 + 建待指派事件
+  if (newStatus === '待指派' && ['待採購','已採購'].includes(r.status)) {
+    if (r.calendar_event_id) {
+      await _puRemoveSubtaskFromEvent(r.calendar_event_id, r.id);
+      upd.calendar_event_id = null;
+    }
+    upd.purchaser_id = null;
+    upd.purchaser_name = null;
+    const aid = await _puSyncAssignCalendar({ ...r, ...upd });
+    upd.assign_event_id = aid;
+  }
+  // 從 待指派 → 其他 → 清待指派事件
+  if (newStatus !== '待指派' && r.assign_event_id) {
+    await _puRemoveSubtaskFromEvent(r.assign_event_id, r.id);
+    upd.assign_event_id = null;
   }
   // 到貨 → 沒 arrival_date 帶今天(不動 QC 入庫日期),並建 QC 提醒
   if (newStatus === '已到貨') {
