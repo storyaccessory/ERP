@@ -37430,8 +37430,18 @@ window._puRebuildAllCalendar = async function() {
           else await db.from('calendar_events').update({ subtasks: newSubs }).eq('id', oldEv.id);
         }
       }
-      // 2) 重建 purchase 事件(採購進行中的)
+      // 2) 不是 已到貨 → 清掉殘留的 QC 事件,重建 purchase 事件
       if (r.status !== '已到貨') {
+        // 清舊 QC 事件
+        if (r.qc_event_id) {
+          const { data: oldQc } = await db.from('calendar_events').select('*').eq('id', r.qc_event_id).maybeSingle();
+          if (oldQc) {
+            const newSubs = (oldQc.subtasks||[]).filter(s => s.purchase_id !== r.id);
+            if (!newSubs.length) await db.from('calendar_events').delete().eq('id', oldQc.id);
+            else await db.from('calendar_events').update({ subtasks: newSubs }).eq('id', oldQc.id);
+          }
+          await db.from('purchase_requests').update({ qc_event_id: null, arrival_date: null }).eq('id', r.id);
+        }
         const calId = await _puSyncCalendar({ ...r, calendar_event_id: null });
         if (calId) {
           await db.from('purchase_requests').update({ calendar_event_id: calId }).eq('id', r.id);
@@ -37472,10 +37482,12 @@ async function _puSyncCalendar(purchaseRow) {
   const _dueD = addWorkdays(new Date(today + 'T00:00:00'), 3);
   const dueDate = `${_dueD.getFullYear()}-${String(_dueD.getMonth()+1).padStart(2,'0')}-${String(_dueD.getDate()).padStart(2,'0')}`;
   const subtaskText = `${purchaseRow.item_name}${purchaseRow.expected_qty?` × ${purchaseRow.expected_qty}`:''}${purchaseRow.reference_link?` 🔗`:''}`;
+  // 已採購 / 已到貨 / 結案 → 採購子任務已完成(自動打勾)
+  const subDone = ['已採購','已到貨','結案'].includes(purchaseRow.status);
   const newSub = {
     id: `pu_${purchaseRow.id}`,
     text: subtaskText,
-    done: false,
+    done: subDone,
     due_date: dueDate,
     purchase_id: purchaseRow.id,
     assignee_id: purchaseRow.purchaser_id,
