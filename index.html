@@ -38305,6 +38305,12 @@ window._puInlineStatus = async function(id, newStatus) {
   const upd = { status: newStatus };
   // 到採購 → 沒 purchase_date 帶今天
   if (newStatus === '已採購' && !r.purchase_date) upd.purchase_date = _localToday();
+  // 從 已到貨 退回 已採購 / 待採購 → 清 QC 事件 + arrival_date
+  if (['已採購','待採購','待指派'].includes(newStatus) && r.qc_event_id) {
+    await _puRemoveSubtaskFromEvent(r.qc_event_id, r.id);
+    upd.qc_event_id = null;
+    upd.arrival_date = null;
+  }
   // 到貨 → 沒 arrival_date 帶今天(不動 QC 入庫日期),並建 QC 提醒
   if (newStatus === '已到貨') {
     if (!r.arrival_date) upd.arrival_date = _localToday();
