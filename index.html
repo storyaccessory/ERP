@@ -37141,6 +37141,8 @@ window.openPurchaseBatchModal = function() {
       }
       // 品項庫維護
       for (const row of inserts) {
+        // 從零件庫挑的(有 part_id)不進採購品項庫,避免重複
+        if (row.part_id) continue;
         const existing = (state.data.purchaseItems||[]).find(it => it.name === row.item_name);
         if (existing) {
           await db.from('purchase_items').update({ usage_count: (existing.usage_count||0) + 1 }).eq('id', existing.id);
