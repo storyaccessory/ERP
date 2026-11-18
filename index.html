@@ -25764,7 +25764,7 @@ async function loadJournal() {
       .select('id, title, start_date, end_date, event_type, priority, assigned_to, assignee_ids, completed_at, subtasks, is_private, created_by')
       .is('completed_at', null)
       .neq('is_template', true)
-      .or(`assigned_to.eq.${myUid},assignee_ids.cs.["${myUid}"],created_by.eq.${myUid}`)
+      .or(`assigned_to.eq.${myUid},assignee_ids.cs.["${myUid}"]`)
       .lte('start_date', in14))
       .order('start_date'),
     // 部門團隊協作事項（多人指派，不限個人）
