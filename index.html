@@ -12995,8 +12995,33 @@ function _renderDevDetail(id) {
     <div style="display:flex;align-items:center;gap:10px;margin-bottom:12px;flex-wrap:wrap">
       <button class="btn btn-outline btn-sm" onclick="closeDevProject()">← 返回列表</button>
       <div style="font-size:18px;font-weight:700;color:var(--accent-dark)">🛠 ${p.name}</div>
-      <span class="tag tag-blue">${p.status||'進行中'}</span>
+      ${(() => {
+        const s = p.status || '進行中';
+        const styles = {
+          '進行中': { bg:'#e3f2fd', color:'#1565c0' },
+          '暫停':   { bg:'#fff8e1', color:'#e65100' },
+          '取消':   { bg:'#f5f5f5', color:'#999' },
+          '完成':   { bg:'#e8f5e9', color:'#2e7d32' },
+        };
+        const st = styles[s] || styles['進行中'];
+        return `<span style="background:${st.bg};color:${st.color};padding:3px 10px;border-radius:12px;font-size:12px;font-weight:700">${s==='進行中'?'● ':s==='暫停'?'⏸ ':s==='取消'?'✕ ':'✓ '}${s}</span>`;
+      })()}
       <span style="background:${_devHealthTop.bg};color:${_devHealthTop.color};padding:3px 12px;border-radius:12px;font-size:12px;font-weight:700">${_devHealthTop.emoji} ${_devHealthTop.label}</span>
+      ${(() => {
+        const s = p.status || '進行中';
+        if (s === '進行中') return `
+          <button class="btn btn-sm btn-outline" onclick="window._devSetProjectStatus('${p.id}','暫停')" style="background:#fff8e1;color:#e65100;border-color:#ffb74d" title="暫停專案 + 移除行事曆事件">⏸ 暫停</button>
+          <button class="btn btn-sm btn-outline" onclick="window._devSetProjectStatus('${p.id}','取消')" style="background:#ffebee;color:#c62828;border-color:#ef9a9a" title="終止專案 + 移除行事曆事件">✕ 終止</button>
+        `;
+        if (s === '暫停') return `
+          <button class="btn btn-sm btn-primary" onclick="window._devSetProjectStatus('${p.id}','進行中')" style="background:#1565c0" title="恢復 + 重建行事曆">▶ 恢復</button>
+          <button class="btn btn-sm btn-outline" onclick="window._devSetProjectStatus('${p.id}','取消')" style="background:#ffebee;color:#c62828;border-color:#ef9a9a">✕ 終止</button>
+        `;
+        if (s === '取消') return `
+          <button class="btn btn-sm btn-primary" onclick="window._devSetProjectStatus('${p.id}','進行中')" style="background:#1565c0">▶ 恢復為進行中</button>
+        `;
+        return '';
+      })()}
     </div>
 
     <div class="cards cards-4" style="margin-bottom:14px">
@@ -15963,6 +15988,47 @@ window._devReflowDates = async function(projectId) {
       renderApp();
     }},
   ], { width: '560px' });
+};
+
+// 切換專案狀態(進行中 / 暫停 / 取消) + 同步處理行事曆
+window._devSetProjectStatus = async function(projectId, newStatus) {
+  const p = (state.data.dev||[]).find(x => x.id === projectId);
+  if (!p) return;
+  const oldStatus = p.status || '進行中';
+  if (oldStatus === newStatus) return;
+
+  // 確認訊息依狀態不同
+  let confirmMsg = '';
+  if (newStatus === '暫停') confirmMsg = `暫停專案「${p.name}」?\n\n· 專案狀態改為「暫停」\n· 所有相關行事曆事件與子任務會移除(不會再提醒)\n· 任務資料全部保留,恢復時可重建行事曆\n· 品項、審查紀錄、日期變更歷程 全部保留`;
+  else if (newStatus === '取消') confirmMsg = `終止專案「${p.name}」?\n\n· 專案狀態改為「取消」\n· 所有相關行事曆事件會移除\n· 任務資料仍保留(方便事後查),但不會再提醒\n· 可隨時恢復為「進行中」`;
+  else if (newStatus === '進行中') confirmMsg = `恢復專案「${p.name}」為進行中?\n\n· 專案狀態改為「進行中」\n· 會自動重建行事曆事件(依目前的任務日期)`;
+  if (!confirm(confirmMsg)) return;
+
+  // 1. 更新專案狀態
+  await db.from('dev_projects').update({ status: newStatus }).eq('id', projectId);
+
+  // 2. 清掉所有舊的行事曆事件(涵蓋暫停、取消兩種退場)
+  const eventIds = [...new Set((p.dev_tasks||[]).map(t => t.calendar_event_id).filter(Boolean))];
+  if (eventIds.length) {
+    await db.from('calendar_events').delete().in('id', eventIds);
+    // 把 task 的 calendar_event_id 也清空
+    await db.from('dev_tasks').update({ calendar_event_id: null }).eq('project_id', projectId);
+  }
+
+  // 3. 若是「恢復為進行中」→ 重建行事曆事件
+  if (newStatus === '進行中') {
+    await loadDev();
+    const p2 = (state.data.dev||[]).find(x => x.id === projectId);
+    if (p2) await _buildDevCalendarEvents(p2, p2.dev_tasks||[], p2.name);
+  }
+
+  const toastMsg = newStatus === '暫停' ? '⏸ 已暫停 · 行事曆已移除'
+    : newStatus === '取消' ? '✕ 已終止 · 行事曆已移除'
+    : '▶ 已恢復為進行中 · 行事曆已重建';
+  showToast(toastMsg, 'success', 4000);
+  await loadDev();
+  try { await loadCalendarEvents?.(); } catch(e){}
+  renderApp();
 };
 
 window._devRebuildCalendar = async function(id) {
