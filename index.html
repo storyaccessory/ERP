@@ -11493,7 +11493,17 @@ function _renderDesignNumbers() {
   const searchQ = (state.data._dnSearch || '').toLowerCase().trim();
   const filterDate = state.data._dnFilterDate || '';
 
+  const typeFilter = state.data._dnTypeFilter || 'all';
+  // 建 project_id → dev_type 對照
+  const projectTypeMap = {};
+  (state.data.dev||[]).forEach(p => { projectTypeMap[p.id] = p.dev_type || '飾品'; });
   let filtered = list;
+  if (typeFilter !== 'all') {
+    filtered = filtered.filter(r => {
+      const t = projectTypeMap[r.project_id] || '飾品';
+      return t === typeFilter;
+    });
+  }
   if (filterDate) filtered = filtered.filter(r => r.date === filterDate);
   if (searchQ) filtered = filtered.filter(r =>
     (r.number||'').includes(searchQ) ||
@@ -11513,9 +11523,21 @@ function _renderDesignNumbers() {
 
   return `
     <div class="tabs">
-      <div class="tab" data-dev-tab="飾品">飾品</div>
-      <div class="tab" data-dev-tab="周邊">周邊</div>
-      <div class="tab active">🔢 設計圖號</div>
+      <div class="tab" data-dev-tab="dashboard">🎯 總覽</div>
+      <div class="tab" data-dev-tab="all">📋 全部專案</div>
+      <div class="tab active" data-dev-tab="設計圖號">🔢 設計圖號</div>
+    </div>
+    <div style="display:flex;gap:6px;margin:8px 0 12px;align-items:center;flex-wrap:wrap">
+      <span style="font-size:12px;color:var(--muted)">類型篩選:</span>
+      ${(() => {
+        const curType = state.data._dnTypeFilter || 'all';
+        const types = [
+          { k:'all', label:'全部', color:'#1565c0' },
+          { k:'飾品', label:'🥈 飾品', color:'#1565c0' },
+          { k:'周邊', label:'🎁 周邊', color:'#e65100' },
+        ];
+        return types.map(t => `<button class="btn btn-sm ${curType===t.k?'btn-primary':'btn-outline'}" onclick="state.data._dnTypeFilter='${t.k}';renderApp()" style="font-size:11px">${t.label}</button>`).join('');
+      })()}
     </div>
 
     <div class="cards cards-4" style="margin-bottom:16px">
