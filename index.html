@@ -37626,9 +37626,11 @@ window._puRebuildAllCalendar = async function() {
 // 待指派事件(status=待指派 時建):給 PM 看,2 工作天內要指派
 async function _puSyncAssignCalendar(purchaseRow) {
   // 找 PM/老闆(給事件 assignee_ids 用)
-  const pmUser = (state.data.users||[]).find(u =>
-    u.email === 'cailing0516@gmail.com' || u.role === 'admin' || u.name === '蔡采玲'
-  );
+  // 順序:蔡采玲 本人 > cailing0516@gmail.com > admin role(fallback)
+  const users = state.data.users||[];
+  const pmUser = users.find(u => u.name === '蔡采玲')
+    || users.find(u => u.email === 'cailing0516@gmail.com')
+    || users.find(u => u.role === 'admin');
   const pmId = pmUser?.id || null;
   const today = _localToday();
   // 申請日 + 2 工作天
