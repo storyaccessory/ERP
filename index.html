@@ -829,7 +829,7 @@ async function loadDashboard() {
     // 應收帳款(精簡欄位):算「綜合業績 = 自營 + 專案」用
     db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month'),
     // 廠商(客戶名稱對應 PROJ_RAW key 用)
-    db.from('vendors').select('name,company_name,code,count_as_project'),
+    db.from('vendors').select('name,company_name,code,count_as_project,no_invoice,no_invoice_from'),
     // 我的送審中 & 最近核准/退回(儀表板卡片用)
     myId
       ? db.from('approval_requests').select('id,request_type,item_type,item_name,status,created_at,review_note,reviewed_at').eq('requested_by', myId).order('created_at',{ascending:false}).limit(20)
@@ -9584,6 +9584,18 @@ async function modalEditVendor(v) {
           </div>
         </label>
       </div>
+      <div class="form-group" style="padding:10px 12px;background:#fff3e0;border-radius:6px;border-left:3px solid #e65100">
+        <label style="display:block;font-weight:600;margin-bottom:6px">🧾✕ 免開發票起始日</label>
+        <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+          <input type="date" class="form-control" id="v-no-invoice-from" value="${v.no_invoice_from||''}" style="width:160px">
+          <button type="button" onclick="document.getElementById('v-no-invoice-from').value=''" class="btn btn-sm btn-outline" style="font-size:11px">✕ 清除(永遠要開)</button>
+        </div>
+        <div style="font-size:11px;color:var(--muted);margin-top:6px">
+          · 空白 = 永遠要開發票<br>
+          · 填 2026-11-01 = 從 2026/11 起 免發票,之前照舊要開<br>
+          · 應收單依請款月份(billing_month)判定
+        </div>
+      </div>
     </div>
   `, [
     { label: '儲存', primary: true, onclick: async () => {
@@ -9607,6 +9619,7 @@ async function modalEditVendor(v) {
         bank_account: document.getElementById('v-account').value.trim() || null,
         note: document.getElementById('v-note').value.trim() || null,
         count_as_project: document.getElementById('v-count-as-project').checked,
+        no_invoice_from: document.getElementById('v-no-invoice-from').value || null,
       }).eq('id', v.id);
       showToast('✅ 已更新');
       closeModal();
@@ -17555,9 +17568,16 @@ function renderAccounting() {
                     const statusNorm = r.status || '待開發票';
                     const arCustInfo = arVendorMap[r.customer_name] || null;
                     const arCustDisplay = arCustInfo?.company_name || r.customer_name || '—';
+                    // 免發票判定:billing_month (或 shipment_date) >= 廠商的 no_invoice_from
+                    const noInvDate = arCustInfo?.no_invoice_from;
+                    const arBmDay = (r.billing_month ? r.billing_month + '-01' : r.shipment_date?.slice(0,10) || '');
+                    const noInvoice = !!(noInvDate && arBmDay && arBmDay >= noInvDate);
                     const arRowYm = (r.billing_month||'').replace('-','');
                     return `<tr data-ar-id="${r.id}" data-ym="${arRowYm}" data-cust="${arCustDisplay}" data-status="${statusNorm}" data-amount="${r.amount||0}" style="${isOverdue?'background:#fff8f8':''}">
-                      <td><strong style="font-size:12px">${arCustDisplay}</strong></td>
+                      <td>
+                        <strong style="font-size:12px">${arCustDisplay}</strong>
+                        ${noInvoice ? `<span style="font-size:10px;background:#fff3e0;color:#e65100;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="此廠商自 ${noInvDate} 起免開發票">🧾✕ 免發票</span>` : ''}
+                      </td>
                       <td style="font-size:12px;color:var(--accent-dark);font-weight:600">${r.billing_month||'—'}</td>
                       <td style="font-size:12px">${(() => {
                         // 優先讀 note 裡的 [結帳區間：...] 前綴
@@ -22958,7 +22978,7 @@ async function loadSales() {
     state.data.accounting.ar_all = arAll || [];
   }
   if (!state.data.accounting.vendors?.length) {
-    const { data: vd } = await db.from('vendors').select('id, name, company_name, code, is_active, count_as_project');
+    const { data: vd } = await db.from('vendors').select('id, name, company_name, code, is_active, count_as_project, no_invoice');
     state.data.accounting.vendors = vd || [];
   }
   // 從 Supabase 載入體驗店付款明細
