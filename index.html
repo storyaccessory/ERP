@@ -23458,43 +23458,105 @@ function renderSalesProjectContent() {
       </div>
     </div>` : ''}
     ${(() => {
-      // 月專案加總 (CSR + PRO)
-      const totalMonthly = Array.from({length:12}, (_,m) =>
+      // ═══════════════════════════════════════════════
+      // 合併成單一表格:總計 / CSR / PRO 都在同一個 table
+      // ═══════════════════════════════════════════════
+      const buildClientRow = (c) => {
+        const cells = c.monthly.map(function(v,mi) {
+          var hasVal = v !== 0;
+          var isNeg = v < 0;
+          var bg  = hasVal ? '#fff' : '#f7f7f7';
+          var col = hasVal ? (isNeg ? '#c62828' : '#555') : '#f7f7f7';
+          var manualKey = 'proj_' + salesActiveYear + '_' + c.name + '_' + mi;
+          var isManual = localStorage.getItem(manualKey) !== null && salesActiveYear >= 2026;
+          if (isManual) { bg = '#fff8e1'; col = '#bf360c'; }
+          var resetBtn = isManual
+            ? '<button onclick="window.projResetCellToAR(' + salesActiveYear + ',\'' + c.name.replace(/\'/g,'\\\'') + '\',' + mi + ')" '
+              + 'title="改回從應收帳款自動匯入的值" '
+              + 'style="position:absolute;top:0;right:0;width:14px;height:14px;border:none;background:#ff9800;color:#fff;border-radius:50%;cursor:pointer;font-size:9px;line-height:1;padding:0;z-index:1">↺</button>'
+            : '';
+          return '<td style="padding:2px 3px;position:relative;">'
+            + resetBtn
+            + '<input type="number" value="' + (hasVal ? v : '') + '"'
+            + ' data-proj-year="' + salesActiveYear + '"'
+            + ' data-proj-name="' + c.name + '"'
+            + ' data-proj-month="' + mi + '"'
+            + ' style="width:100%;padding:2px 4px;border:1px solid ' + (isManual?'#ffb74d':'#e0e0e0') + ';border-radius:4px;font-size:11px;text-align:right;box-sizing:border-box;background:' + bg + ';color:' + col + ';"'
+            + ' oninput="projMonthInput(this);(function(inp){inp.style.background=\'#fff8e1\';inp.style.color=\'#bf360c\';})(this)">'
+            + '</td>';
+        }).join('');
+        const codeBadge = c.code ? `<span style="font-size:9px;background:#f5f5f5;color:#777;border-radius:3px;padding:1px 4px;margin-left:4px;font-family:monospace">${c.code}</span>` : '';
+        return `<tr>
+          <td style="padding:3px 8px;font-size:12px;white-space:nowrap;">${c.name}${codeBadge}</td>
+          ${cells}
+          <td style="text-align:right;padding:3px 8px;font-size:12px;font-weight:700;color:${c.total<0?'#c62828':'#00695c'};">${c.total!==0?salesFmt(c.total):'-'}</td>
+        </tr>`;
+      };
+
+      const buildGroupHeader = (icon, title, groupClients, bg) => {
+        const total = groupClients.reduce((s,c)=>s+c.total,0);
+        return `<tr style="background:${bg}">
+          <td colspan="13" style="padding:7px 12px;font-size:13px;font-weight:700;color:#00695c">${icon} ${title}</td>
+          <td style="padding:7px 12px;text-align:right;font-size:12px;font-weight:800;color:#00695c">${salesFmt(total)}</td>
+        </tr>`;
+      };
+
+      const buildSubtotalRow = (label, groupClients, bg) => {
+        const monthlyTot = Array.from({length:12}, (_,m) => groupClients.reduce((s,c)=>s+(c.monthly[m]||0),0));
+        const totalAll = monthlyTot.reduce((a,b)=>a+b,0);
+        const cells = monthlyTot.map(v=>`<td style="text-align:center;padding:5px 4px;font-size:11px;font-weight:700;color:${v<0?'#c62828':(v!==0?'#00695c':'#bbb')}">${v!==0?salesFmt(v):'-'}</td>`).join('');
+        return `<tr style="background:${bg}">
+          <td style="padding:5px 10px;font-size:12px;font-weight:700">${label}</td>
+          ${cells}
+          <td style="text-align:right;padding:5px 10px;font-size:12px;font-weight:800;color:${totalAll<0?'#c62828':'#00695c'}">${totalAll!==0?salesFmt(totalAll):'-'}</td>
+        </tr>`;
+      };
+
+      // 月總計 = CSR + PRO
+      const grandMonthly = Array.from({length:12}, (_,m) =>
         csrClients.reduce((s,c)=>s+(c.monthly[m]||0),0) +
         proClients.reduce((s,c)=>s+(c.monthly[m]||0),0)
       );
-      const grandTotal = totalMonthly.reduce((a,b)=>a+b,0);
-      if (grandTotal === 0) return '';
-      const cells = totalMonthly.map(v=>`<td style="text-align:center;padding:5px 4px;font-size:12px;font-weight:700;color:${v<0?'#c62828':(v!==0?'#00695c':'#999')}">${v!==0?salesFmt(v):'-'}</td>`).join('');
+      const grandTotal = grandMonthly.reduce((a,b)=>a+b,0);
+      const grandCells = grandMonthly.map(v=>`<td style="text-align:center;padding:7px 4px;font-size:12px;font-weight:800;color:${v<0?'#c62828':(v!==0?'#00695c':'#999')}">${v!==0?salesFmt(v):'-'}</td>`).join('');
+      const grandRow = `<tr style="background:#b2dfdb">
+        <td style="padding:7px 10px;font-size:13px;font-weight:800;color:#004d40">📊 總計 (CSR+PRO)</td>
+        ${grandCells}
+        <td style="text-align:right;padding:7px 10px;font-size:13px;font-weight:800;color:${grandTotal<0?'#c62828':'#004d40'}">${salesFmt(grandTotal)}</td>
+      </tr>`;
+
+      const csrRows = csrClients.filter(c=>c.total!==0).map(buildClientRow).join('');
+      const proRows = proClients.filter(c=>c.total!==0).map(buildClientRow).join('');
+
       return `
-      <div style="margin-bottom:16px;background:#fff;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,0.07);border:2px solid #00695c;overflow:hidden">
-        <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px 10px;border-bottom:1px solid #b2dfdb;background:#e0f2f1">
-          <span style="font-weight:700;font-size:13px;color:#00695c">📊 月專案加總 (CSR + PRO)</span>
-          <span style="font-size:14px;color:#00695c;font-weight:800">合計 ${salesFmtFull(Math.round(grandTotal))}</span>
-        </div>
-        <div style="overflow-x:auto;padding:10px 16px 12px">
-          <table style="border-collapse:collapse;table-layout:fixed;width:max-content">
+      <div style="margin-bottom:16px;background:#fff;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,0.07);border:1px solid #b2dfdb;overflow:hidden">
+        <div style="overflow-x:auto;padding:10px 12px 12px">
+          <table style="border-collapse:collapse;table-layout:fixed;width:max-content;min-width:100%">
             <colgroup>
-              <col style="width:120px">
-              ${SALES_MONTHS_LABEL.map(()=>'<col style="width:72px">').join('')}
-              <col style="width:80px">
+              <col style="width:150px">
+              ${SALES_MONTHS_LABEL.map(()=>'<col style="width:78px">').join('')}
+              <col style="width:95px">
             </colgroup>
-            <thead><tr style="background:#b2dfdb">
-              <th style="padding:5px 8px;font-size:12px;text-align:left">月份</th>
-              ${SALES_MONTHS_LABEL.map(l=>`<th style="padding:5px 4px;font-size:11px;text-align:center">${l}</th>`).join('')}
-              <th style="padding:5px 8px;font-size:11px;text-align:right">合計</th>
-            </tr></thead>
-            <tbody><tr>
-              <td style="padding:5px 8px;font-size:12px;font-weight:700">總計</td>
-              ${cells}
-              <td style="text-align:right;padding:5px 8px;font-size:12px;font-weight:800;color:#00695c">${salesFmt(grandTotal)}</td>
-            </tr></tbody>
+            <thead>
+              <tr style="background:#e0f2f1">
+                <th style="padding:6px 10px;font-size:12px;text-align:left;color:#00695c">客戶</th>
+                ${SALES_MONTHS_LABEL.map(l=>`<th style="padding:6px 4px;font-size:11px;text-align:center;color:#00695c">${l}</th>`).join('')}
+                <th style="padding:6px 10px;font-size:11px;text-align:right;color:#00695c">合計</th>
+              </tr>
+              ${grandRow}
+            </thead>
+            <tbody>
+              ${csrClients.length ? buildGroupHeader('📦', '經銷客戶 (CSR)', csrClients, '#f1f8f6') : ''}
+              ${csrRows}
+              ${csrClients.length ? buildSubtotalRow('　小計 (CSR)', csrClients, '#e8f5e9') : ''}
+              ${proClients.length ? buildGroupHeader('🔧', '專案客戶 (PRO)', proClients, '#f1f8f6') : ''}
+              ${proRows}
+              ${proClients.length ? buildSubtotalRow('　小計 (PRO)', proClients, '#e8f5e9') : ''}
+            </tbody>
           </table>
         </div>
       </div>`;
     })()}
-    ${renderGroup('📦 經銷客戶（CSR）', csrClients, '#00695c')}
-    ${renderGroup('🔧 專案客戶（PRO）', proClients, '#00695c')}
   </div>`;
 }
 
