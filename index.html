@@ -829,7 +829,7 @@ async function loadDashboard() {
     // 應收帳款(精簡欄位):算「綜合業績 = 自營 + 專案」用
     db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month'),
     // 廠商(客戶名稱對應 PROJ_RAW key 用)
-    db.from('vendors').select('name,company_name,code'),
+    db.from('vendors').select('name,company_name,code,count_as_project'),
     // 我的送審中 & 最近核准/退回(儀表板卡片用)
     myId
       ? db.from('approval_requests').select('id,request_type,item_type,item_name,status,created_at,review_note,reviewed_at').eq('requested_by', myId).order('created_at',{ascending:false}).limit(20)
@@ -9575,6 +9575,15 @@ async function modalEditVendor(v) {
       </div>
       <div class="form-group"><label>帳號</label><input class="form-control" id="v-account" value="${v.bank_account||''}" oninput="window._cleanBankAccount(this)"></div>
       <div class="form-group"><label>備註</label><input class="form-control" id="v-note" value="${v.note||''}"></div>
+      <div class="form-group" style="padding:10px 12px;background:#e0f2f1;border-radius:6px;border-left:3px solid #00695c">
+        <label style="display:flex;align-items:center;gap:8px;cursor:pointer;margin:0">
+          <input type="checkbox" id="v-count-as-project" ${v.count_as_project!==false?'checked':''} style="width:18px;height:18px;cursor:pointer;accent-color:#00695c">
+          <div>
+            <span style="font-weight:600">計入專案業績統計</span>
+            <div style="font-size:11px;color:var(--muted)">勾掉 = 這個廠商的應收不算進專案業績(例如:自營平台、員工代墊、股東借款等)</div>
+          </div>
+        </label>
+      </div>
     </div>
   `, [
     { label: '儲存', primary: true, onclick: async () => {
@@ -9597,6 +9606,7 @@ async function modalEditVendor(v) {
         bank_code: document.getElementById('v-bank-code').value.trim() || null,
         bank_account: document.getElementById('v-account').value.trim() || null,
         note: document.getElementById('v-note').value.trim() || null,
+        count_as_project: document.getElementById('v-count-as-project').checked,
       }).eq('id', v.id);
       showToast('✅ 已更新');
       closeModal();
@@ -17535,12 +17545,11 @@ function renderAccounting() {
                 <th>客戶</th><th>請款月份</th><th>出貨日</th><th>含稅金額</th><th>品項說明</th>
                 <th>發票號碼</th><th>發票日期</th><th>請款單</th><th>信件主旨</th><th>狀態</th>
                 <th>付款期限</th><th>匯款日</th><th>匯款截圖</th>
-                <th title="是否計入專案業績">💼</th>
                 ${isAdmin?'<th>操作</th>':''}
               </tr></thead>
               <tbody id="ar-table-body">
               ${arRows.length === 0
-                ? `<tr><td colspan="15"><div class="empty"><div class="empty-icon">📋</div><p>尚無應收帳款資料</p></div></td></tr>`
+                ? `<tr><td colspan="14"><div class="empty"><div class="empty-icon">📋</div><p>尚無應收帳款資料</p></div></td></tr>`
                 : arRows.map(r => {
                     const isOverdue = r.status !== '已收款' && r.payment_due_date && new Date(r.payment_due_date) < new Date();
                     const statusNorm = r.status || '待開發票';
@@ -17587,11 +17596,6 @@ function renderAccounting() {
                           ? `<img src="${r.payment_screenshot_url}" style="width:48px;height:36px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--border)"
                                onclick="window._showImgPreview('${r.payment_screenshot_url}')" title="點擊放大">`
                           : `<span style="color:var(--muted);font-size:12px">—</span>`}
-                      </td>
-                      <td style="text-align:center">
-                        <input type="checkbox" ${r.count_as_project!==false?'checked':''}
-                          onchange="window._arToggleCountAsProject('${r.id}',this.checked)"
-                          title="計入專案業績" style="width:16px;height:16px;cursor:pointer;accent-color:#00695c">
                       </td>
                       ${isAdmin?`<td><div class="action-btns">
                         <button class="btn-table" data-action="edit-ar" data-id="${r.id}"
@@ -22768,8 +22772,6 @@ function projGetYearData(year) {
     // 累計每客戶每月的 AR 金額(避免在迴圈中重複加)
     const arSum = {};  // { custName: { month0: amount } }
     for (const rec of allAR) {
-      // 人工標記不計入 → 跳過
-      if (rec.count_as_project === false) continue;
       // 只取目標年度
       const bm = rec.billing_month || rec.shipment_date?.slice(0,7);
       if (!bm || !bm.startsWith(yStr)) continue;
@@ -22789,6 +22791,8 @@ function projGetYearData(year) {
       );
       // 2026 起強制使用「系統簡稱」(vendor.name);找不到廠商 → 歸到「⚠ 未對應廠商」便於排查
       let custName = vendor?.name || '⚠ 未對應廠商:' + custRaw;
+      // 廠商被標記不計入業績(例如蝦皮、PINKOI、員工代墊廠商等)→ 跳過
+      if (vendor?.count_as_project === false) continue;
       if (platformBlacklist.has((vendor?.name || '').toLowerCase())) continue;
       // COM 開頭的是供應廠商,不是客戶,排除
       if ((vendor?.code || '').toUpperCase().startsWith('COM')) continue;
@@ -22954,7 +22958,7 @@ async function loadSales() {
     state.data.accounting.ar_all = arAll || [];
   }
   if (!state.data.accounting.vendors?.length) {
-    const { data: vd } = await db.from('vendors').select('id, name, company_name, code, is_active');
+    const { data: vd } = await db.from('vendors').select('id, name, company_name, code, is_active, count_as_project');
     state.data.accounting.vendors = vd || [];
   }
   // 從 Supabase 載入體驗店付款明細
