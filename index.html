@@ -23301,7 +23301,7 @@ function renderSalesProjectContent() {
     if (groupClients.length === 0) return '';
     const groupTotal = groupClients.reduce((s,c)=>s+c.total,0);
     const monthlyTot = Array.from({length:12}, (_,m) => groupClients.reduce((s,c)=>s+(c.monthly[m]||0),0));
-    const rows = groupClients.filter(c=>c.total!==0||salesActiveYear>=2026).map(c => {
+    const rows = groupClients.filter(c=>c.total!==0).map(c => {
       const cells = c.monthly.map(function(v,mi) {
         var hasVal = v !== 0;
         var isNeg = v < 0;
