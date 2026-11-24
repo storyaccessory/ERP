@@ -22753,11 +22753,11 @@ function projGetYearData(year) {
       const month0 = parseInt(bm.slice(5,7)) - 1; // 0-based
       if (month0 < 0 || month0 > 11) continue;
       const amount = parseFloat(rec.amount) || 0;
-      if (!amount) continue;
+      if (amount === 0) continue;  // 允許負數(折讓單),只跳過 0
       // 客戶名稱:優先對應 vendors,然後 customer_name
       const custRaw = (rec.customer_name || '').trim();
       if (!custRaw) continue;
-      if (platformBlacklist.has(custRaw)) continue;  // 排除自營平台
+      if (platformBlacklist.has(custRaw)) continue;
       const vendors = state.data.accounting?.vendors || [];
       const vendor = vendors.find(v =>
         v.company_name === custRaw || v.name === custRaw ||
@@ -22766,8 +22766,6 @@ function projGetYearData(year) {
       );
       let custName = vendor?.name || custRaw;
       if (platformBlacklist.has(custName)) continue;
-      // 嘗試對應 PROJ_RAW 既有的客戶名(避免「麗嬰」「麗嬰國際」「Cozy」「cozy」變兩列)
-      // 規則:1) 完全相同 2) 大小寫不同 3) 兩字以上、一方是另一方的子字串
       const projKey = Object.keys(base).find(k => k === custName)
         || Object.keys(base).find(k => k.toLowerCase() === custName.toLowerCase())
         || Object.keys(base).find(k =>
@@ -22775,26 +22773,33 @@ function projGetYearData(year) {
             (k.includes(custName) || custName.includes(k))
           );
       if (projKey) custName = projKey;
-      if (!arSum[custName]) arSum[custName] = {};
-      arSum[custName][month0] = (arSum[custName][month0] || 0) + amount;
+      if (!arSum[custName]) arSum[custName] = { months: {}, vendorCode: vendor?.code || '' };
+      arSum[custName].months[month0] = (arSum[custName].months[month0] || 0) + amount;
+      if (vendor?.code && !arSum[custName].vendorCode) arSum[custName].vendorCode = vendor.code;
     }
     // 把 AR 累計值套到結果(只在 localStorage 沒有手動覆蓋時)
     for (const custName in arSum) {
+      const info = arSum[custName];
       if (!result[custName]) {
         const rawEntry = Object.values(base).find(e =>
           e.code && custName.includes(e.code)
         );
+        // 依 vendor code 前綴分 CSR / PRO
+        const vcodeUpper = (info.vendorCode || '').toUpperCase();
+        let autoType = 'CSR';
+        if (vcodeUpper.startsWith('PRO')) autoType = 'PRO';
+        else if (vcodeUpper.startsWith('CSR')) autoType = 'CSR';
         result[custName] = {
-          code: rawEntry?.code || '',
-          type: rawEntry?.type || 'CSR',
+          code: info.vendorCode || rawEntry?.code || '',
+          type: rawEntry?.type || autoType,
           monthly: Array(12).fill(0),
           fromAR: true,
         };
       }
-      for (const m0 in arSum[custName]) {
+      for (const m0 in info.months) {
         const manualKey = `proj_${year}_${custName}_${m0}`;
         if (localStorage.getItem(manualKey) === null) {
-          result[custName].monthly[m0] = arSum[custName][m0];
+          result[custName].monthly[m0] = info.months[m0];
         }
       }
     }
