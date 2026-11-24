@@ -825,7 +825,7 @@ async function loadDashboard() {
     // 餐費(用於儀表板進度卡片,5號前抓前月、5號後抓當月)
     db.from('meal_expenses').select('applicant_name,amount').eq('year_month', _mealYmStr),
     // 自營平台業績日報:給首頁的「2026年度業績達成」圖表用,避免拿到過時的舊快取
-    db.from('sales_daily').select('*'),
+    db.from('sales_daily').select('*').range(0, 9999),
     // 應收帳款(精簡欄位):算「綜合業績 = 自營 + 專案」用
     db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month'),
     // 廠商(客戶名稱對應 PROJ_RAW key 用)
@@ -22963,10 +22963,17 @@ async function loadSales() {
   if (!state.data.sales) state.data.sales = {};
   if (!state.data.salesCache) state.data.salesCache = {};
   if (!state.data.expCache)   state.data.expCache   = {};
-  // 從 Supabase 載入業績日報
-  const { data: sdRows } = await db.from('sales_daily').select('*');
-  if (sdRows) {
-    for (const r of sdRows) {
+  // 從 Supabase 載入業績日報(分批撈避免 PostgREST 預設 1000 筆上限)
+  {
+    let allSd = [];
+    const pageSize = 1000;
+    for (let offset = 0; ; offset += pageSize) {
+      const { data: page } = await db.from('sales_daily').select('*').range(offset, offset + pageSize - 1);
+      if (!page || !page.length) break;
+      allSd = allSd.concat(page);
+      if (page.length < pageSize) break;
+    }
+    for (const r of allSd) {
       state.data.salesCache[`${r.year}_${r.platform}_${r.month1}_${r.day}`] = parseFloat(r.value)||0;
     }
   }
@@ -22978,7 +22985,7 @@ async function loadSales() {
     state.data.accounting.ar_all = arAll || [];
   }
   if (!state.data.accounting.vendors?.length) {
-    const { data: vd } = await db.from('vendors').select('id, name, company_name, code, is_active, count_as_project, no_invoice');
+    const { data: vd } = await db.from('vendors').select('id, name, company_name, code, is_active, count_as_project, no_invoice, no_invoice_from');
     state.data.accounting.vendors = vd || [];
   }
   // 從 Supabase 載入體驗店付款明細
