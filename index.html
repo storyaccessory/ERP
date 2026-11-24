@@ -23493,22 +23493,25 @@ function renderSalesProjectContent() {
         </tr>`;
       };
 
-      const buildGroupHeader = (icon, title, groupClients, bg) => {
+      const HEADER_BG = '#e0f2f1';   // 客戶 / 經銷客戶 / 專案客戶 統一
+      const SUBTOTAL_BG = '#e8f5e9'; // 小計 / 總計 統一
+
+      const buildGroupHeader = (title, groupClients) => {
         const total = groupClients.reduce((s,c)=>s+c.total,0);
-        return `<tr style="background:${bg}">
-          <td colspan="13" style="padding:7px 12px;font-size:13px;font-weight:700;color:#00695c">${icon} ${title}</td>
+        return `<tr style="background:${HEADER_BG}">
+          <td colspan="13" style="padding:7px 12px;font-size:13px;font-weight:700;color:#00695c">${title}</td>
           <td style="padding:7px 12px;text-align:right;font-size:12px;font-weight:800;color:#00695c">${salesFmt(total)}</td>
         </tr>`;
       };
 
-      const buildSubtotalRow = (label, groupClients, bg) => {
+      const buildSubtotalRow = (label, groupClients) => {
         const monthlyTot = Array.from({length:12}, (_,m) => groupClients.reduce((s,c)=>s+(c.monthly[m]||0),0));
         const totalAll = monthlyTot.reduce((a,b)=>a+b,0);
-        const cells = monthlyTot.map(v=>`<td style="text-align:center;padding:5px 4px;font-size:11px;font-weight:700;color:${v<0?'#c62828':(v!==0?'#00695c':'#bbb')}">${v!==0?salesFmt(v):'-'}</td>`).join('');
-        return `<tr style="background:${bg}">
+        const cells = monthlyTot.map(v=>`<td style="text-align:center;padding:5px 4px;font-size:11px;font-weight:700;color:${v<0?'#c62828':'#00695c'}">${salesFmt(v)}</td>`).join('');
+        return `<tr style="background:${SUBTOTAL_BG}">
           <td style="padding:5px 10px;font-size:12px;font-weight:700">${label}</td>
           ${cells}
-          <td style="text-align:right;padding:5px 10px;font-size:12px;font-weight:800;color:${totalAll<0?'#c62828':'#00695c'}">${totalAll!==0?salesFmt(totalAll):'-'}</td>
+          <td style="text-align:right;padding:5px 10px;font-size:12px;font-weight:800;color:${totalAll<0?'#c62828':'#00695c'}">${salesFmt(totalAll)}</td>
         </tr>`;
       };
 
@@ -23518,11 +23521,11 @@ function renderSalesProjectContent() {
         proClients.reduce((s,c)=>s+(c.monthly[m]||0),0)
       );
       const grandTotal = grandMonthly.reduce((a,b)=>a+b,0);
-      const grandCells = grandMonthly.map(v=>`<td style="text-align:center;padding:7px 4px;font-size:12px;font-weight:800;color:${v<0?'#c62828':(v!==0?'#00695c':'#999')}">${v!==0?salesFmt(v):'-'}</td>`).join('');
-      const grandRow = `<tr style="background:#b2dfdb">
-        <td style="padding:7px 10px;font-size:13px;font-weight:800;color:#004d40">📊 總計 (CSR+PRO)</td>
+      const grandCells = grandMonthly.map(v=>`<td style="text-align:center;padding:7px 4px;font-size:12px;font-weight:800;color:${v<0?'#c62828':'#00695c'}">${salesFmt(v)}</td>`).join('');
+      const grandRow = `<tr style="background:${SUBTOTAL_BG}">
+        <td style="padding:7px 10px;font-size:13px;font-weight:800;color:#00695c">總計 (CSR+PRO)</td>
         ${grandCells}
-        <td style="text-align:right;padding:7px 10px;font-size:13px;font-weight:800;color:${grandTotal<0?'#c62828':'#004d40'}">${salesFmt(grandTotal)}</td>
+        <td style="text-align:right;padding:7px 10px;font-size:13px;font-weight:800;color:${grandTotal<0?'#c62828':'#00695c'}">${salesFmt(grandTotal)}</td>
       </tr>`;
 
       const csrRows = csrClients.filter(c=>c.total!==0).map(buildClientRow).join('');
@@ -23538,20 +23541,20 @@ function renderSalesProjectContent() {
               <col style="width:95px">
             </colgroup>
             <thead>
-              <tr style="background:#e0f2f1">
+              <tr style="background:${HEADER_BG}">
                 <th style="padding:6px 10px;font-size:12px;text-align:left;color:#00695c">客戶</th>
                 ${SALES_MONTHS_LABEL.map(l=>`<th style="padding:6px 4px;font-size:11px;text-align:center;color:#00695c">${l}</th>`).join('')}
                 <th style="padding:6px 10px;font-size:11px;text-align:right;color:#00695c">合計</th>
               </tr>
-              ${grandRow}
             </thead>
             <tbody>
-              ${csrClients.length ? buildGroupHeader('📦', '經銷客戶 (CSR)', csrClients, '#f1f8f6') : ''}
+              ${csrClients.length ? buildGroupHeader('經銷客戶 (CSR)', csrClients) : ''}
               ${csrRows}
-              ${csrClients.length ? buildSubtotalRow('　小計 (CSR)', csrClients, '#e8f5e9') : ''}
-              ${proClients.length ? buildGroupHeader('🔧', '專案客戶 (PRO)', proClients, '#f1f8f6') : ''}
+              ${csrClients.length ? buildSubtotalRow('小計 (CSR)', csrClients) : ''}
+              ${proClients.length ? buildGroupHeader('專案客戶 (PRO)', proClients) : ''}
               ${proRows}
-              ${proClients.length ? buildSubtotalRow('　小計 (PRO)', proClients, '#e8f5e9') : ''}
+              ${proClients.length ? buildSubtotalRow('小計 (PRO)', proClients) : ''}
+              ${grandRow}
             </tbody>
           </table>
         </div>
