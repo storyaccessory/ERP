@@ -7225,6 +7225,20 @@ async function modalAddAcct(tab, existing) {
 }
 
 // 圖片放大預覽
+// 切換應收是否計入專案業績
+window._arToggleCountAsProject = async function(id, checked) {
+  const { error } = await db.from('accounts_receivable').update({ count_as_project: checked }).eq('id', id);
+  if (error) { showToast('儲存失敗:' + error.message, 'error'); return; }
+  // 更新本地快取
+  const list = state.data.accounting?.ar_all || [];
+  const r = list.find(x => x.id === id);
+  if (r) r.count_as_project = checked;
+  const list2 = state.data.accounting?.ar || [];
+  const r2 = list2.find(x => x.id === id);
+  if (r2) r2.count_as_project = checked;
+  showToast(checked ? '✓ 已計入專案業績' : '已取消計入業績');
+};
+
 window._showImgPreview = function(url) {
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out';
@@ -17521,11 +17535,12 @@ function renderAccounting() {
                 <th>客戶</th><th>請款月份</th><th>出貨日</th><th>含稅金額</th><th>品項說明</th>
                 <th>發票號碼</th><th>發票日期</th><th>請款單</th><th>信件主旨</th><th>狀態</th>
                 <th>付款期限</th><th>匯款日</th><th>匯款截圖</th>
+                <th title="是否計入專案業績">💼</th>
                 ${isAdmin?'<th>操作</th>':''}
               </tr></thead>
               <tbody id="ar-table-body">
               ${arRows.length === 0
-                ? `<tr><td colspan="14"><div class="empty"><div class="empty-icon">📋</div><p>尚無應收帳款資料</p></div></td></tr>`
+                ? `<tr><td colspan="15"><div class="empty"><div class="empty-icon">📋</div><p>尚無應收帳款資料</p></div></td></tr>`
                 : arRows.map(r => {
                     const isOverdue = r.status !== '已收款' && r.payment_due_date && new Date(r.payment_due_date) < new Date();
                     const statusNorm = r.status || '待開發票';
@@ -17572,6 +17587,11 @@ function renderAccounting() {
                           ? `<img src="${r.payment_screenshot_url}" style="width:48px;height:36px;object-fit:cover;border-radius:4px;cursor:pointer;border:1px solid var(--border)"
                                onclick="window._showImgPreview('${r.payment_screenshot_url}')" title="點擊放大">`
                           : `<span style="color:var(--muted);font-size:12px">—</span>`}
+                      </td>
+                      <td style="text-align:center">
+                        <input type="checkbox" ${r.count_as_project!==false?'checked':''}
+                          onchange="window._arToggleCountAsProject('${r.id}',this.checked)"
+                          title="計入專案業績" style="width:16px;height:16px;cursor:pointer;accent-color:#00695c">
                       </td>
                       ${isAdmin?`<td><div class="action-btns">
                         <button class="btn-table" data-action="edit-ar" data-id="${r.id}"
@@ -22739,14 +22759,17 @@ function projGetYearData(year) {
   }
 
   // ── 2026 起：從 AR 應收帳款整合業績 ──
+  // 只算 count_as_project !== false 的 AR(人工勾選是否計入)
   if (year >= 2026) {
-    // 排除自營平台名稱(蝦皮、PINKOI 等),避免誤計入專案業績
-    const platformBlacklist = new Set(SALES_PLATFORMS);
+    // 排除自營平台名稱(蝦皮、PINKOI 等),避免誤計入專案業績 — 大小寫不敏感
+    const platformBlacklist = new Set(SALES_PLATFORMS.map(s => s.toLowerCase()));
     // 載入全部 AR(loadSales 已預載 ar_all)
     const allAR = state.data.accounting?.ar_all || state.data.accounting?.ar || [];
     // 累計每客戶每月的 AR 金額(避免在迴圈中重複加)
     const arSum = {};  // { custName: { month0: amount } }
     for (const rec of allAR) {
+      // 人工標記不計入 → 跳過
+      if (rec.count_as_project === false) continue;
       // 只取目標年度
       const bm = rec.billing_month || rec.shipment_date?.slice(0,7);
       if (!bm || !bm.startsWith(yStr)) continue;
@@ -22757,15 +22780,16 @@ function projGetYearData(year) {
       // 客戶名稱:優先對應 vendors,然後 customer_name
       const custRaw = (rec.customer_name || '').trim();
       if (!custRaw) continue;
-      if (platformBlacklist.has(custRaw)) continue;
+      if (platformBlacklist.has(custRaw.toLowerCase())) continue;
       const vendors = state.data.accounting?.vendors || [];
       const vendor = vendors.find(v =>
         v.company_name === custRaw || v.name === custRaw ||
         (v.company_name && custRaw.includes(v.company_name)) ||
         (v.name && custRaw.includes(v.name))
       );
-      let custName = vendor?.name || custRaw;
-      if (platformBlacklist.has(custName)) continue;
+      // 2026 起強制使用「系統簡稱」(vendor.name);找不到廠商 → 歸到「⚠ 未對應廠商」便於排查
+      let custName = vendor?.name || '⚠ 未對應廠商:' + custRaw;
+      if (platformBlacklist.has((vendor?.name || '').toLowerCase())) continue;
       // COM 開頭的是供應廠商,不是客戶,排除
       if ((vendor?.code || '').toUpperCase().startsWith('COM')) continue;
       const projKey = Object.keys(base).find(k => k === custName)
