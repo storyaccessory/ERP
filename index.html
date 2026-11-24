@@ -23301,11 +23301,12 @@ function renderSalesProjectContent() {
     if (groupClients.length === 0) return '';
     const groupTotal = groupClients.reduce((s,c)=>s+c.total,0);
     const monthlyTot = Array.from({length:12}, (_,m) => groupClients.reduce((s,c)=>s+(c.monthly[m]||0),0));
-    const rows = groupClients.filter(c=>c.total>0||salesActiveYear>=2026).map(c => {
+    const rows = groupClients.filter(c=>c.total!==0||salesActiveYear>=2026).map(c => {
       const cells = c.monthly.map(function(v,mi) {
-        var hasVal = v > 0;
+        var hasVal = v !== 0;
+        var isNeg = v < 0;
         var bg  = hasVal ? '#fff' : '#f7f7f7';
-        var col = hasVal ? '#888' : '#f7f7f7'; // 有值灰字，無值隱形
+        var col = hasVal ? (isNeg ? '#c62828' : '#888') : '#f7f7f7'; // 負數紅字,有值灰字,無值隱形
         // 是否有手動覆蓋(localStorage 有 key 表示使用者改過)
         var manualKey = 'proj_' + salesActiveYear + '_' + c.name + '_' + mi;
         var isManual = localStorage.getItem(manualKey) !== null && salesActiveYear >= 2026;
@@ -23318,7 +23319,7 @@ function renderSalesProjectContent() {
           : '';
         return '<td style="padding:2px 3px;position:relative;">'
           + resetBtn
-          + '<input type="number" min="0" value="' + (hasVal ? v : '') + '"'
+          + '<input type="number" value="' + (hasVal ? v : '') + '"'
           + ' data-proj-year="' + salesActiveYear + '"'
           + ' data-proj-name="' + c.name + '"'
           + ' data-proj-month="' + mi + '"'
@@ -23331,10 +23332,10 @@ function renderSalesProjectContent() {
       return `<tr>
         <td style="padding:3px 8px;font-size:12px;white-space:nowrap;">${c.name}${typeTag}</td>
         ${cells}
-        <td style="text-align:right;padding:3px 8px;font-size:12px;font-weight:700;color:${borderColor};">${c.total>0?salesFmt(c.total):'-'}</td>
+        <td style="text-align:right;padding:3px 8px;font-size:12px;font-weight:700;color:${c.total<0?'#c62828':borderColor};">${c.total!==0?salesFmt(c.total):'-'}</td>
       </tr>`;
     }).join('');
-    const footerCells = monthlyTot.map(v=>`<td style="text-align:center;padding:3px 5px;font-size:11px;font-weight:700;">${v>0?salesFmt(v):'-'}</td>`).join('');
+    const footerCells = monthlyTot.map(v=>`<td style="text-align:center;padding:3px 5px;font-size:11px;font-weight:700;color:${v<0?'#c62828':'inherit'};">${v!==0?salesFmt(v):'-'}</td>`).join('');
     return `
       <div style="margin-bottom:16px;background:#fff;border-radius:14px;box-shadow:0 2px 8px rgba(0,0,0,0.07);border:1px solid #e0f2f1;overflow:hidden;">
         <div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px 10px;border-bottom:1px solid #e0f2f1;background:#f8fffe;">
