@@ -17576,7 +17576,6 @@ function renderAccounting() {
                     return `<tr data-ar-id="${r.id}" data-ym="${arRowYm}" data-cust="${arCustDisplay}" data-status="${statusNorm}" data-amount="${r.amount||0}" style="${isOverdue?'background:#fff8f8':''}">
                       <td>
                         <strong style="font-size:12px">${arCustDisplay}</strong>
-                        ${noInvoice ? `<span style="font-size:10px;background:#fff3e0;color:#e65100;padding:1px 6px;border-radius:8px;margin-left:4px;font-weight:600" title="此廠商自 ${noInvDate} 起免開發票">🧾✕ 免發票</span>` : ''}
                       </td>
                       <td style="font-size:12px;color:var(--accent-dark);font-weight:600">${r.billing_month||'—'}</td>
                       <td style="font-size:12px">${(() => {
@@ -17606,7 +17605,9 @@ function renderAccounting() {
                         })()}
                       </td>
                       <td style="font-size:12px;max-width:160px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap" title="${(r.subject||'').replace(/"/g,'&quot;')}">${r.subject||'—'}</td>
-                      <td><span class="tag ${SC[statusNorm]||'tag-grey'}">${statusNorm}</span></td>
+                      <td>${noInvoice
+                        ? `<span class="tag" style="background:#fff3e0;color:#e65100;font-weight:600" title="此廠商自 ${noInvDate} 起免開發票">免開發票</span>`
+                        : `<span class="tag ${SC[statusNorm]||'tag-grey'}">${statusNorm}</span>`}</td>
                       <td style="font-size:12px;${isOverdue?'color:var(--danger);font-weight:600':''}">${r.payment_due_date?.slice?.(0,10)||'—'}${isOverdue?' ⚠️':''}</td>
                       <td style="font-size:12px;color:${r.payment_date?'var(--success)':'var(--muted)'}">
                         ${r.payment_date ? `✅ ${r.payment_date.slice(0,10)}` : '—'}
