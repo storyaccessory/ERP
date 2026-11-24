@@ -829,7 +829,7 @@ async function loadDashboard() {
     // 應收帳款(精簡欄位):算「綜合業績 = 自營 + 專案」用
     db.from('accounts_receivable').select('id,billing_month,shipment_date,customer_name,amount,year_month'),
     // 廠商(客戶名稱對應 PROJ_RAW key 用)
-    db.from('vendors').select('name,company_name'),
+    db.from('vendors').select('name,company_name,code'),
     // 我的送審中 & 最近核准/退回(儀表板卡片用)
     myId
       ? db.from('approval_requests').select('id,request_type,item_type,item_name,status,created_at,review_note,reviewed_at').eq('requested_by', myId).order('created_at',{ascending:false}).limit(20)
@@ -22766,6 +22766,8 @@ function projGetYearData(year) {
       );
       let custName = vendor?.name || custRaw;
       if (platformBlacklist.has(custName)) continue;
+      // COM 開頭的是供應廠商,不是客戶,排除
+      if ((vendor?.code || '').toUpperCase().startsWith('COM')) continue;
       const projKey = Object.keys(base).find(k => k === custName)
         || Object.keys(base).find(k => k.toLowerCase() === custName.toLowerCase())
         || Object.keys(base).find(k =>
