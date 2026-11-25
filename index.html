@@ -23371,10 +23371,13 @@ function renderSalesProduct() {
   const ymSet = new Set(rows.map(r => r.year_month));
   const allYms = [...ymSet].sort().reverse();
   const latestYm = allYms[0];
-  const category = state.data._psmCat || 'all';
+  // 分類多選:state.data._psmCats = ['necklace','ring'];  空 / 包含 all → 全部
+  if (!Array.isArray(state.data._psmCats)) state.data._psmCats = ['all'];
+  const cats = state.data._psmCats;
+  const isAllCats = cats.length === 0 || cats.includes('all');
+  const sortBy = state.data._psmSort || 'amount';  // 'amount' | 'qty'
 
-  // 篩分類
-  const filterByCat = r => category === 'all' ? true : _psmCategoryOf(r) === category;
+  const filterByCat = r => isAllCats ? true : cats.includes(_psmCategoryOf(r));
 
   // 累計範圍 helper:n 個月窗口(含當月)
   const range = (fromYm, n) => {
@@ -23395,7 +23398,7 @@ function renderSalesProduct() {
       agg[r.product_name].qty += parseFloat(r.quantity)||0;
       agg[r.product_name].amt += parseFloat(r.amount)||0;
     }
-    const list = Object.values(agg).sort((a,b) => b.amt - a.amt);
+    const list = Object.values(agg).sort((a,b) => sortBy === 'qty' ? b.qty - a.qty : b.amt - a.amt);
     const totalQty = list.reduce((s,x)=>s+x.qty,0);
     const totalAmt = list.reduce((s,x)=>s+x.amt,0);
     const top = list.slice(0, 20);
@@ -23468,10 +23471,23 @@ function renderSalesProduct() {
   return `
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="window._psmOpenUpload()" style="font-size:13px">📥 匯入月報</button>
-      <div style="display:flex;gap:4px;flex-wrap:wrap">
-        ${PSM_CATEGORIES.map(c => `<button class="btn btn-sm ${category===c.key?'btn-primary':'btn-outline'}" onclick="state.data._psmCat='${c.key}';renderApp()" style="font-size:11px">${c.icon} ${c.label}</button>`).join('')}
-      </div>
       <span style="font-size:11px;color:var(--muted);margin-left:auto">最新月份:${latestYm} · 已匯入 ${allYms.length} 個月</span>
+    </div>
+    <!-- 分類(可複選)+ 排序切換 -->
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 10px;background:#f1f8f6;border-radius:8px">
+      <span style="font-size:12px;color:var(--muted);font-weight:600">分類:</span>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        ${PSM_CATEGORIES.map(c => {
+          const active = c.key === 'all' ? isAllCats : (cats.includes(c.key) && !isAllCats);
+          return `<button class="btn btn-sm ${active?'btn-primary':'btn-outline'}" onclick="window._psmToggleCat('${c.key}')" style="font-size:11px">${c.icon} ${c.label}</button>`;
+        }).join('')}
+      </div>
+      <span style="color:#ccc">·</span>
+      <span style="font-size:12px;color:var(--muted);font-weight:600">排序:</span>
+      <div style="display:flex;gap:4px">
+        <button class="btn btn-sm ${sortBy==='amount'?'btn-primary':'btn-outline'}" onclick="state.data._psmSort='amount';renderApp()" style="font-size:11px">💰 依金額</button>
+        <button class="btn btn-sm ${sortBy==='qty'?'btn-primary':'btn-outline'}" onclick="state.data._psmSort='qty';renderApp()" style="font-size:11px">📦 依數量</button>
+      </div>
     </div>
     <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px">
       ${buildCard(`近 1 個月 (${latestYm})`, months1)}
@@ -23499,6 +23515,25 @@ function renderSalesProduct() {
     </div>
   `;
 }
+
+// 複選分類切換
+window._psmToggleCat = function(key) {
+  if (!Array.isArray(state.data._psmCats)) state.data._psmCats = ['all'];
+  // 點 all → 切換全部 / 清空
+  if (key === 'all') {
+    state.data._psmCats = ['all'];
+    renderApp();
+    return;
+  }
+  // 若目前是 all 或空 → 改成只勾這個
+  let cats = state.data._psmCats.filter(c => c !== 'all');
+  if (cats.includes(key)) cats = cats.filter(c => c !== key);
+  else cats.push(key);
+  // 都沒勾 → 回到全部
+  if (cats.length === 0) cats = ['all'];
+  state.data._psmCats = cats;
+  renderApp();
+};
 
 // 開啟匯入 modal
 window._psmOpenUpload = function() {
