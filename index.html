@@ -23667,7 +23667,7 @@ window._psmProcessUpload = async function() {
     const merged = {};
     for (const r of raw) {
       const base = baseName(r.name);
-      const isNonProd = /折價券|退貨|退款|折扣|服務費/.test(base);
+      const isNonProd = /折價券|退貨|退款|折扣|服務費|運費|運費補額/.test(base);
       if (!merged[base]) merged[base] = { product_name: base, all_skus: [], quantity: 0, amount: 0, is_non_product: isNonProd };
       merged[base].all_skus.push(r.sku);
       merged[base].quantity += r.qty;
