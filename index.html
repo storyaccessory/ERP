@@ -23579,8 +23579,16 @@ window._psmProcessUpload = async function() {
       raw.push({ sku, name, qty, amt });
     }
 
-    // 合併:去除尺寸後綴(#N / -#N)
-    const baseName = (n) => String(n||'').replace(/\s*-?#\d+\s*$/, '').trim();
+    // 合併:去除尺寸後綴(#N / -#N) + 尾巴括號(白鑽 / 金 / 粉色 等)
+    const baseName = (n) => {
+      let s = String(n||'').trim();
+      // 先去尾巴括號(全形跟半形都處理,可能有多個)
+      s = s.replace(/[((][^))]*[))]\s*$/, '').trim();
+      s = s.replace(/[((][^))]*[))]\s*$/, '').trim();  // 再跑一次避免兩層
+      // 再去尺寸 #14 / -#14
+      s = s.replace(/\s*-?#\d+\s*$/, '').trim();
+      return s;
+    };
     const merged = {};
     for (const r of raw) {
       const base = baseName(r.name);
