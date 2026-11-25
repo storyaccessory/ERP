@@ -23370,7 +23370,10 @@ function renderSalesProduct() {
   // 歸類成每月一筆 → 找最新 year_month
   const ymSet = new Set(rows.map(r => r.year_month));
   const allYms = [...ymSet].sort().reverse();
-  const latestYm = allYms[0];
+  // 使用者選的基準月份(預設最新)
+  const latestYm = state.data._psmAnchor && allYms.includes(state.data._psmAnchor)
+    ? state.data._psmAnchor
+    : allYms[0];
   // 分類多選:state.data._psmCats = ['necklace','ring'];  空 / 包含 all → 全部
   if (!Array.isArray(state.data._psmCats)) state.data._psmCats = ['all'];
   const cats = state.data._psmCats;
@@ -23471,7 +23474,14 @@ function renderSalesProduct() {
   return `
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
       <button class="btn btn-primary" onclick="window._psmOpenUpload()" style="font-size:13px">📥 匯入月報</button>
-      <span style="font-size:11px;color:var(--muted);margin-left:auto">最新月份:${latestYm} · 已匯入 ${allYms.length} 個月</span>
+      <div style="display:flex;align-items:center;gap:6px;margin-left:10px">
+        <span style="font-size:12px;color:var(--muted);font-weight:600">基準月份:</span>
+        <select onchange="state.data._psmAnchor=this.value;renderApp()" style="padding:4px 8px;font-size:12px;border:1px solid var(--border);border-radius:4px">
+          ${allYms.map(ym => `<option value="${ym}" ${ym===latestYm?'selected':''}>${ym}</option>`).join('')}
+        </select>
+        ${latestYm !== allYms[0] ? `<button class="btn btn-sm btn-outline" onclick="state.data._psmAnchor='';renderApp()" style="font-size:11px">↩ 回到最新</button>` : ''}
+      </div>
+      <span style="font-size:11px;color:var(--muted);margin-left:auto">已匯入 ${allYms.length} 個月</span>
     </div>
     <!-- 分類(可複選)+ 排序切換 -->
     <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;padding:8px 10px;background:#f1f8f6;border-radius:8px">
@@ -23589,6 +23599,34 @@ window._psmProcessUpload = async function() {
     if (count > 0) {
       preview.innerHTML = `<div style="color:#c62828;padding:10px;background:#ffebee;border-radius:6px">⚠ ${yearMonth} 已匯入過 (共 ${count} 筆)。請先到「歷史上傳紀錄」刪除後再匯入。</div>`;
       return;
+    }
+
+    // 禁止跳月:新上傳必須是已有資料「最後月份」的下一個月
+    const { data: existingList } = await db.from('product_sales_monthly').select('year_month');
+    const existingYms = [...new Set((existingList||[]).map(r => r.year_month))].sort();
+    if (existingYms.length) {
+      const lastYm = existingYms[existingYms.length - 1];
+      // 算 lastYm 的下一個月
+      const [ly, lm] = lastYm.split('-').map(Number);
+      const nextD = new Date(ly, lm, 1);  // month 已經是下個月的 index
+      const expectedNext = `${nextD.getFullYear()}-${String(nextD.getMonth()+1).padStart(2,'0')}`;
+      if (yearMonth !== expectedNext) {
+        // 列出缺的月份
+        const missing = [];
+        let cur = expectedNext;
+        while (cur < yearMonth) {
+          missing.push(cur);
+          const [cy, cm] = cur.split('-').map(Number);
+          const nd = new Date(cy, cm, 1);
+          cur = `${nd.getFullYear()}-${String(nd.getMonth()+1).padStart(2,'0')}`;
+        }
+        if (missing.length > 10) missing.splice(10, missing.length, '...');
+        const msg = yearMonth < expectedNext
+          ? `⚠ 不能回補中間月份。目前最新月份 ${lastYm},請從 ${expectedNext} 開始依序匯入,或先刪除之後的月份。`
+          : `⚠ 不能跳月。缺少的月份:<b>${missing.join(' · ')}</b><br>請先匯入這些月份的報表後,再匯入 ${yearMonth}。`;
+        preview.innerHTML = `<div style="color:#c62828;padding:10px;background:#ffebee;border-radius:6px">${msg}</div>`;
+        return;
+      }
     }
 
     // 找表頭所在列(含「商品型號」的那一列)
