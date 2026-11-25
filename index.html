@@ -23103,7 +23103,9 @@ function renderSales() {
     <button data-sales-tab="project" style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;
       background:${salesActiveTab==='project'?'#2d4a4a':'#e0f2f1'};color:${salesActiveTab==='project'?'#fff':'#00695c'};">📋 專案業績</button>
     <button data-sales-tab="input" style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;
-      background:#e0f2f1;color:#00695c;">✏️ 自營平台業績</button>
+      background:${salesActiveTab==='input'?'#2d4a4a':'#e0f2f1'};color:${salesActiveTab==='input'?'#fff':'#00695c'};">✏️ 自營平台業績</button>
+    <button data-sales-tab="product" style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;
+      background:${salesActiveTab==='product'?'#2d4a4a':'#e0f2f1'};color:${salesActiveTab==='product'?'#fff':'#00695c'};">🛍 商品銷售</button>
   </div>`;
 
   // KPI cards (截圖風格：有色左邊框)
@@ -23680,6 +23682,7 @@ function renderSalesProjectHeader() {
       <button data-sales-tab="dashboard" style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:#e0f2f1;color:#00695c;">📊 業績總覽</button>
       <button data-sales-tab="project" style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:#2d4a4a;color:#fff;">📋 專案業績</button>
       <button data-sales-tab="input" style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:#e0f2f1;color:#00695c;">✏️ 自營平台業績</button>
+      <button data-sales-tab="product" style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;background:#e0f2f1;color:#00695c;">🛍 商品銷售</button>
     </div>`;
 }
 
