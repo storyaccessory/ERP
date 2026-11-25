@@ -22686,7 +22686,7 @@ const PROJ_RAW = {"2026": {"金寶珍": {"code": "CSR1001", "type": "CSR", "mont
 // ── State ──
 let salesCharts = {};
 let salesActiveYear = new Date().getFullYear();
-let salesActiveTab = 'dashboard'; // 'dashboard' | 'input' | 'project'
+let salesActiveTab = 'dashboard'; // 'dashboard' | 'input' | 'project' | 'product'
 let salesInputYear = new Date().getFullYear();
 let salesInputMonth = new Date().getMonth(); // 0-based, display month
 
@@ -23008,11 +23008,13 @@ async function loadSales() {
 // ── Tab bar ──
 function salesTabBar() {
   const ON='#00897b', OFF_BG='#e0f2f1', OFF_TX='#00695c';
-  return `<div style="display:flex;gap:8px;margin-bottom:16px;">
+  return `<div style="display:flex;gap:8px;margin-bottom:16px;flex-wrap:wrap">
     <button data-sales-tab="dashboard" style="padding:8px 22px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:14px;
       background:${salesActiveTab==='dashboard'?ON:OFF_BG};color:${salesActiveTab==='dashboard'?'#fff':OFF_TX};">📊 業績總覽</button>
     <button data-sales-tab="input" style="padding:8px 22px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:14px;
       background:${salesActiveTab==='input'?ON:OFF_BG};color:${salesActiveTab==='input'?'#fff':OFF_TX};">✏️ 自營平台業績</button>
+    <button data-sales-tab="product" style="padding:8px 22px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:14px;
+      background:${salesActiveTab==='product'?ON:OFF_BG};color:${salesActiveTab==='product'?'#fff':OFF_TX};">🛍 商品銷售</button>
   </div>`;
 }
 
@@ -23023,6 +23025,7 @@ function renderSales() {
 
   if (salesActiveTab === 'input') return `<div style="display:flex;flex-direction:column;gap:12px;">${salesTabBar2()}${renderSalesInput()}</div>`;
   if (salesActiveTab === 'project') return `<div style="display:flex;flex-direction:column;gap:12px;">${renderSalesProjectHeader()}${renderSalesProjectContent()}</div>`;
+  if (salesActiveTab === 'product') return `<div style="display:flex;flex-direction:column;gap:12px;">${salesTabBar2()}${renderSalesProduct()}</div>`;
 
   const currentMonth = new Date().getMonth();
   const platformYearTotal = salesGetYearTotal(salesActiveYear);
@@ -23300,8 +23303,336 @@ function salesTabBar2() {
       background:${salesActiveTab==='project'?ON:OFF_BG};color:${salesActiveTab==='project'?'#fff':OFF_TX};">📋 專案業績</button>
     <button data-sales-tab="input" style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;
       background:${salesActiveTab==='input'?ON:OFF_BG};color:${salesActiveTab==='input'?'#fff':OFF_TX};">✏️ 自營平台業績</button>
+    <button data-sales-tab="product" style="padding:8px 18px;border-radius:8px;border:none;cursor:pointer;font-weight:600;font-size:13px;
+      background:${salesActiveTab==='product'?ON:OFF_BG};color:${salesActiveTab==='product'?'#fff':OFF_TX};">🛍 商品銷售</button>
   </div>`;
 }
+
+// ══════════════════════════════════════════
+// 🛍 商品銷售月統計(product_sales_monthly)
+// ══════════════════════════════════════════
+const PSM_CATEGORIES = [
+  { key:'all',       label:'全部', icon:'' },
+  { key:'necklace',  label:'項鍊', icon:'🔗', keyword:'項鍊' },
+  { key:'bracelet',  label:'手鍊', icon:'✋', keyword:'手鍊' },
+  { key:'ring',      label:'戒指', icon:'💍', keyword:'戒指' },
+  { key:'earring',   label:'耳環', icon:'👂', keyword:'耳環' },
+  { key:'gift',      label:'贈品', icon:'🎁' },  // GF 開頭
+  { key:'other',     label:'其他', icon:'' },
+];
+function _psmCategoryOf(row) {
+  // 優先:GF 開頭 → 贈品
+  const skus = Array.isArray(row.all_skus) ? row.all_skus : [];
+  if (skus.some(s => (s||'').toString().toUpperCase().startsWith('GF'))) return 'gift';
+  const n = row.product_name || '';
+  if (n.includes('項鍊')) return 'necklace';
+  if (n.includes('手鍊')) return 'bracelet';
+  if (n.includes('戒指')) return 'ring';
+  if (n.includes('耳環')) return 'earring';
+  return 'other';
+}
+
+// 從 year_month 字串算回去 N 月:'2026-11' - 3 = '2026-09'
+function _ymBack(ymStr, n) {
+  const [y, m] = ymStr.split('-').map(Number);
+  const d = new Date(y, m-1-n, 1);
+  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}`;
+}
+
+async function _psmLoad() {
+  if (state.data.psm) return; // 已載入
+  const all = [];
+  const pageSize = 1000;
+  for (let offset = 0; ; offset += pageSize) {
+    const { data } = await db.from('product_sales_monthly').select('*').range(offset, offset + pageSize - 1);
+    if (!data || !data.length) break;
+    all.push(...data);
+    if (data.length < pageSize) break;
+  }
+  state.data.psm = all;
+}
+
+function renderSalesProduct() {
+  // 先載入(若尚未)
+  if (!state.data.psm) { _psmLoad().then(() => renderApp()); return `<div class="card"><div class="empty"><div class="empty-icon">⏳</div><p>載入中…</p></div></div>`; }
+  const rows = state.data.psm || [];
+  if (!rows.length) return `
+    <div class="card">
+      <div class="empty" style="padding:30px">
+        <div class="empty-icon">🛍</div>
+        <p style="font-size:14px;color:var(--muted)">還沒有匯入任何商品銷售資料</p>
+        <button class="btn btn-primary" onclick="window._psmOpenUpload()" style="margin-top:10px">📥 匯入第一個月</button>
+      </div>
+    </div>`;
+
+  // 歸類成每月一筆 → 找最新 year_month
+  const ymSet = new Set(rows.map(r => r.year_month));
+  const allYms = [...ymSet].sort().reverse();
+  const latestYm = allYms[0];
+  const category = state.data._psmCat || 'all';
+
+  // 篩分類
+  const filterByCat = r => category === 'all' ? true : _psmCategoryOf(r) === category;
+
+  // 累計範圍 helper:n 個月窗口(含當月)
+  const range = (fromYm, n) => {
+    const yms = new Set();
+    for (let i = 0; i < n; i++) yms.add(_ymBack(fromYm, -i)); // -i 往回算
+    // 修正:_ymBack 傳 n 是往回 n 月,所以 i 要正
+    yms.clear();
+    for (let i = 0; i < n; i++) yms.add(_ymBack(fromYm, i));
+    return [...yms];
+  };
+
+  const buildCard = (title, months) => {
+    const subset = rows.filter(r => months.includes(r.year_month) && filterByCat(r) && !r.is_non_product);
+    // 加總(同商品跨月累計)
+    const agg = {};
+    for (const r of subset) {
+      if (!agg[r.product_name]) agg[r.product_name] = { name: r.product_name, qty: 0, amt: 0 };
+      agg[r.product_name].qty += parseFloat(r.quantity)||0;
+      agg[r.product_name].amt += parseFloat(r.amount)||0;
+    }
+    const list = Object.values(agg).sort((a,b) => b.amt - a.amt);
+    const totalQty = list.reduce((s,x)=>s+x.qty,0);
+    const totalAmt = list.reduce((s,x)=>s+x.amt,0);
+    const top = list.slice(0, 20);
+    const nonProd = rows.filter(r => months.includes(r.year_month) && r.is_non_product);
+    const nonProdAgg = {};
+    for (const r of nonProd) {
+      if (!nonProdAgg[r.product_name]) nonProdAgg[r.product_name] = { name:r.product_name, qty:0, amt:0 };
+      nonProdAgg[r.product_name].qty += parseFloat(r.quantity)||0;
+      nonProdAgg[r.product_name].amt += parseFloat(r.amount)||0;
+    }
+    const nonList = Object.values(nonProdAgg);
+    return `
+      <div class="card" style="padding:14px 16px">
+        <div style="font-weight:700;font-size:14px;color:#00695c;margin-bottom:4px">${title}</div>
+        <div style="font-size:11px;color:var(--muted);margin-bottom:10px">${months.join(' · ')}</div>
+        <div style="display:flex;gap:12px;margin-bottom:12px;padding-bottom:10px;border-bottom:1px solid #e0f2f1">
+          <div style="flex:1">
+            <div style="font-size:11px;color:var(--muted)">總銷售</div>
+            <div style="font-size:20px;font-weight:800;color:#00695c">$ ${Math.round(totalAmt).toLocaleString()}</div>
+          </div>
+          <div style="flex:1">
+            <div style="font-size:11px;color:var(--muted)">總數量</div>
+            <div style="font-size:20px;font-weight:800;color:#00695c">${totalQty.toLocaleString()} 件</div>
+          </div>
+        </div>
+        <div style="font-size:12px;font-weight:700;color:#555;margin-bottom:6px">🏆 熱銷 TOP ${top.length}</div>
+        <table style="width:100%;border-collapse:collapse;font-size:12px">
+          <thead style="background:#f1f8f6">
+            <tr>
+              <th style="padding:4px 6px;text-align:left;width:30px">#</th>
+              <th style="padding:4px 6px;text-align:left">商品</th>
+              <th style="padding:4px 6px;text-align:right;width:50px">數量</th>
+              <th style="padding:4px 6px;text-align:right;width:80px">金額</th>
+            </tr>
+          </thead>
+          <tbody>
+            ${top.map((x,i) => `<tr style="border-bottom:1px solid #f5f5f5">
+              <td style="padding:3px 6px;color:var(--muted)">${i+1}</td>
+              <td style="padding:3px 6px">${x.name}</td>
+              <td style="padding:3px 6px;text-align:right">${x.qty.toLocaleString()}</td>
+              <td style="padding:3px 6px;text-align:right;color:#00695c;font-weight:600">${Math.round(x.amt).toLocaleString()}</td>
+            </tr>`).join('')}
+          </tbody>
+        </table>
+        ${nonList.length ? `
+        <details style="margin-top:10px">
+          <summary style="font-size:11px;color:var(--muted);cursor:pointer">其他項目 (折價券 / 退款等 共 ${nonList.length}) ▾</summary>
+          <table style="width:100%;border-collapse:collapse;font-size:11px;margin-top:4px">
+            ${nonList.map(x=>`<tr style="color:${x.amt<0?'#c62828':'#777'}">
+              <td style="padding:2px 6px">${x.name}</td>
+              <td style="padding:2px 6px;text-align:right">${x.qty}</td>
+              <td style="padding:2px 6px;text-align:right">${Math.round(x.amt).toLocaleString()}</td>
+            </tr>`).join('')}
+          </table>
+        </details>` : ''}
+      </div>`;
+  };
+
+  const months1 = range(latestYm, 1);
+  const months3 = range(latestYm, 3);
+  const months6 = range(latestYm, 6);
+
+  // 歷史上傳摘要(每個 year_month 的筆數)
+  const uploadSummary = allYms.map(ym => {
+    const batch = rows.filter(r => r.year_month === ym);
+    const uploadedAt = batch[0]?.uploaded_at?.slice(0,16).replace('T',' ') || '';
+    return { ym, count: batch.length, uploadedAt };
+  });
+
+  return `
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <button class="btn btn-primary" onclick="window._psmOpenUpload()" style="font-size:13px">📥 匯入月報</button>
+      <div style="display:flex;gap:4px;flex-wrap:wrap">
+        ${PSM_CATEGORIES.map(c => `<button class="btn btn-sm ${category===c.key?'btn-primary':'btn-outline'}" onclick="state.data._psmCat='${c.key}';renderApp()" style="font-size:11px">${c.icon} ${c.label}</button>`).join('')}
+      </div>
+      <span style="font-size:11px;color:var(--muted);margin-left:auto">最新月份:${latestYm} · 已匯入 ${allYms.length} 個月</span>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(340px,1fr));gap:12px">
+      ${buildCard(`近 1 個月 (${latestYm})`, months1)}
+      ${buildCard(`近 3 個月`, months3)}
+      ${buildCard(`近 6 個月`, months6)}
+    </div>
+    <div class="card" style="padding:12px 16px">
+      <div style="font-weight:700;font-size:13px;margin-bottom:8px">📋 歷史上傳紀錄</div>
+      <table style="width:100%;border-collapse:collapse;font-size:12px">
+        <thead style="background:#f1f8f6"><tr>
+          <th style="padding:6px;text-align:left">年月</th>
+          <th style="padding:6px;text-align:right">筆數</th>
+          <th style="padding:6px;text-align:left">匯入時間</th>
+          <th style="padding:6px;text-align:center;width:80px">操作</th>
+        </tr></thead>
+        <tbody>
+          ${uploadSummary.map(s => `<tr style="border-top:1px solid #f5f5f5">
+            <td style="padding:5px 6px;font-weight:600">${s.ym}</td>
+            <td style="padding:5px 6px;text-align:right">${s.count}</td>
+            <td style="padding:5px 6px;color:var(--muted)">${s.uploadedAt}</td>
+            <td style="padding:5px 6px;text-align:center"><button onclick="window._psmDelete('${s.ym}')" style="font-size:11px;padding:3px 8px;background:#ffebee;color:#c62828;border:none;border-radius:4px;cursor:pointer">刪除</button></td>
+          </tr>`).join('')}
+        </tbody>
+      </table>
+    </div>
+  `;
+}
+
+// 開啟匯入 modal
+window._psmOpenUpload = function() {
+  showModal('📥 匯入商品銷售月報', `
+    <div style="font-size:13px;line-height:1.7;color:var(--muted);margin-bottom:12px">
+      · 支援 xls / xlsx<br>
+      · 自動抓檔案內的「日期區間」決定年月<br>
+      · 商品型號 <b>ZZ900</b> 會自動略過<br>
+      · 尺寸不同的 SKU(例:#14、#16)會自動合併同品名<br>
+      · 若該月已匯入,會阻擋以免覆蓋 — 請先到「歷史上傳紀錄」刪除舊的
+    </div>
+    <input type="file" id="psm-file" accept=".xls,.xlsx" class="form-control">
+    <div id="psm-preview" style="margin-top:10px"></div>
+  `, [
+    { label: '取消', onclick: closeModal },
+    { label: '📤 解析並上傳', primary: true, onclick: () => window._psmProcessUpload() },
+  ], { width: '640px' });
+};
+
+window._psmProcessUpload = async function() {
+  const fileInput = document.getElementById('psm-file');
+  const file = fileInput?.files?.[0];
+  if (!file) { showToast('請先選檔','error'); return; }
+  const preview = document.getElementById('psm-preview');
+  preview.innerHTML = '<div style="color:var(--muted);font-size:12px">⏳ 解析中…</div>';
+  try {
+    // 用 CDN 載入 SheetJS
+    if (typeof XLSX === 'undefined') {
+      await new Promise((res, rej) => {
+        const s = document.createElement('script');
+        s.src = 'https://cdn.sheetjs.com/xlsx-0.20.0/package/dist/xlsx.full.min.js';
+        s.onload = res; s.onerror = rej;
+        document.head.appendChild(s);
+      });
+    }
+    const buf = await file.arrayBuffer();
+    const wb = XLSX.read(buf, { type:'array' });
+    const sheet = wb.Sheets[wb.SheetNames[0]];
+    const matrix = XLSX.utils.sheet_to_json(sheet, { header:1, defval:'' });
+    // 抓年月:找「日期區間:YYYYMMDD~YYYYMMDD」
+    let yearMonth = null;
+    for (const row of matrix.slice(0, 5)) {
+      for (const cell of row) {
+        const m = String(cell).match(/日期區間:(\d{4})(\d{2})\d{2}/);
+        if (m) { yearMonth = `${m[1]}-${m[2]}`; break; }
+      }
+      if (yearMonth) break;
+    }
+    if (!yearMonth) throw new Error('找不到「日期區間」,無法判定年月');
+
+    // 檢查是否已存在
+    const { count } = await db.from('product_sales_monthly').select('*', { count:'exact', head:true }).eq('year_month', yearMonth);
+    if (count > 0) {
+      preview.innerHTML = `<div style="color:#c62828;padding:10px;background:#ffebee;border-radius:6px">⚠ ${yearMonth} 已匯入過 (共 ${count} 筆)。請先到「歷史上傳紀錄」刪除後再匯入。</div>`;
+      return;
+    }
+
+    // 找表頭所在列(含「商品型號」的那一列)
+    let headerRow = -1;
+    for (let i = 0; i < matrix.length; i++) {
+      if (matrix[i].some(c => String(c).trim() === '商品型號')) { headerRow = i; break; }
+    }
+    if (headerRow < 0) throw new Error('找不到表頭「商品型號」');
+    const headers = matrix[headerRow].map(h => String(h).trim());
+    const idxSku = headers.indexOf('商品型號');
+    const idxName = headers.indexOf('品名規格');
+    const idxQty = headers.indexOf('數量');
+    const idxAmt = headers.indexOf('實售金額');
+
+    // 掃資料列
+    const raw = [];
+    for (let i = headerRow+1; i < matrix.length; i++) {
+      const r = matrix[i];
+      const sku = String(r[idxSku]||'').trim();
+      if (!sku || sku === '合計') continue;
+      if (sku === 'ZZ900') continue;      // 物流費排除
+      const name = String(r[idxName]||'').trim();
+      const qty = parseFloat(r[idxQty]) || 0;
+      const amt = parseFloat(r[idxAmt]) || 0;
+      raw.push({ sku, name, qty, amt });
+    }
+
+    // 合併:去除尺寸後綴(#N / -#N)
+    const baseName = (n) => String(n||'').replace(/\s*-?#\d+\s*$/, '').trim();
+    const merged = {};
+    for (const r of raw) {
+      const base = baseName(r.name);
+      const isNonProd = /折價券|退貨|退款|折扣|服務費/.test(base);
+      if (!merged[base]) merged[base] = { product_name: base, all_skus: [], quantity: 0, amount: 0, is_non_product: isNonProd };
+      merged[base].all_skus.push(r.sku);
+      merged[base].quantity += r.qty;
+      merged[base].amount += r.amt;
+    }
+
+    const toInsert = Object.values(merged).map(m => ({
+      year_month: yearMonth,
+      product_name: m.product_name,
+      all_skus: m.all_skus,
+      sku_count: m.all_skus.length,
+      quantity: m.quantity,
+      amount: m.amount,
+      is_non_product: m.is_non_product,
+      source_file: file.name,
+      uploaded_by: state.user?.id || null,
+    }));
+
+    preview.innerHTML = `
+      <div style="color:#00695c;padding:10px;background:#e8f5e9;border-radius:6px;font-size:12px">
+        ✓ 準備匯入 <b>${yearMonth}</b><br>
+        · 原始 SKU: ${raw.length} 筆<br>
+        · 合併後商品: ${toInsert.length} 筆<br>
+        · 非商品(折價/退款/服務費): ${toInsert.filter(x=>x.is_non_product).length} 筆<br>
+        <br>⏳ 寫入中…
+      </div>`;
+
+    const { error } = await db.from('product_sales_monthly').insert(toInsert);
+    if (error) throw error;
+    showToast(`✓ ${yearMonth} 匯入成功 · ${toInsert.length} 筆`, 'success', 4000);
+    state.data.psm = null;  // 清快取
+    closeModal();
+    await _psmLoad();
+    renderApp();
+  } catch (e) {
+    preview.innerHTML = `<div style="color:#c62828;padding:10px;background:#ffebee;border-radius:6px;font-size:12px">❌ ${e.message||e}</div>`;
+  }
+};
+
+window._psmDelete = async function(ym) {
+  if (!confirm(`確定要刪除 ${ym} 的所有商品銷售紀錄?\n\n刪除後可以重新匯入該月的報表。`)) return;
+  const { error } = await db.from('product_sales_monthly').delete().eq('year_month', ym);
+  if (error) { showToast('刪除失敗:'+error.message,'error'); return; }
+  showToast(`已刪除 ${ym}`);
+  state.data.psm = null;
+  await _psmLoad();
+  renderApp();
+};
 
 // ══ 專案業績 頁面 ══
 function renderSalesProjectHeader() {
