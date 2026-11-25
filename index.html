@@ -23518,24 +23518,25 @@ function renderSalesProduct() {
         <button class="btn btn-sm btn-outline" onclick="window._psmExportHistory()" style="font-size:11px;background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7">📥 下載 CSV</button>
       </div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
-        <thead style="background:#f1f8f6"><tr>
-          <th style="padding:6px;text-align:left">年月</th>
-          <th style="padding:6px;text-align:right;width:70px">筆數</th>
-          <th style="padding:6px;text-align:left;width:140px">匯入時間</th>
-          <th style="padding:6px;text-align:left;width:80px">匯入人</th>
-          <th style="padding:6px;text-align:left">檔名</th>
-          <th style="padding:6px;text-align:center;width:120px">操作</th>
+      <table style="width:100%;border-collapse:collapse;font-size:12px;line-height:1.5">
+        <thead style="background:#f1f8f6"><tr style="height:34px">
+          <th style="padding:0 10px;text-align:left">年月</th>
+          <th style="padding:0 10px;text-align:right;width:70px">筆數</th>
+          <th style="padding:0 10px;text-align:left;width:140px">匯入時間</th>
+          <th style="padding:0 10px;text-align:left;width:80px">匯入人</th>
+          <th style="padding:0 10px;text-align:left">檔名</th>
+          <th style="padding:0 10px;text-align:center;width:120px">操作</th>
         </tr></thead>
         <tbody>
-          ${uploadSummary.map(s => `<tr style="border-top:1px solid #f5f5f5">
-            <td style="padding:5px 6px;font-weight:600">${s.ym}</td>
-            <td style="padding:5px 6px;text-align:right">${s.count}</td>
-            <td style="padding:5px 6px;color:var(--muted);font-family:monospace">${s.uploadedAt}</td>
-            <td style="padding:5px 6px">${s.uploadedByName}</td>
-            <td style="padding:5px 6px;color:var(--muted);font-size:11px">${s.sourceFile||'—'}</td>
-            <td style="padding:5px 6px;text-align:center">
-              <button onclick="window._psmExportMonth('${s.ym}')" style="font-size:11px;padding:3px 8px;background:#e3f2fd;color:#1565c0;border:none;border-radius:4px;cursor:pointer;margin-right:4px" title="下載該月 CSV">📥</button>
-              ${isAdmin ? `<button onclick="window._psmDelete('${s.ym}')" style="font-size:11px;padding:3px 8px;background:#ffebee;color:#c62828;border:none;border-radius:4px;cursor:pointer">刪除</button>` : '<span style="color:#ccc;font-size:10px">僅管理員</span>'}
+          ${uploadSummary.map(s => `<tr style="border-top:1px solid #f0f0f0;height:34px">
+            <td style="padding:0 10px;font-weight:600;vertical-align:middle">${s.ym}</td>
+            <td style="padding:0 10px;text-align:right;vertical-align:middle">${s.count}</td>
+            <td style="padding:0 10px;color:var(--muted);font-family:monospace;vertical-align:middle">${s.uploadedAt}</td>
+            <td style="padding:0 10px;vertical-align:middle">${s.uploadedByName}</td>
+            <td style="padding:0 10px;color:var(--muted);font-size:11px;vertical-align:middle;max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">${s.sourceFile||'—'}</td>
+            <td style="padding:0 10px;text-align:center;vertical-align:middle;white-space:nowrap">
+              <button onclick="window._psmExportMonth('${s.ym}')" style="font-size:11px;padding:3px 8px;background:#e3f2fd;color:#1565c0;border:none;border-radius:4px;cursor:pointer;margin-right:4px;vertical-align:middle" title="下載該月 CSV">📥</button>
+              ${isAdmin ? `<button onclick="window._psmDelete('${s.ym}')" style="font-size:11px;padding:3px 8px;background:#ffebee;color:#c62828;border:none;border-radius:4px;cursor:pointer;vertical-align:middle">刪除</button>` : '<span style="color:#ccc;font-size:10px;vertical-align:middle">僅管理員</span>'}
             </td>
           </tr>`).join('')}
         </tbody>
