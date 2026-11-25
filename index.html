@@ -23378,7 +23378,7 @@ function renderSalesProduct() {
   if (!Array.isArray(state.data._psmCats)) state.data._psmCats = ['all'];
   const cats = state.data._psmCats;
   const isAllCats = cats.length === 0 || cats.includes('all');
-  const sortBy = state.data._psmSort || 'amount';  // 'amount' | 'qty'
+  const sortBy = state.data._psmSort || 'qty';  // 預設依數量;'amount' | 'qty'
 
   const filterByCat = r => isAllCats ? true : cats.includes(_psmCategoryOf(r));
 
