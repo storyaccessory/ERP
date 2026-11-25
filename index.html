@@ -23465,10 +23465,15 @@ function renderSalesProduct() {
   const months6 = range(latestYm, 6);
 
   // 歷史上傳摘要(每個 year_month 的筆數)
+  const usersById = {};
+  (state.data.users||[]).forEach(u => { usersById[u.id] = u.name; });
   const uploadSummary = allYms.map(ym => {
     const batch = rows.filter(r => r.year_month === ym);
     const uploadedAt = batch[0]?.uploaded_at?.slice(0,16).replace('T',' ') || '';
-    return { ym, count: batch.length, uploadedAt };
+    const uploadedById = batch[0]?.uploaded_by;
+    const uploadedByName = usersById[uploadedById] || '—';
+    const sourceFile = batch[0]?.source_file || '';
+    return { ym, count: batch.length, uploadedAt, uploadedByName, sourceFile };
   });
 
   return `
@@ -23504,25 +23509,39 @@ function renderSalesProduct() {
       ${buildCard(`近 3 個月`, months3)}
       ${buildCard(`近 6 個月`, months6)}
     </div>
-    <div class="card" style="padding:12px 16px">
-      <div style="font-weight:700;font-size:13px;margin-bottom:8px">📋 歷史上傳紀錄</div>
+    ${(() => {
+      const _ep = effectiveProfile() || {};
+      const isAdmin = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com';
+      return `<div class="card" style="padding:12px 16px">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px">
+        <span style="font-weight:700;font-size:13px">📋 歷史上傳紀錄</span>
+        <button class="btn btn-sm btn-outline" onclick="window._psmExportHistory()" style="font-size:11px;background:#e8f5e9;color:#2e7d32;border-color:#a5d6a7">📥 下載 CSV</button>
+      </div>
       <table style="width:100%;border-collapse:collapse;font-size:12px">
         <thead style="background:#f1f8f6"><tr>
           <th style="padding:6px;text-align:left">年月</th>
-          <th style="padding:6px;text-align:right">筆數</th>
-          <th style="padding:6px;text-align:left">匯入時間</th>
-          <th style="padding:6px;text-align:center;width:80px">操作</th>
+          <th style="padding:6px;text-align:right;width:70px">筆數</th>
+          <th style="padding:6px;text-align:left;width:140px">匯入時間</th>
+          <th style="padding:6px;text-align:left;width:80px">匯入人</th>
+          <th style="padding:6px;text-align:left">檔名</th>
+          <th style="padding:6px;text-align:center;width:120px">操作</th>
         </tr></thead>
         <tbody>
           ${uploadSummary.map(s => `<tr style="border-top:1px solid #f5f5f5">
             <td style="padding:5px 6px;font-weight:600">${s.ym}</td>
             <td style="padding:5px 6px;text-align:right">${s.count}</td>
-            <td style="padding:5px 6px;color:var(--muted)">${s.uploadedAt}</td>
-            <td style="padding:5px 6px;text-align:center"><button onclick="window._psmDelete('${s.ym}')" style="font-size:11px;padding:3px 8px;background:#ffebee;color:#c62828;border:none;border-radius:4px;cursor:pointer">刪除</button></td>
+            <td style="padding:5px 6px;color:var(--muted);font-family:monospace">${s.uploadedAt}</td>
+            <td style="padding:5px 6px">${s.uploadedByName}</td>
+            <td style="padding:5px 6px;color:var(--muted);font-size:11px">${s.sourceFile||'—'}</td>
+            <td style="padding:5px 6px;text-align:center">
+              <button onclick="window._psmExportMonth('${s.ym}')" style="font-size:11px;padding:3px 8px;background:#e3f2fd;color:#1565c0;border:none;border-radius:4px;cursor:pointer;margin-right:4px" title="下載該月 CSV">📥</button>
+              ${isAdmin ? `<button onclick="window._psmDelete('${s.ym}')" style="font-size:11px;padding:3px 8px;background:#ffebee;color:#c62828;border:none;border-radius:4px;cursor:pointer">刪除</button>` : '<span style="color:#ccc;font-size:10px">僅管理員</span>'}
+            </td>
           </tr>`).join('')}
         </tbody>
       </table>
-    </div>
+    </div>`;
+    })()}
   `;
 }
 
@@ -23708,6 +23727,9 @@ window._psmProcessUpload = async function() {
 };
 
 window._psmDelete = async function(ym) {
+  const _ep = effectiveProfile() || {};
+  const isAdmin = _ep.role === 'admin' || _ep.email === 'cailing0516@gmail.com';
+  if (!isAdmin) { showToast('僅管理員可以刪除', 'error'); return; }
   if (!confirm(`確定要刪除 ${ym} 的所有商品銷售紀錄?\n\n刪除後可以重新匯入該月的報表。`)) return;
   const { error } = await db.from('product_sales_monthly').delete().eq('year_month', ym);
   if (error) { showToast('刪除失敗:'+error.message,'error'); return; }
@@ -23715,6 +23737,71 @@ window._psmDelete = async function(ym) {
   state.data.psm = null;
   await _psmLoad();
   renderApp();
+};
+
+// CSV 下載助手
+function _psmDownloadCSV(filename, rows, headers) {
+  const esc = v => {
+    const s = (v==null?'':String(v));
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g,'""')}"` : s;
+  };
+  const csv = '﻿' + [headers.join(',')].concat(
+    rows.map(r => headers.map(h => esc(r[h])).join(','))
+  ).join('\n');
+  const blob = new Blob([csv], { type:'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename;
+  document.body.appendChild(a); a.click();
+  setTimeout(() => { document.body.removeChild(a); URL.revokeObjectURL(url); }, 100);
+}
+
+// 下載:歷史上傳摘要
+window._psmExportHistory = function() {
+  const rows = state.data.psm || [];
+  const usersById = {};
+  (state.data.users||[]).forEach(u => { usersById[u.id] = u.name; });
+  const ymMap = {};
+  for (const r of rows) {
+    if (!ymMap[r.year_month]) ymMap[r.year_month] = { ym:r.year_month, count:0, amount:0, quantity:0, uploaded_at:r.uploaded_at, uploaded_by:usersById[r.uploaded_by]||'', source_file:r.source_file||'' };
+    ymMap[r.year_month].count++;
+    ymMap[r.year_month].amount += parseFloat(r.amount)||0;
+    ymMap[r.year_month].quantity += parseFloat(r.quantity)||0;
+  }
+  const list = Object.values(ymMap).sort((a,b) => b.ym.localeCompare(a.ym))
+    .map(x => ({
+      '年月': x.ym,
+      '筆數': x.count,
+      '總數量': Math.round(x.quantity),
+      '總金額': Math.round(x.amount),
+      '匯入時間': (x.uploaded_at||'').slice(0,16).replace('T',' '),
+      '匯入人': x.uploaded_by,
+      '檔名': x.source_file,
+    }));
+  _psmDownloadCSV('商品銷售_歷史上傳紀錄.csv', list, ['年月','筆數','總數量','總金額','匯入時間','匯入人','檔名']);
+};
+
+// 下載:特定月份完整資料
+window._psmExportMonth = function(ym) {
+  const rows = (state.data.psm || []).filter(r => r.year_month === ym);
+  if (!rows.length) { showToast('沒資料','error'); return; }
+  const usersById = {};
+  (state.data.users||[]).forEach(u => { usersById[u.id] = u.name; });
+  const list = rows.map(r => ({
+    '年月': r.year_month,
+    '品名': r.product_name,
+    'SKU數': r.sku_count,
+    'SKU清單': (r.all_skus||[]).join(' | '),
+    '數量': r.quantity,
+    '金額': Math.round(r.amount),
+    '分類': {
+      necklace:'項鍊', bracelet:'手鍊', ring:'戒指', earring:'耳環', gift:'贈品', other:'其他'
+    }[_psmCategoryOf(r)] || '',
+    '是否非商品': r.is_non_product ? '是' : '',
+    '匯入人': usersById[r.uploaded_by]||'',
+    '匯入時間': (r.uploaded_at||'').slice(0,16).replace('T',' '),
+  }));
+  _psmDownloadCSV(`商品銷售_${ym}.csv`, list, ['年月','品名','SKU數','SKU清單','數量','金額','分類','是否非商品','匯入人','匯入時間']);
 };
 
 // ══ 專案業績 頁面 ══
