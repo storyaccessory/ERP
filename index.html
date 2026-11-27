@@ -12964,6 +12964,12 @@ function _buildDevSkippedStepsPicker(d) {
 // 回傳「標準工作天」小 chip HTML(供任務列顯示)
 function _devStdDaysChip(task, isCancelled) {
   if (isCancelled) return '';
+  // v2 重做任務:讀 notes 裡的 [v2_days:N] 標記(使用者自訂工作天)
+  const v2m = (task.notes||'').match(/\[v2_days:(\d+)\]/);
+  if (v2m) {
+    return '<span style="font-size:10px;color:#c0392b;background:#fff3f0;padding:1px 6px;border-radius:8px;margin-left:6px" title="重做工作天(自訂)">'
+      + v2m[1] + '天</span>';
+  }
   const tpl = PIPELINE_TEMPLATES[task.pipeline];
   if (!tpl) return '';
   const stepM = (tpl.main||[]).find(s => s.key === task.step_key);
@@ -13766,6 +13772,8 @@ function _devOpenReviewModal(project, task) {
     if (t.step_group !== 'main') return false;
     if ((t.order_num||0) >= (task.order_num||0)) return false;
     if (t.status === '取消') return false;
+    // 重做只需要打樣相關 step,不包含工廠發包檔 / 找工廠
+    if (t.step_key === 'factory_file' || t.step_key === 'factory_search') return false;
     const step = _findStepDef(t.pipeline, t.step_key);
     return step?.stage === curStage;
   }).sort((a,b) => (a.order_num||0) - (b.order_num||0));
@@ -13930,48 +13938,82 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults, opts =
   // 量產完成不再自動彈建商品(手工由陳秋惠處理)
 
 
-  // 新增重做步驟:在這些任務後面 append v2/v3 新任務(舊任務保留為 v1 歷史)
+  // 新增重做步驟:在「量產發包」前面 insert v2 新任務,並把後續任務的 order_num / due_date 一起往後推
   let appendCount = 0;
   if (opts.appendTasks && opts.appendTasks.length && rejectedCount > 0) {
     const rerunDays = Math.max(1, parseInt(opts.rerunDays)||5);
     const d0 = new Date(today + 'T00:00:00');
-    // 共用第一筆的 due_date
     let cur = new Date(d0);
-    // 找目前所有 task 的最大 order_num
     const p0 = state.data.dev.find(x => x.id === projectId);
-    let order = Math.max(...((p0?.dev_tasks||[]).map(t => t.order_num||0)), 0);
+    const allTasks = (p0?.dev_tasks||[]);
+
+    // 找「量產發包」的 order_num 當 insert 位置;找不到就放在最後
+    const prodTask = allTasks
+      .filter(t => t.step_group === 'main' && (t.step_key === 'production_deploy' || /量產發包/.test(t.step_name||'')))
+      .sort((a,b) => (a.order_num||0) - (b.order_num||0))[0];
+    const maxOrder = Math.max(0, ...allTasks.map(t => t.order_num||0));
+    const insertBefore = prodTask ? (prodTask.order_num||maxOrder+1) : (maxOrder + 1);
+
+    const v2Count = opts.appendTasks.length + 1; // +1 for review v2
+    const totalShiftDays = opts.appendTasks.length * rerunDays + 1; // 每筆 +rerunDays,再 +1 給審查
+
+    // Step 1: 把 insertBefore 以後的所有 task 的 order_num 往後推 v2Count
+    const shiftOrderTasks = allTasks.filter(t => (t.order_num||0) >= insertBefore);
+    for (const t of shiftOrderTasks) {
+      const newOrder = (t.order_num||0) + v2Count;
+      await db.from('dev_tasks').update({ order_num: newOrder }).eq('id', t.id);
+      t.order_num = newOrder;
+    }
+
+    // Step 2: 把 insertBefore 以後「尚未完成」的 task 的 due_date 往後推 totalShiftDays 個工作天
+    for (const t of shiftOrderTasks) {
+      if (t.status === '已完成' || t.status === '取消') continue;
+      if (!t.due_date) continue;
+      try {
+        const newDue = _shiftWorkdays(t.due_date, totalShiftDays);
+        if (newDue && newDue !== t.due_date) {
+          await _devApplyDateChange(t.id, t.due_date, newDue, {
+            source: 'rerun_shift',
+            reason: `因 ${task?.step_name||'審查'} 退回重做 · 整體延後 ${totalShiftDays} 工作天`,
+            shiftBaseline: false,
+          });
+          t.due_date = newDue;
+        }
+      } catch(e) { console.warn('[v2 shift due]', e); }
+    }
+
+    // Step 3: 在 insertBefore 位置插入 v2 任務
     const inserts = [];
+    let orderCursor = insertBefore;
     for (const rt of opts.appendTasks) {
-      // 本輪算第幾次 → 看同 step_key 既有數量(含剛被新增前的)
-      const sameKeyCount = (p0?.dev_tasks||[]).filter(t => t.step_key === rt.step_key && t.pipeline === rt.pipeline && t.step_group === 'main').length;
+      const sameKeyCount = allTasks.filter(t => t.step_key === rt.step_key && t.pipeline === rt.pipeline && t.step_group === 'main').length;
       const round = sameKeyCount + 1;
-      // 每筆 due_date 依工作天往後堆(沿用原本 pipeline 工序,但簡化:每筆 +rerunDays)
       cur = addWorkdays(cur, rerunDays);
       const dueStr = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
       inserts.push({
         project_id: projectId,
         variant_id: null,
         pipeline: rt.pipeline,
-        step_key: rt.step_key,   // 保留同 key 方便 pipeline 判斷
+        step_key: rt.step_key,
         step_name: `${rt.step_name} (v${round} 重做)`,
         step_group: 'main',
         is_milestone: rt.is_milestone,
-        order_num: ++order,
+        order_num: orderCursor++,
         assignee_id: rt.assignee_id,
         assignee_name: rt.assignee_name,
         expected_date: dueStr,
         due_date: dueStr,
         status: '未開始',
-        notes: `因 ${task?.step_name || '審查'} 校正新增 (v${round})`,
+        notes: `因 ${task?.step_name || '審查'} 校正新增 (v${round}) [v2_days:${rerunDays}]`,
       });
       appendCount++;
     }
-    // 本次審查任務也要在後面追一個 v2(讓下次再審)
-    const taskDef = (state.data.dev.find(x => x.id === projectId)?.dev_tasks||[]).find(t => t.id === taskId);
+    // 本次審查任務也要再追一個 v2(讓下次再審)
+    const taskDef = allTasks.find(t => t.id === taskId);
     if (taskDef) {
-      const sameReviewCount = (p0?.dev_tasks||[]).filter(t => t.step_key === taskDef.step_key && t.pipeline === taskDef.pipeline).length;
+      const sameReviewCount = allTasks.filter(t => t.step_key === taskDef.step_key && t.pipeline === taskDef.pipeline).length;
       const reviewRound = sameReviewCount + 1;
-      cur = addWorkdays(cur, 1);  // 審查日通常在打樣送審寄出的隔天
+      cur = addWorkdays(cur, 1);
       const dueStr = `${cur.getFullYear()}-${String(cur.getMonth()+1).padStart(2,'0')}-${String(cur.getDate()).padStart(2,'0')}`;
       inserts.push({
         project_id: projectId,
@@ -13981,13 +14023,13 @@ async function _devFinalizeTaskComplete(projectId, taskId, reviewResults, opts =
         step_name: `${taskDef.step_name.replace(/ \(v\d+ 重做\)$/,'')} (v${reviewRound} 重做)`,
         step_group: 'main',
         is_milestone: taskDef.is_milestone,
-        order_num: ++order,
+        order_num: orderCursor++,
         assignee_id: taskDef.assignee_id,
         assignee_name: taskDef.assignee_name,
         expected_date: dueStr,
         due_date: dueStr,
         status: '未開始',
-        notes: `因校正新增重審 (v${reviewRound})`,
+        notes: `因校正新增重審 (v${reviewRound}) [v2_days:1]`,
       });
     }
     if (inserts.length) {
